@@ -1,0 +1,110 @@
+<Project>
+
+  <!-- Shared build settings for all CredProx projects. -->
+
+  <PropertyGroup>
+    <!-- Libraries target .NET 10 only (person's decision at the M5 gate, 2026-10-14;
+         plan §7). Projects that are not libraries (tests) override TargetFramework
+         and clear TargetFrameworks. -->
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- XML docs on every public member; missing docs are warnings, and warnings
+         are errors above. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- Deterministic, SourceLinked build (plan §7 "Package quality"). -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <!-- Canonical repository location: the public GitHub home (§9 decision 2, amended
+       by M25). Every URL below is explicit because a dev machine's git remote may be
+       an SSH host alias that means nothing outside that machine — ScmRepositoryUrl is
+       what SourceLink converts, so the alias never reaches a published PDB. -->
+  <PropertyGroup>
+    <RepositoryUrl>https://github.com/GravLabs/cred-prox.git</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/GravLabs/cred-prox</PackageProjectUrl>
+    <PackageReleaseNotes>https://github.com/GravLabs/cred-prox/blob/main/CHANGELOG.md</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <!-- The SDK's git detection fills $(ScmRepositoryUrl) and the SourceRoot items from
+       the detected remote — an SSH host alias on dev machines, whatever the runner
+       used in CI. Both are rewritten to the canonical GitHub URL right before
+       SourceLink translates them (the alias must never reach a published PDB).
+       AfterTargets="InitializeSourceControlInformation" runs right after git
+       detection fills the SourceRoot items and before SourceLink generation, so the
+       package is identical no matter how the builder cloned the repo. CI asserts the
+       canonical URL in the packed PDBs, so a silently no-op rewrite fails the build. -->
+  <Target Name="CredProxCanonicalScmUrl" AfterTargets="InitializeSourceControlInformation"
+          Condition="'$(IsPackable)' != 'false'">
+    <PropertyGroup>
+      <ScmRepositoryUrl>https://github.com/GravLabs/cred-prox.git</ScmRepositoryUrl>
+    </PropertyGroup>
+    <ItemGroup>
+      <SourceRoot Update="@(SourceRoot)"
+                  ScmRepositoryUrl="https://github.com/GravLabs/cred-prox.git"
+                  RepositoryUrl="https://github.com/GravLabs/cred-prox.git" />
+    </ItemGroup>
+  </Target>
+
+  <!-- NuGet package metadata. -->
+  <PropertyGroup>
+    <!-- Single version for the whole repo; milestones bump it (plan §7). -->
+    <Version>0.7.0</Version>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Authors>Hector Ramos</Authors>
+    <Company>Hector Ramos</Company>
+    <Product>CredProx</Product>
+    <Copyright>Copyright (c) Hector Ramos</Copyright>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>yarp;reverse-proxy;oauth;credentials</PackageTags>
+  </PropertyGroup>
+
+  <!-- Package quality (plan §7): SourceLink for GitHub, package README, and API
+       compatibility validation. 0.6.0 is the PackageValidation baseline (PUBLISHING.md
+       rule): every pack from here on compares the public surface against the published
+       0.6.0. The baseline packages are the published bytes, committed under
+       build/baselines (docs/adr/0001), so validation needs no network or LAN feed —
+       this machine and a GitHub-hosted runner compare against identical bytes.
+       SDK 10.0's APICompat has no [Experimental] awareness: every baseline removal is
+       CP0001, experimental or not (the experimental-stability downgrade landed in
+       ApiCompat only after .NET 10 — dotnet/sdk main ApiStabilityClassifier, absent
+       from release/10.0 and from the 10.0.112 task assembly). ApiCompatExcludeAttributes-
+       File is NOT the lever: it feeds attribute-data comparison only, and on newer SDKs
+       listing ExperimentalAttribute there would disable the native skip. The intentional
+       0.4.0 preset removal is recorded in src/CredProx/CompatibilitySuppressions.xml
+       (SDK default path, auto-detected). Pre-1.0 the whole public surface is
+       experimental and may change; the guard bites on graduated surface. -->
+  <!-- Condition is != 'false', not == 'true': IsPackable defaults to true in the SDK
+       targets, which run after this file — projects that don't set it (the src
+       libraries) would otherwise miss it here. -->
+  <PropertyGroup Condition="'$(IsPackable)' != 'false'">
+    <!-- GitHub SourceLink comes from the SDK-bundled provider (Sdks/Microsoft.SourceLink.GitHub
+         since SDK 8.0.200) — no PackageReference. The nuget.org copy drags a vulnerable
+         Microsoft.Build.Tasks.Git through restore (NU1902 as error here); the bundled one
+         needs no restore. Explicit enables so the gate never depends on SDK defaults. -->
+    <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
+    <EnableSourceLink>true</EnableSourceLink>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>0.6.0</PackageValidationBaselineVersion>
+    <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
+         entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
+         $(MSBuildProjectName) equals $(PackageId) for all four packable projects. -->
+    <PackageValidationBaselinePath>$(MSBuildThisFileDirectory)build/baselines/$(MSBuildProjectName).$(PackageValidationBaselineVersion).nupkg</PackageValidationBaselinePath>
+    <PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)/README.md')">README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildProjectDirectory)/README.md" Pack="true" PackagePath="/"
+          Condition="Exists('$(MSBuildProjectDirectory)/README.md')" />
+  </ItemGroup>
+
+</Project>

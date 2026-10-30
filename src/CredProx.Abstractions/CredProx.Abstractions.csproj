@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Plugin contract for CredProx: the small set of interfaces that built-in and third-party features, credential providers, secret sources and presets are written against. Contains no implementations.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The request/response/partition hooks operate on HttpContext, as YARP's own hooks do.
+         IChangeToken (Microsoft.Extensions.Primitives) ships in the same shared framework. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

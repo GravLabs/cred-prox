@@ -1,0 +1,17 @@
+{
+  "realm": "credprox",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "credprox-api",
+      "secret": "credprox-api-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ]
+}

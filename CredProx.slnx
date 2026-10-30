@@ -1,0 +1,34 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CredProx.Abstractions/CredProx.Abstractions.csproj" />
+    <Project Path="src/CredProx.AzureKeyVault/CredProx.AzureKeyVault.csproj" />
+    <Project Path="src/CredProx/CredProx.csproj" />
+    <Project Path="src/CredProx.Testing/CredProx.Testing.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/ADP/ADP.csproj" />
+    <Project Path="samples/AgentEgress/AgentEgress.csproj" />
+    <Project Path="samples/AiGateway/AiGateway.csproj" />
+    <Project Path="samples/CustomPlugin/CustomPlugin.csproj" />
+    <Project Path="samples/GitHubApp/GitHubApp.csproj" />
+    <Project Path="samples/HmacSigning/HmacSigning.csproj" />
+    <Project Path="samples/LoginExchange/LoginExchange.csproj" />
+    <Project Path="samples/MicrosoftGraph/MicrosoftGraph.csproj" />
+    <Project Path="samples/MutualTls/MutualTls.csproj" />
+    <Project Path="samples/OAuthKeycloak/OAuthKeycloak.csproj" />
+    <Project Path="samples/Operations/Operations.csproj" />
+    <Project Path="samples/PerCallerCredentials/PerCallerCredentials.csproj" />
+    <Project Path="samples/QuickStart/QuickStart.csproj" />
+    <Project Path="samples/SessionCookie/SessionCookie.csproj" />
+    <Project Path="samples/Spotify/Spotify.csproj" />
+    <Project Path="samples/TokenExchange/TokenExchange.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CredProx.Benchmarks/CredProx.Benchmarks.csproj" />
+    <Project Path="tests/CredProx.ConformanceTests/CredProx.ConformanceTests.csproj" />
+    <Project Path="tests/CredProx.E2ETests/CredProx.E2ETests.csproj" />
+    <Project Path="tests/CredProx.LoadTests/CredProx.LoadTests.csproj" />
+    <Project Path="tests/CredProx.SecurityTests/CredProx.SecurityTests.csproj" />
+    <Project Path="tests/CredProx.Tests/CredProx.Tests.csproj" />
+  </Folder>
+</Solution>

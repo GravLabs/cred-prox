@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- .NET 10 only: the person dropped the .NET 8 target at the M5 gate (2026-10-14). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Tests use the experimental contract on purpose. -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.Abstractions\CredProx.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.AzureKeyVault\CredProx.AzureKeyVault.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Integration tests host a stub vendor in an in-process ASP.NET Core server. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

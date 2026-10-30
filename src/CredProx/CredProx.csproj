@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Outbound credential and policy brokering for third-party APIs, built on YARP. Callers send requests without secrets; CredProx attaches the right credential, enforces the right policy, and forwards the request.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CredProx.Abstractions\CredProx.Abstractions.csproj" />
+    <PackageReference Include="Yarp.ReverseProxy" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Unit tests exercise the internal reference-extraction helper directly; the
+         security property tests construct the request state the transform owns. -->
+    <InternalsVisibleTo Include="CredProx.Tests" />
+    <InternalsVisibleTo Include="CredProx.SecurityTests" />
+    <InternalsVisibleTo Include="CredProx.LoadTests" />
+    <InternalsVisibleTo Include="CredProx.Benchmarks" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- The core dogfoods the experimental plugin contract (plan §3.5 rule 2). -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+  </PropertyGroup>
+
+</Project>

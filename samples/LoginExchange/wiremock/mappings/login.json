@@ -1,0 +1,13 @@
+{
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "/acme/[^/]+/login"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "body": "{\"sessionId\": \"sess-{{formData request.body 'form' urlDecode=true}}{{form.user}}\", \"expiresIn\": 3600}",
+    "transformers": ["response-template"]
+  }
+}

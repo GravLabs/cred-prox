@@ -1,0 +1,209 @@
+# GitHub Actions CI. ubuntu-latest (Docker is preinstalled for the container jobs).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: Build, test and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Examples (in the solution) restore CredProx from the local package feed.
+      - name: Pack packages to the local feed
+        run: |
+          dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
+          dotnet pack src/CredProx -c Release -o artifacts/packages
+          dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Testing -c Release -o artifacts/packages
+
+      # Runs after the local feed is populated: the solution includes the examples,
+      # whose CredProx PackageReference only resolves from that feed (no public feed
+      # carries CredProx), and an implicit restore is part of the scan.
+      - name: Vulnerable dependency scan
+        run: dotnet list CredProx.slnx package --vulnerable --include-transitive
+
+      # Guards the Directory.Build.props SourceLink rewrite (CredProxCanonicalScmUrl):
+      # a positive-only check on the canonical raw-content URL — if the rewrite ever
+      # no-ops, the PDB carries a machine-local remote instead and this fails.
+      # Same assertion as PUBLISHING.md.
+      - name: Assert SourceLink in packed symbols
+        run: |
+          for pkg in artifacts/packages/*.snupkg; do
+            unzip -p "$pkg" 'lib/net10.0/*.pdb' | grep -aq 'https://raw.githubusercontent.com/GravLabs/cred-prox/' \
+              || { echo "SourceLink canonical URL missing in $pkg"; exit 1; }
+          done
+
+      - name: Restore
+        run: dotnet restore CredProx.slnx
+
+      - name: Build
+        run: dotnet build CredProx.slnx --configuration Release --no-restore
+
+      - name: Test with coverage
+        run: >-
+          dotnet test tests/CredProx.Tests/CredProx.Tests.csproj
+          --configuration Release --no-build
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      - name: Security property tests with coverage
+        run: >-
+          dotnet test tests/CredProx.SecurityTests/CredProx.SecurityTests.csproj
+          --configuration Release --no-build
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      # The built-ins and the fakes run the plugin authors' conformance suites (§5.2);
+      # this run is also what puts CredProx.Testing itself under the coverage gate.
+      - name: Conformance suites with coverage
+        run: >-
+          dotnet test tests/CredProx.ConformanceTests/CredProx.ConformanceTests.csproj
+          --configuration Release --no-build
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      - name: Coverage gate (§5.3)
+        run: python3 build/coverage-gate.py "TestResults/**/coverage.cobertura.xml"
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Generate coverage summary
+        if: always()
+        shell: bash
+        run: |
+          if ! ls TestResults/*/coverage.cobertura.xml >/dev/null 2>&1; then
+            echo "No coverage file produced; skipping report generation."
+            exit 0
+          fi
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          reportgenerator \
+            -reports:"TestResults/**/coverage.cobertura.xml" \
+            -targetdir:coverage-report \
+            -reporttypes:"Html;TextSummary;Cobertura"
+          cat coverage-report/Summary.txt
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report
+          if-no-files-found: ignore
+
+  # Plan §5.1: container end-to-end tests (real Keycloak, real nginx mTLS).
+  # Linux runner with Docker; the tests skip themselves where Docker is absent.
+  e2e:
+    name: Container end-to-end (Keycloak, nginx mTLS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore tests/CredProx.E2ETests/CredProx.E2ETests.csproj
+
+      - name: Build
+        run: dotnet build tests/CredProx.E2ETests/CredProx.E2ETests.csproj --configuration Release --no-restore
+
+      - name: Test
+        run: >-
+          dotnet test tests/CredProx.E2ETests/CredProx.E2ETests.csproj
+          --configuration Release --no-build
+
+  # Plan §6: examples build against the packed packages (catching packaging mistakes) and
+  # the offline-capable ones smoke against local stubs/containers.
+  # E4 (Spotify) and E5 (Graph) build here; their live smokes need vendor accounts (nightly).
+  examples:
+    name: Examples build and smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Pack packages to the local feed
+        run: |
+          dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
+          dotnet pack src/CredProx -c Release -o artifacts/packages
+          dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Testing -c Release -o artifacts/packages
+
+      - name: Build all examples (Release, against the packages)
+        run: |
+          for p in QuickStart OAuthKeycloak MutualTls Spotify MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie; do
+            dotnet build "samples/$p" --configuration Release
+          done
+
+      - name: Smoke E1 QuickStart (WireMock)
+        run: samples/QuickStart/smoke.sh
+
+      - name: Smoke E2 OAuthKeycloak (Keycloak)
+        run: samples/OAuthKeycloak/smoke.sh
+
+      - name: Smoke E3 MutualTls (nginx mTLS)
+        run: samples/MutualTls/smoke.sh
+
+      - name: Smoke E6 ADP (WireMock)
+        run: samples/ADP/smoke.sh
+
+      - name: Smoke E7 PerCallerCredentials (Keycloak)
+        run: samples/PerCallerCredentials/smoke.sh
+
+      - name: Smoke E8 GitHubApp (in-process stubs)
+        run: samples/GitHubApp/smoke.sh
+
+      - name: Smoke E9 HmacSigning (in-process stub)
+        run: samples/HmacSigning/smoke.sh
+
+      # Conformance self-test + proxy path, both against in-process stubs.
+      - name: Smoke E10 CustomPlugin (in-process stubs)
+        run: samples/CustomPlugin/smoke.sh
+
+      # Throttling, vendor-429 pause, circuit breaker, health (shortened load script).
+      - name: Smoke E11 Operations (WireMock)
+        run: samples/Operations/smoke.sh
+
+      # Login exchange, per-environment partitions, partition allow-list (WireMock).
+      - name: Smoke E12 LoginExchange (WireMock)
+        run: samples/LoginExchange/smoke.sh
+
+      # Caller keys, injected provider key, SSE passthrough, allow-list, throttle, audit.
+      - name: Smoke E13 AiGateway (in-process provider stub)
+        run: samples/AiGateway/smoke.sh
+
+      # Token exchange against real Keycloak: per-user exchanged tokens, forged
+      # inbound 401 before any exchange, caller key still required, downstream
+      # audience refuses the inbound token.
+      - name: Smoke E14 TokenExchange (Keycloak)
+        run: samples/TokenExchange/smoke.sh
+
+      # Agent keys, allow-lists as tool boundaries, one shared cached session token
+      # across two agents, scrubbing of the token the stub echoes back (in-process).
+      - name: Smoke E15 AgentEgress (in-process Salesforce stub)
+        run: samples/AgentEgress/smoke.sh
+
+      # Session-cookie login (Cayuse shape): form login replayed as Cookie, per-environment
+      # partitions, caller cookies replaced, transparent refresh, scrubbed echo (in-process).
+      - name: Smoke E16 SessionCookie (in-process CRM stub)
+        run: samples/SessionCookie/smoke.sh

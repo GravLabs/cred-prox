@@ -1,0 +1,38 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_PASSWORD: admin
+    ports:
+      - "5091:8080"
+    volumes:
+      - ./realm:/opt/keycloak/data/import:ro
+
+  api:
+    image: credprox-e2-sample
+    build:
+      context: ../..
+      dockerfile: samples/OAuthKeycloak/Dockerfile
+    command: ["dotnet", "/app/OAuthKeycloak.dll", "--role", "api"]
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Api__Authority: http://keycloak:8080/realms/credprox
+    depends_on:
+      - keycloak
+    ports:
+      - "5082:8080"
+
+  proxy:
+    image: credprox-e2-sample
+    build:
+      context: ../..
+      dockerfile: samples/OAuthKeycloak/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+    depends_on:
+      - keycloak
+      - api
+    ports:
+      - "5081:8080"

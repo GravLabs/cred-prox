@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Fakes and conformance test suites for CredProx plugin authors: a fake token
+    server, a fake upstream, a captured log sink, and conformance base classes
+    (CredentialProviderConformanceTests and friends) that hand a plugin author the
+    token-cache, failure-mode, refresh-on-401 and no-secret-in-logs checks from plan §5.2
+    for free. The built-ins run the same suites (tests/CredProx.ConformanceTests).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CredProx\CredProx.csproj" />
+    <ProjectReference Include="..\CredProx.Abstractions\CredProx.Abstractions.csproj" />
+    <PackageReference Include="xunit" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Conformance suites will exercise the experimental contract. -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+    <!-- The xunit reference makes the SDK treat this as a test project, which defaults
+         IsPackable off; this one is a shipped library. -->
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,8 @@
+services:
+  wiremock:
+    image: wiremock/wiremock:3.9.2
+    ports:
+      - "8082:8080"
+    command: ["--global-response-templating"]
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings:ro
