@@ -8,9 +8,9 @@
   <!-- Examples (plan §6) build against the packed packages, not project references:
        CI packs to artifacts/packages and samples/nuget.config points there. -->
   <ItemGroup>
-    <PackageVersion Include="CredProx" Version="0.7.0" />
-    <PackageVersion Include="CredProx.AzureKeyVault" Version="0.7.0" />
-    <PackageVersion Include="CredProx.Testing" Version="0.7.0" />
+    <PackageVersion Include="CredProx" Version="0.7.1" />
+    <PackageVersion Include="CredProx.AzureKeyVault" Version="0.7.1" />
+    <PackageVersion Include="CredProx.Testing" Version="0.7.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageVersion Include="Azure.Identity" Version="1.13.1" />
   </ItemGroup>

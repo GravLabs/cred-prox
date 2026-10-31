@@ -7,15 +7,21 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-30
+
 ### Changed
 
-- **GitHub public pivot (M25 — no functional change):** the canonical source home is now
-  `https://github.com/GravLabs/cred-prox`. Package metadata (repository, project and
-  release-notes URLs) and SourceLink point there **from the next release onward**; CI
-  workflows moved to `.github/`; `PackageValidation` now validates against the published
-  baseline packages committed under `build/baselines` (ADR-0001), so `dotnet pack` needs
-  no particular package feed on any machine. No public API or behaviour change; the
-  package registry scope is unchanged (see PUBLISHING.md).
+- **GitHub public pivot ships in package metadata (M25 — no functional change):**
+  sources are byte-identical to `0.7.0`; this release exists so the published packages
+  carry the new canonical home — repository, project and release-notes URLs point at
+  `https://github.com/GravLabs/cred-prox`, and the symbol packages embed GitHub
+  SourceLink (`0.7.0` as published keeps its historical metadata; published packages are
+  immutable).
+- **`PackageValidation` baseline rotated to `0.7.0`** (ADR-0001 rotation procedure):
+  the four published `0.7.0` packages are the committed baselines, so every pack
+  compares the public surface against the published `0.7.0` bytes with no feed access.
+  No public API or behaviour change; the package registry scope is unchanged
+  (see PUBLISHING.md).
 
 ## [0.7.0] - 2026-10-21
 

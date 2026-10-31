@@ -57,8 +57,11 @@
 
   <!-- NuGet package metadata. -->
   <PropertyGroup>
-    <!-- Single version for the whole repo; milestones bump it (plan §7). -->
-    <Version>0.7.0</Version>
+    <!-- Single version for the whole repo; milestones bump it (plan §7). 0.7.1 is a
+         metadata-only release: identical sources to 0.7.0, repacked post-pivot so the
+         published packages carry the GitHub ProjectUrl/SourceLink (the published 0.7.0
+         keeps its historical internal metadata - immutable). -->
+    <Version>0.7.1</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Authors>Hector Ramos</Authors>
     <Company>Hector Ramos</Company>
@@ -69,9 +72,9 @@
   </PropertyGroup>
 
   <!-- Package quality (plan §7): SourceLink for GitHub, package README, and API
-       compatibility validation. 0.6.0 is the PackageValidation baseline (PUBLISHING.md
-       rule): every pack from here on compares the public surface against the published
-       0.6.0. The baseline packages are the published bytes, committed under
+       compatibility validation. 0.7.0 is the PackageValidation baseline (rotated for
+       the 0.7.1 release per ADR-0001): every pack compares the public surface against
+       the published 0.7.0. The baseline packages are the published bytes, committed under
        build/baselines (docs/adr/0001), so validation needs no network or LAN feed —
        this machine and a GitHub-hosted runner compare against identical bytes.
        SDK 10.0's APICompat has no [Experimental] awareness: every baseline removal is
@@ -94,7 +97,7 @@
     <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
     <EnableSourceLink>true</EnableSourceLink>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.6.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.7.0</PackageValidationBaselineVersion>
     <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
          entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
          $(MSBuildProjectName) equals $(PackageId) for all four packable projects. -->

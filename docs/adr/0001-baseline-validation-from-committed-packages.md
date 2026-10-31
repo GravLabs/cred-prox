@@ -6,7 +6,7 @@ Status: accepted (M25, GitHub public pivot)
 ## Context
 
 Every `dotnet pack` runs APICompat against the last published release
-(`<PackageValidationBaselineVersion>`, currently `0.6.0`) so a public-surface removal
+(`<PackageValidationBaselineVersion>`, currently `0.7.0`) so a public-surface removal
 fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
 Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
 declared the internal LAN NuGet registry (anonymous download), and the SDK's
@@ -22,10 +22,10 @@ Commit the **published baseline packages** under `build/baselines/` and point
 `<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
 
 ```
-build/baselines/CredProx.0.6.0.nupkg               da852b80c7a2b3cf229f0af01124abf3eaf3774b3b643e3e2f2232aad0620374
-build/baselines/CredProx.Abstractions.0.6.0.nupkg  0beee8881c540ce3b9d8575500e628b15ac7543db1d1c555f740669317cf51ca
-build/baselines/CredProx.AzureKeyVault.0.6.0.nupkg 9d907a318e7703797f6a14d12818e950c47fb23dec055dabe2b9e108272bf97a
-build/baselines/CredProx.Testing.0.6.0.nupkg       160e6d754df18a0b2c6f0761babde87223bc0160c7f911418eafc7457b2f3464
+build/baselines/CredProx.0.7.0.nupkg               8ef1b9eaca542023f6d6378ab6f7f979d822d5dfa6e60e0bccdf7e7962ff5cce
+build/baselines/CredProx.Abstractions.0.7.0.nupkg  d20b78d6afdfc38233eedc96989984038d96fd6a0bed15bf03d41b9e0fc22d19
+build/baselines/CredProx.AzureKeyVault.0.7.0.nupkg 30d826c17ab5a23de1195239319e26bc78cc00b723b4c624b25c1f56311f8af1
+build/baselines/CredProx.Testing.0.7.0.nupkg       8cad6fc75e238bd5a33f7bc64457eb48901ff8df7c71604813ff02afc2ca3489
 ```
 
 The files are the bytes downloaded from the registry that published them (sha256 above;
@@ -35,6 +35,11 @@ non-empty `PackageValidationBaselinePath` **skips the feed-based restore entirel
 (`Microsoft.NET.ApiCompat.targets`); the version property stays as the baseline identity
 and the filename convention. Each release bumps the baseline to the previously published
 version: download its four nupkgs from the registry, replace the folder, update this list.
+Rotations executed: `0.6.0` at M25 (2026-10-30, hashes in git history at that commit);
+`0.7.0` for the 0.7.1 metadata release (2026-10-30) — the four table entries above are
+the registry-served bytes, with `CredProx` independently matching the byte-identical
+consumer probe recorded at the 0.7.0 publish. Pack the **fresh** `obj/` after rotating
+(see Consequences): a repack on an untouched obj skips validation silently.
 
 ## Consequences
 
