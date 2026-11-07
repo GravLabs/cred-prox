@@ -3,6 +3,7 @@ using System.Text;
 using CredProx;
 using CredProx.Abstractions;
 using FsCheck;
+using FsCheck.Fluent;
 using FsCheck.Xunit;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
@@ -18,7 +19,8 @@ namespace CredProx.SecurityTests;
 /// path — traversal variants, encodings, case tricks, hostile unicode — a declared caller
 /// is admitted only by an exact ordinal pattern match on a safe path, every rejection
 /// answers the same constant 403 document (nothing value-specific rides it out), and a
-/// presented key value never appears in the 401 problem document.
+/// presented key value never appears in the 401 problem document. Path fragments are
+/// drawn from what a host can actually represent as a request path — see <see cref="PathFragments"/>.
 /// </summary>
 public sealed class CallerAllowListProperties
 {
@@ -36,7 +38,7 @@ public sealed class CallerAllowListProperties
         return SecurityContexts.ResponseBody(context);
     }
 
-    [Property(MaxTest = 500)]
+    [Property(MaxTest = 500, Arbitrary = new[] { typeof(PathFragments) })]
     public async Task AllowList_IsTheOnlyGate(NonNull<string> generated)
     {
         // A DefaultHttpContext publishes one path view — the host's decoded path; the
@@ -62,7 +64,7 @@ public sealed class CallerAllowListProperties
         Assert.Equal(RejectedBody, SecurityContexts.ResponseBody(context));
     }
 
-    [Property(MaxTest = 500)]
+    [Property(MaxTest = 500, Arbitrary = new[] { typeof(PathFragments) })]
     public async Task TraversalAndEncodingVariants_NeverMatch(NonNull<string> prefix, NonNull<string> suffix)
     {
         // Splice a dot segment or an encoded separator into a path that otherwise matches
@@ -81,7 +83,7 @@ public sealed class CallerAllowListProperties
         }
     }
 
-    [Property(MaxTest = 500)]
+    [Property(MaxTest = 500, Arbitrary = new[] { typeof(PathFragments) })]
     public async Task CaseTricks_NeverMatch(NonNull<string> segment)
     {
         // Ordinal matching admits only the exact case; a case-folded or case-inverted
@@ -220,5 +222,39 @@ public sealed class CallerAllowListProperties
             new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config))),
             new ConfigurationSecretSource(config),
             NullLogger<CallerRegistryProvider>.Instance);
+    }
+
+    /// <summary>
+    /// Path-fragment generator for the properties that splice generated strings into a
+    /// request path: the default <see cref="NonNull{T}"/> strings can draw a NUL, or a
+    /// <c>%00</c> escape that decodes to one, and <see cref="PathString"/> refuses both —
+    /// <c>Request.Path = path</c> throws before any feature code runs, which is a
+    /// harness limitation, not an allow-list behaviour. A live server refuses the same
+    /// inputs before routing (pinned on the wire in the Kestrel traversal E2E tests), so
+    /// they are outside every path property's domain; everything else stays in the
+    /// generator, shrinking included.
+    /// </summary>
+    public static class PathFragments
+    {
+        public static Arbitrary<NonNull<string>> NonNullString { get; } =
+            Arb.Filter(
+                FsCheck.Fluent.ArbMap.Default.ArbFor<NonNull<string>>(),
+                static fragment => BuildableAsRequestPath("/" + fragment.Get));
+
+        // Ground truth is the very conversion Context() performs — the InvalidOperationException
+        // it throws is the one NUL (raw or %00-decoded) produces; the leading '/' keeps the
+        // ArgumentException class (path-form) out of the predicate.
+        private static bool BuildableAsRequestPath(string path)
+        {
+            try
+            {
+                PathString _ = path;
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
     }
 }

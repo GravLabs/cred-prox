@@ -204,6 +204,17 @@ public sealed class KestrelTraversalE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task EncodedNull_IsRefusedByTheServerBeforeAnyFeature()
+    {
+        // The wire counterpart of the property-generator exclusion in
+        // CallerAllowListProperties: Kestrel refuses a %00 in the request target in its
+        // own URL decoding (observed live: 400) — routing, caller authentication and the
+        // allow-list never see the request. Inputs that decode to NUL can therefore never
+        // reach the code those properties quantify over.
+        Assert.Equal(400, await RawGetAsync("/allowed/%00/admin", withKey: true));
+    }
+
+    [Fact]
     public async Task NoKey_IsUnauthorized_OnTheWire()
     {
         Assert.Equal(401, await RawGetAsync("/allowed/thing", withKey: false));
