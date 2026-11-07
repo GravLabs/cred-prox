@@ -1,6 +1,7 @@
 # Live validation report (M26 + M29 round 2)
 
-Evidence log for `scripts/live-azure-smoke.sh` runs (plan:
+**What this document is:** the evidence log of the live validation runs — a test
+record, not user guidance. Scripts: `scripts/live-azure-smoke.sh` (plan:
 `docs/azure-live-test-plan.md`; round-2/M29 sections: the Round 2 block below). Discipline: outcomes, status codes and
 resource **names/roles** only — no secrets, no tenant/subscription GUIDs, no
 response bodies. Scratch responses are kept in `/tmp` and deleted after each
@@ -24,7 +25,7 @@ run.
   The Phase 5 cycle run took this path (08:06:33Z, per `~/.azure/commands`);
   az's command log redacts arguments to `{}`, so **nothing was persisted to
   disk** — the exposure was transient and local to this machine, and the value
-  was one the battery legitimately held (same owner-approved credential).
+  was one the battery legitimately held (same approved credential).
   Fixed: the seed now uses the pipe channel `--file <(printf '%s' …)`, the
   same shape as the version-pipe restore, so no argv path carries the real
   secret even in E mode. A grep over the whole battery for secret-taking
@@ -39,7 +40,7 @@ run.
 ## Tenant-environment findings (wiring window, Oct 31 – Nov 3)
 
 Recorded from the Phase 3 setup attempts before the phase was dropped (all
-verified live against the person's tenant; objects since deleted):
+verified live against the maintainer's tenant; objects since deleted):
 
 1. **Key Vault creation in the RG's home region is rejected by this tenant**
    (`RequestDisallowedByAzure`, location ineligible) — the vault lives in
@@ -76,7 +77,7 @@ before Phase ≥2 setup. Read-only (list/show only).
 
 ### 2026-10-30 — Phase 1: PASS (first live-Azure proof for this project)
 
-`scripts/live-azure-smoke.sh 1` on the person's machine with the existing
+`scripts/live-azure-smoke.sh 1` on the maintainer's machine with the existing
 `az login` session (no sign-in performed by the battery, no tenant mutation,
 no resource creation — the ARM call is the authenticated-user
 `GET /subscriptions` list):
@@ -95,16 +96,16 @@ provider's single-flight is covered by `FakeTimeProvider` tests; over the
 real chain `DefaultAzureCredential` adds its own cache, so a 2-call probe
 cannot attribute the reuse. The originally planned attribution venue —
 Phase 3's live exchange counted per `x-ms-request-id` — was **dropped with
-the phase** (owner 2026-11-03; OBO removed in M27), so no live-issuer
+the phase** (decision 2026-11-03; OBO removed in M27), so no live-issuer
 issuance attribution exists anywhere in this milestone; the fake-level
 proof stands alone.
 
 ### 2026-10-31 — Phase 2: PASS (client-credentials vs real Entra + live scrub)
 
-Person-authorized tenant objects in place (resource group
+Maintainer-authorized tenant objects in place (resource group
 `credprox-live-test`, app registration `credprox-e5-oauth` with its service
 principal holding Reader on that RG). `scripts/live-azure-smoke.sh 2` on the
-person's machine with the existing `az login` session:
+maintainer's machine with the existing `az login` session:
 
 - positive run: OAuth (client-credentials) variant; CredProx minted a real
   `…/oauth2/v2.0/token` token from the tenant and proxied
@@ -132,8 +133,8 @@ running process never re-reads env, so re-exporting would have probed the
 
 ### 2026-11-04 — Phase 4: PASS (Key Vault as the only secret source; rotation by OVERWRITE)
 
-Second owner word (via the architect, 04:06Z) chose option (b) and delegated
-execution — the 03:02Z first word had STOPped at its own precondition (the Phase 2
+Second maintainer go-ahead (04:06Z) chose option (b) and delegated
+execution — the 03:02Z first go-ahead had STOPped at its own precondition (the Phase 2
 client secret was not available locally; history in the M26 row's transitions).
 Authorized exactly: **one** `az ad app credential reset` on `credprox-e5-oauth`
 with `--append --display-name credprox-m26-p4 --end-date 2026-12-04` (existing
@@ -162,14 +163,14 @@ value never printed, never in argv, never on disk.
 - Post-run: the vault secret carries three versions; the **current** version holds
     the correct value. Rotation is proven by OVERWRITE, not delete+re-add —
     soft-delete's name lock makes the latter unusable.
-- The word's UAI-grant item stayed moot (no test UAI exists — finding 4/§ above);
-    the vault's RBAC carries the owner's account as **Key Vault Secrets Officer**,
+- The go-ahead's UAI-grant item stayed moot (no test UAI exists — finding 4/§ above);
+    the vault's RBAC carries the maintainer's account as **Key Vault Secrets Officer**,
     which covers this run's CLI-identity reads. No grant changes, no other tenant
     mutation.
 
 ### 2026-11-04 — Phase 5: destroy → apply → re-run cycle: PASS (one-command IaC proven)
 
-Owner word "go cycle" (12:21Z, via the architect): run the five commands at
+Maintainer go-ahead "go cycle" (12:21Z): run the five commands at
 `f51d43b` in order, stop at first failure. The cycle **destroyed and rebuilt
 the tenant objects end to end** and re-passed the battery:
 
@@ -179,17 +180,17 @@ the tenant objects end to end** and re-passed the battery:
 - 2) `live-infra-destroy.sh` — vault deleted and **PURGED** (read-back: PURGED;
   the old vault predated any purge protection, purge protection is null).
 - 3) `live-infra-apply.sh` — **two stops, both template bugs, no design change**
-  (each stopped, reported, resumed on the architect's word):
+  (each stopped, reported, resumed on the maintainer's go-ahead):
   (a) `enablePurgeProtection: false` is rejected at create on every
-  subscription — off is expressed by **omitting** the property (fix `ac57248`);
+  subscription — off is expressed by **omitting** the property;
   (b) a from-memory Secrets Officer role GUID failed with
   `RoleDefinitionDoesNotExist` — the apply script now resolves the role
   definition id **live** (`az role definition list`), no GUID in the tree
-  (fix `6cb0ecc`). Architect verified both read-only before each go.
+  . Both fixes were verified read-only before each go-ahead.
   Apply then succeeded; read-backs: vault `enableRbacAuthorization: true`,
   `enablePurgeProtection: **null**` (omission = off, proven at the resource),
   soft-delete retention 7; vault-scope role assignment list = exactly one,
-  Secrets Officer for the owner.
+  Secrets Officer for the maintainer.
 - 4) `live-e5-app.sh create` — new registration (different application id),
   SP + RG Reader recreated, fresh 30-day credential (`credprox-m26-p4`) piped
   into the fresh vault (value never printed/argv/disk). Read-backs: exactly one
@@ -217,7 +218,7 @@ env. The battery now never holds the value at all in this configuration.
 
 Survivors after the cycle: RG `credprox-live-test`; `credprox-e5-oauth` (1
 credential, expires 2026-12-04, its SP with Reader on the RG);
-`credprox-live-kv` (1 secret, 1 version, Secrets Officer owner assignment).
+`credprox-live-kv` (1 secret, 1 version, Secrets Officer role assignment).
 One-command apply / one-command destroy bar **met**, including through two
 real-world failure-and-repair rounds.
 
@@ -225,10 +226,10 @@ real-world failure-and-repair rounds.
 
 Scope per the M26 row: the battery scripts' handling of secret material and
 the scrub assertions against REAL failure bodies; the forged-token variants
-were Phase 3's and are **out of scope** (phase dropped by owner 2026-11-03,
+were Phase 3's and are **out of scope** (phase dropped 2026-11-03,
 OBO removed in M27). Findings and dispositions:
 
-1. **E-mode `--value` argv exposure** — found by the architect pre-pass,
+1. **E-mode `--value` argv exposure** — found in the pre-execution review,
    fixed at `da54c97`, disclosed in full above. No further exposure found on
    re-read of every az/dotnet/env invocation in the five scripts.
 2. **Scratch-hygiene claim was false** (this pass): the report header says
@@ -262,7 +263,7 @@ literal secret-shaped string in the scripts is the fixed dummy.
 
 ## Round 2 (M29) — Azure as the host: managed identity + vault-sourced credentials (2026-11-06)
 
-Owner word 2026-11-05 ("merge, start M29, hold release") plus the scope
+Maintainer go-ahead 2026-11-05 ("merge, start M29, hold release") plus the scope
 correction "use AME azure regions" → eastus. Phase definitions, pass criteria
 and the corrected P10 semantics live in
 `docs/azure-live-test-plan.md` (round-2 section); this section records the
@@ -274,7 +275,7 @@ runs and what the live layer actually taught. Zero `src/` delta: every fix
 - **Pre-ruling pass (2026-11-06):** revision `--0000004` (build
   `574740afd7b4`) — P5–P9 PASS on direct battery logs; P10 stopped honest:
   the wrong key was never refused because the then-59-min stub token left no
-  mint inside the witness window. This produced the architect ruling B+C
+  mint inside the witness window. This produced ruling B+C
   (2-minute stub + next-mint semantics, below).
 - **Main pass (2026-11-06, fixes 11–15):** revision `--0000005`, image stamp
   `DEPLOY_IMAGE_DIGEST=sha256:e9c65308de74…` — **P5–P10 PASS** on direct
@@ -285,7 +286,7 @@ runs and what the live layer actually taught. Zero `src/` delta: every fix
   one-command apply/destroy proven for the round-2 objects too.
 - **P10 detail (2-minute stub, stated plainly):** the live deployment set
   `CredProxTest__stub-token-minutes=2` on the counterparty for the witness;
-  the **code default remains 59** and no shipped behavior changed. Refusal
+  the **code default remains 59** and no shipped behaviour changed. Refusal
   observed ≈82 s after the wrong-key overwrite vs the ≈90 s prediction
   (120 s lifetime × 0.8 `RefreshFraction`); original key restored 18:43:21Z
   (`secret download`, never `show -o tsv`); recovery on the next probe 33 s
@@ -307,18 +308,18 @@ runs and what the live layer actually taught. Zero `src/` delta: every fix
 3. **Two user-assigned identities on one Container App:** `ClientSecret`
    flows pick the identity by `ManagedIdentityClientId` **in code**; an
    env-level hint never reaches the ACA managed-identity wire.
-4. **Vault-pinned CA for mTLS (fix 11):** the counterparty's pinned client
+4. **Vault-pinned CA for mTLS:** the counterparty's pinned client
    CA travels from the vault into the app's custom trust store
    (`ExtraStore` → `CustomRootTrust`); the OS store never has it on ACA.
-5. **`az rest` leading-dash values (fix 12):** container-app job `args`
+5. **`az rest` leading-dash values:** container-app job `args`
    starting with `--` must be passed as `--args=NAME=VALUE`.
-6. **Accepted-empty job start (fix 14):** a start call returning no execution
+6. **Accepted-empty job start:** a start call returning no execution
    name yet leaving a run queued is **LAUNCHED** — never blindly restart;
    stderr carries the diagnostics.
-7. **Decorated ACA logs (fix 13):** `job logs show` lines carry a
+7. **Decorated ACA logs:** `job logs show` lines carry a
    timestamp/level decoration; the battery strips it, wants 4 of 6 phase
    lines, and retries the log-store 409 window.
-8. **Env-key normalization (silent, cost two debug layers):**
+8. **Env-key normalisation (silent, cost two debug layers):**
    `AddEnvironmentVariables` maps `__` in names to the config `:` separator —
    `KeyVault__Uri` is only reachable as `KeyVault:Uri`; a raw-name lookup
    returns null silently and looked like "vault provider missing".
@@ -335,16 +336,16 @@ runs and what the live layer actually taught. Zero `src/` delta: every fix
 
 ### What round 2 did NOT prove
 
-- net8.0 runtime behavior (net10.0-only host locally; CI covers net8.0).
+- net8.0 runtime behaviour — moot: the library ships for net10.0 only (.NET 8 was
+  dropped at the M5 gate).
 - Live rotation of the counterparty-pinned key pair — the pin is static for
   P10 by design (ruling B+C); delete+re-add rotation was deliberately not
   tested (rotate-by-overwrite is the rule under test).
 - Reload firing without restart is proven **offline only**
   (`--mode reloadproof`); P10 carries the live next-mint timing witness.
-- Throttling / idempotency scope — excluded by the owner ("skip rate
+- Throttling / idempotency scope — excluded by the maintainer ("skip rate
   limiting").
-- Security-milestone adversarial pass: **scheduled**, not yet run (dev-review
-  owns the verdict).
+- Security-milestone adversarial pass: **scheduled**, not yet run.
 
 Tenant after the run: resource group `exists=false`, both vaults soft-deleted
 and **purged** (`az keyvault list-deleted` → 0), 0 role assignments — verified
@@ -352,7 +353,7 @@ by read-backs the destroy script failed its own exit over.
 
 ## Pending
 
-- **Phase 3 — DROPPED by owner 2026-11-03, OBO removed in M27.** The
+- **Phase 3 — DROPPED 2026-11-03, OBO removed in M27.** The
   device-code sign-in never ran; the `credprox-e14-*` app registrations,
   their service principals and the local scratch then in hand were deleted
   and verified the same day (amended 2026-11-04, review F1: that day's
@@ -364,10 +365,11 @@ by read-backs the destroy script failed its own exit over.
   carries only fake-level unit coverage until M27 removes it. Wiring findings
   are preserved above.
 - Phase 4 (Key Vault secret source): **executed 2026-11-04 — see the Runs
-  section above.** The full history (03:02Z word → STOP on the secret-availability
-  precondition → owner option (b) → V-mode PASS) is in the M26 row's transitions.
+  section above.** The full history (03:02Z go-ahead → STOP on the secret-availability
+  precondition → maintainer option (b) → V-mode PASS) is recorded in the
+  milestone's execution log.
   Wiring behind it: the E5 sample wires the Key Vault config provider behind
   `KeyVault:Uri` (package `Azure.Extensions.AspNetCore.Configuration.Secrets`
   pinned 1.3.2 — 1.5+ drags Azure.Core 1.61 whose credential merge collides
   CS0433 with the repo-pinned Azure.Identity 1.13.1); battery `phase4()` runs the
-  overwrite-rotation probe in E or V mode, person-present-gated.
+  overwrite-rotation probe in E or V mode, maintainer-present-gated.

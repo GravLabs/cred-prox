@@ -1,7 +1,7 @@
 # E11 — Operations: throttling, vendor back-off, circuit breaker, health
 
 What running CredProx in production looks like (plan §6 E11, §8.4): three clusters behind
-one host, each exercising one operational behavior, all configured — no C# beyond the
+one host, each exercising one operational behaviour, all configured — no C# beyond the
 standard three registration lines in `Program.cs`. WireMock plays the vendor with three
 personalities (`wiremock/mappings/`). Needs Docker.
 
@@ -13,7 +13,7 @@ personalities (`wiremock/mappings/`). Needs Docker.
 
 That starts WireMock and the host, then runs `load.sh` — the shortened load script
 (the nightly NBomber suite holds the rigorous rate assertions) — which drives and
-asserts each behavior:
+asserts each behaviour:
 
 ```
 == 1. Rate limit: 30-request burst against a 5 req/s cluster ==

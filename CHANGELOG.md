@@ -39,9 +39,9 @@ change between minor versions; `[Experimental]` APIs may change at any time.
   the provider's `ReloadInterval`. A 59-minute token caps rotation staleness near
   ~47 minutes even with 30-second polling.
 - **Library code is unchanged from 0.8.1** — no public API additions, removals or
-  behavior changes; this release re-versions identical sources with docs and samples.
+  behaviour changes; this release re-versions identical sources with docs and samples.
 - The public repository history was collapsed to a single commit and the old version
-  tags removed (owner decision): source links for 0.8.1 and earlier resolve only while
+  tags removed (maintainer decision): source links for 0.8.1 and earlier resolve only while
   the host retains the unreferenced commits — they are unsupported-by-construction, so
   **0.8.2 is the supported version** for stepping into source.
 
@@ -58,7 +58,7 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 ### Removed
 
 - **Breaking (experimental surface): the Entra on-behalf-of exchange mode** (M27,
-  ADR-0002, owner decision 2026-11-03): `TokenExchangeMode.EntraObo` is removed and
+  ADR-0002, maintainer decision 2026-11-03): `TokenExchangeMode.EntraObo` is removed and
   `TokenExchange` speaks RFC 8693 only. The `Mode` property stays — existing
   `Mode: Rfc8693` config binds unchanged — and a config still naming the removed mode
   **fails loudly at startup binding**, never degrading to a silent RFC 8693 call. If
@@ -87,7 +87,7 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 - **Symbol packages embed local build paths (found post-publish):** stepping through
   CredProx `0.7.1` with symbols shows the release machine's build paths instead of the
-  normalized `/_/` CI-mapped paths (GitHub SourceLink URLs are present and unaffected).
+  normalised `/_/` CI-mapped paths (GitHub SourceLink URLs are present and unaffected).
   No functional or security impact; the published packages are immutable, and the next
   release packs with the corrected procedure (see PUBLISHING.md).
 
@@ -334,10 +334,10 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [0.3.0] - 2026-10-16
 
-Finalizing release: benchmarks, package quality (SourceLink, deterministic build,
+Finalising release: benchmarks, package quality (SourceLink, deterministic build,
 symbols, package READMEs, PackageValidation baseline), examples verified against the
-packed `.nupkg` files, and the plan's §9 decisions closed out. Published to the Gitea
-registry (main + tag); nuget.org postponed per plan §9.
+packed `.nupkg` files, and the plan's §9 decisions closed out. Published to the
+internal registry (main + tag); nuget.org postponed per plan §9.
 
 ## [0.3.0-preview.3] - 2026-10-15
 

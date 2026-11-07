@@ -6,12 +6,12 @@
 # soft-delete recover-if-deleted first, every role definition id resolved
 # LIVE (never a recalled GUID), officer principal from the signed-in identity.
 #
-# Region: arg 1, default eastus - owner word 2026-11-06: AMERICAS regions only
+# Region: arg 1, default eastus - decision 2026-11-06: AMERICAS regions only
 # (plan §Region; live what-if 2026-11-06 passed eastus/eastus2/centralus/
 # westus2/southcentralus/canadacentral). The vault deploys in the SAME region
 # (passed explicitly to Bicep). If the RG was created in a fallback region,
 # pass that same region here.
-# Person-present scope: deploys into the person's subscription.
+# Run-manually scope: deploys into the maintainer's subscription.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 RG=credprox-live-test
@@ -19,9 +19,9 @@ VAULT=credprox-m29-kv
 LOC="${1:-eastus}"
 
 [[ "$(az account get-access-token -o none 2>/dev/null; echo $?)" == 0 ]] \
-  || { echo "az sign-in required (person-present)"; exit 1; }
+  || { echo "az sign-in required (run manually)"; exit 1; }
 az group show -n "$RG" -o none 2>/dev/null \
-  || { echo "resource group $RG absent - create it person-present first (gate step 1)"; exit 1; }
+  || { echo "resource group $RG absent - create it manually first (gate step 1)"; exit 1; }
 
 if ! az keyvault show -n "$VAULT" -g "$RG" -o none 2>/dev/null \
    && az keyvault show-deleted -n "$VAULT" -o none 2>/dev/null; then

@@ -10,10 +10,10 @@
 # name-locks the vault and breaks the one-command cycle. Irreversible by
 # design. Uses `az resource delete` so NO containerapp CLI extension is needed
 # for teardown - the exit path must never depend on an extension install.
-# Person-present scope; touches only credprox-m29-* objects.
+# Run-manually scope; touches only credprox-m29-* objects.
 set -euo pipefail
 # Region for the vault purge (arg 1) - MUST match what apply used
-# (default matches live-infra-apply-r2.sh; owner word 2026-11-06: Americas only).
+# (default matches live-infra-apply-r2.sh; decision 2026-11-06: Americas only).
 LOC="${1:-eastus}"
 RG=credprox-live-test
 VAULT=credprox-m29-kv
@@ -43,7 +43,7 @@ else
   echo "destroyed: $VAULT deleted and PURGED (name lock cleared - apply creates fresh)"
 fi
 echo "destroyed: $APP, $JOB, $CAPENV, $ACR, credprox-m29-uai, credprox-m29-kubelet (read-backs:)"
-# fix 16 (live 2026-11-06): ARM deletes are ASYNC - a single immediate `resource show`
+# live finding 2026-11-06: ARM deletes are ASYNC - a single immediate `resource show`
 # raced the ARM cache and printed "STILL PRESENT" for a registry that was in fact
 # deleted moments later. And the script exited 0 even with a read-back present, so the
 # caller's OK marker masked a real leftover. Poll until gone (bounded), then let the
@@ -52,7 +52,7 @@ DESTROY_FAIL=0
 for R in "Microsoft.App/containerApps $APP" "Microsoft.App/jobs $JOB" "Microsoft.App/managedEnvironments $CAPENV" "Microsoft.ContainerRegistry/registries $ACR"; do
   set -- $R
   i=0
-  # fix 17 (live 2026-11-06): ACR delete latency observed 2-4 min on ARM - a 2-min
+  # live finding 2026-11-06: ACR delete latency observed 2-4 min on ARM - a 2-min
   # poll cap honestly FAILed a deletion that landed ~1 min later. Cap to 4 min.
   while az resource show -g "$RG" -n "$2" --resource-type "$1" -o none 2>/dev/null; do
     i=$((i+1)); (( i >= 24 )) && break; sleep 10

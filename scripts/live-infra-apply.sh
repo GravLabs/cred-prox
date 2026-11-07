@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 # M26 Phase 5 one-command APPLY for the RG-scoped live-validation infra
-# (infra/azure/credprox-live.bicep): the credprox-live-kv vault + the owner's
+# (infra/azure/credprox-live.bicep): the credprox-live-kv vault + the maintainer's
 # Key Vault Secrets Officer assignment. Idempotent.
 #
 # Soft-delete recovery: destroy purges, but an interrupted destroy can leave
 # the vault soft-deleted - and a same-name create is then name-locked - so
 # recover first when that's the state (plan Phase 5 decision).
-# Person-present scope: deploys into the person's subscription.
+# Run-manually scope: deploys into the maintainer's subscription.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 RG=credprox-live-test
 VAULT=credprox-live-kv
 
 [[ "$(az account get-access-token -o none 2>/dev/null; echo $?)" == 0 ]] \
-  || { echo "az sign-in required (person-present)"; exit 1; }
+  || { echo "az sign-in required (run manually)"; exit 1; }
 az group show -n "$RG" -o none 2>/dev/null \
-  || { echo "resource group $RG absent - create it person-present first"; exit 1; }
+  || { echo "resource group $RG absent - create it manually first"; exit 1; }
 
 if ! az keyvault show -n "$VAULT" -g "$RG" -o none 2>/dev/null \
    && az keyvault show-deleted -n "$VAULT" -o none 2>/dev/null; then

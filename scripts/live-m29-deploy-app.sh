@@ -7,7 +7,7 @@
 # Idempotent: existing app/job are updated via `... update --yaml` rather than
 # create-failing. The job template needs the app's internal FQDN, so the order
 # is fixed: app -> read back properties.configuration.ingress.fqdn -> job.
-# Person-present scope; creates/updates only credprox-m29-app/-battery.
+# Run-manually scope; creates/updates only credprox-m29-app/-battery.
 set -euo pipefail
 RG=credprox-live-test
 APP=credprox-m29-app
@@ -16,9 +16,9 @@ ACR=credproxm29reg
 VAULT=credprox-m29-kv
 
 [[ "$(az account get-access-token -o none 2>/dev/null; echo $?)" == 0 ]] \
-  || { echo "az sign-in required (person-present)"; exit 1; }
+  || { echo "az sign-in required (run manually)"; exit 1; }
 az containerapp -h >/dev/null 2>&1 \
-  || { echo "az containerapp command group absent - run: az extension add --name containerapp (local install, person-present)"; exit 1; }
+  || { echo "az containerapp command group absent - run: az extension add --name containerapp (local install, run manually)"; exit 1; }
 az keyvault show -n "$VAULT" -g "$RG" -o none 2>/dev/null \
   || { echo "vault $VAULT absent - apply infra first"; exit 1; }
 

@@ -12,13 +12,13 @@
 // live (recalled role ids have bitten before - M26).
 targetScope = 'resourceGroup'
 
-@description('RG home region for the Container Apps environment, ACR - and the vault (all one region). Owner word 2026-11-06: Americas regions ONLY; default eastus, fallback order eastus2, centralus, westus2, southcentralus, canadacentral (plan §Region; live what-if 2026-11-06 passed all six, westeurope still rejected). The tenant denyLocation policy remains unreadable from the owner account and RG-scope policy remains the one thing what-if cannot evaluate.')
+@description('RG home region for the Container Apps environment, ACR - and the vault (all one region). Decision 2026-11-06: Americas regions ONLY; default eastus, fallback order eastus2, centralus, westus2, southcentralus, canadacentral (plan §Region; live what-if 2026-11-06 passed all six, westeurope still rejected). The tenant denyLocation policy remains unreadable from the maintainer account and RG-scope policy remains the one thing what-if cannot evaluate.')
 param mainLocation string
 
 @description('Name of the round-2 live-validation Key Vault.')
 param vaultName string = 'credprox-m29-kv'
 
-@description('Vault location: the SAME region as everything else (owner word 2026-11-06, Americas only). The round-1 northeurope Key Vault RP exemption is moot - the 2026-11-06 Americas what-if never flagged the vault. The apply script passes this explicitly and destroy purges with the same value.')
+@description('Vault location: the SAME region as everything else (decision 2026-11-06, Americas only). The round-1 northeurope Key Vault RP exemption is moot - the 2026-11-06 Americas what-if never flagged the vault. The apply script passes this explicitly and destroy purges with the same value.')
 param vaultLocation string = 'eastus'
 
 @description('User-assigned managed identity the container app runs as (the M29 subject: a REAL UAI identity for CredProx egress).')

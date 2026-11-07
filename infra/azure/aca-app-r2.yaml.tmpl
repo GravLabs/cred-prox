@@ -102,14 +102,15 @@ properties:
           # NO ASPNETCORE_URLS: the counterparty owns its ports in code
           # (Kestrel ListenAnyIP 8082 http + 8443 https with client certs) -
           # the https endpoint needs the client-cert options the URL channel
-          # cannot carry, so one owner for both is the only consistent shape.
+          # cannot carry, so in-code ownership of both endpoints is the only
+          # consistent shape.
           - name: MANAGED_IDENTITY_CLIENT_ID
             value: "$UAI_CLIENT_ID"
           - name: DEPLOY_IMAGE_DIGEST
             value: "$DEPLOY_IMAGE_DIGEST"
           - name: KeyVault__Uri
             value: "$VAULT_URI"
-          # Architect ruling B (2026-11-06): 2-minute stub tokens for the live P10
+          # Ruling B (2026-11-06): 2-minute stub tokens for the live P10
           # rotation witness. The proxy re-mints only at the EXCHANGED-token refresh
           # (lifetime x RefreshFraction 0.8), so at the 59-min default a rotation is
           # never refused inside the witness window. Default 59 (offline/unset) is

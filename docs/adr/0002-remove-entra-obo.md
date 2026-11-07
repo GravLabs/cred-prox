@@ -1,7 +1,7 @@
 # ADR-0002: Remove the Entra on-behalf-of exchange mode
 
 Date: 2026-11-03
-Status: accepted (M27, owner decision)
+Status: accepted (M27, maintainer decision)
 
 ## Context
 
@@ -10,7 +10,7 @@ M14 shipped the `TokenExchange` credential type with two wire shapes selected by
 (Microsoft's on-behalf-of profile — `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`,
 the inbound token sent as `assertion`, plus `requested_token_use=on_behalf_of`).
 
-On 2026-11-03 the owner decided to remove OBO from the library: *"this is not really
+On 2026-11-03 the maintainer decided to remove OBO from the library: *"this is not really
 needed, remove it and the examples. Keep all the other azure features."* The decision
 followed M26 (live Azure/Entra validation): the OBO path was the one shipped shape whose
 live proof required a tenant sign-in sitting, and under the tenant's real constraints
@@ -31,7 +31,7 @@ plugin point exists for.
   `TokenExchangeProvider`.
 - **Keep** `TokenExchangeMode` as a single-member enum (`Rfc8693`). Existing config
   naming `Mode: Rfc8693` keeps binding; removing the property would break every
-  `TokenExchange` credential for no owner-requested reason.
+  `TokenExchange` credential for no requested reason.
 - A config still naming the removed mode fails loudly at startup binding
   (`ConfigurationBinder` refuses the unknown enum value;
   `CredentialRegistryProviderTests.RemovedEntraOboMode_FailsStartupBinding` pins that

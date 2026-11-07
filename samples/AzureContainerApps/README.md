@@ -31,7 +31,7 @@ docker run --rm credprox-m29:latest --mode proxy --smoke
 
 `P5 PASS … P9 PASS` + `SMOKE OK` is the G1 offline gate. The full live gate
 list lives in the plan (§Round 2); `scripts/live-*.sh` drive it — **only**
-after the owner's gate, nothing here mutates Azure by itself.
+after the maintainer's gate, nothing here mutates Azure by itself.
 
 The offline **reload** proof (no Azure, no tenant; Linux docker):
 

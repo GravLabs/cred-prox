@@ -2,7 +2,7 @@
 
 The nightly load layer from `docs/credprox-plan.md` §5.1 "Load": real clocks, real
 threads, sustained concurrency against the in-process pipeline. These tests assert
-behavioral invariants under load, not throughput numbers:
+behavioural invariants under load, not throughput numbers:
 
 - `ThrottleLoadTests` — a 200-request burst never pushes the upstream past the
   configured rate; the concurrency cap holds under contention.

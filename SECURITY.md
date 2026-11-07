@@ -40,7 +40,7 @@ The security boundaries CredProx promises (plan §3, §5.2):
   unauthenticated or unknown caller gets no upstream request; operation allow-lists are
   enforced fail-closed.
 - **Destination allow-lists** — a templated destination cannot be steered outside its
-  declared allow-list (including via encoded or normalized path/host tricks).
+  declared allow-list (including via encoded or normalised path/host tricks).
 - **Header hygiene** — inbound `Authorization` and caller keys are not forwarded to
   upstreams; injected credential headers replace, never duplicate.
 - **Token cache isolation** — cache entries are keyed per credential and partition; one

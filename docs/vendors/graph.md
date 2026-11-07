@@ -5,7 +5,7 @@
 | **Auth model** | Entra ID OAuth 2.0 client credentials per tenant; Graph then takes the bearer token. App permissions require admin consent — the consent-free M26 validation set deliberately used Azure RBAC targets instead ([docs/live-validation-report.md](../live-validation-report.md)) |
 | **CredProx credential** | `OAuthClientCredentials` with `ClientAuthentication: BasicHeader` — **or** secretless `TokenCredential` (ambient Azure identity) |
 | **Sample** | [E5 `samples/MicrosoftGraph`](../../samples/MicrosoftGraph/README.md) — both variants, plus Key Vault as the secret source |
-| **Verification** | Endpoint form, `.default` scope and Basic client auth verified in sample E5 (`appsettings.OAuth.json` / `appsettings.ManagedIdentity.json`); the live Entra and Key Vault paths were validated against the person's tenant in M26 ([report](../live-validation-report.md)) |
+| **Verification** | Endpoint form, `.default` scope and Basic client auth verified in sample E5 (`appsettings.OAuth.json` / `appsettings.ManagedIdentity.json`); the live Entra and Key Vault paths were validated against the maintainer's tenant in M26 ([report](../live-validation-report.md)) |
 
 ## CredProx config
 

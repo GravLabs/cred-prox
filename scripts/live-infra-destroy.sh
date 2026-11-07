@@ -6,7 +6,7 @@
 # old secret history. Purge is irreversible - this destroys the vault and all
 # its secret versions, which is exactly what "destroy" promises. The role
 # assignment goes with the vault. Pair: scripts/live-infra-apply.sh.
-# Person-present scope; touches nothing outside credprox-live-kv.
+# Run-manually scope; touches nothing outside credprox-live-kv.
 set -euo pipefail
 RG=credprox-live-test
 VAULT=credprox-live-kv
@@ -14,7 +14,7 @@ VAULT=credprox-live-kv
 # Idempotent: tolerate already-gone states (destroy may be re-run).
 az keyvault delete -n "$VAULT" -g "$RG" -o none 2>/dev/null || true
 # purge needs the vault location (same constant as the Bicep default) and
-# owner-level permission - it may be refused. Non-fatal by design, but the
+# an elevated RBAC permission - it may be refused. Non-fatal by design, but the
 # read-back below states honestly which state we actually left, so the cycle's
 # evidence records which re-apply path (create vs recover) was taken.
 az keyvault purge -n "$VAULT" -l northeurope -o none 2>/dev/null || true

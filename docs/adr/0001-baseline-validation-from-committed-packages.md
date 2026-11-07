@@ -37,20 +37,20 @@ and the filename convention. Each release bumps the baseline to the previously p
 version: download its four nupkgs from the registry, replace the folder, update this list.
 Rotations executed: `0.6.0` at M25 (2026-10-30, hashes in git history at that commit);
 `0.7.0` for the 0.7.1 metadata release (2026-10-30; hashes in git history at that
-commit). `0.7.1` **deliberately skipped** for the 0.8.0 release (2026-11-04, architect
-decision on the owner's release word): the owed rotation to `0.7.1` would have committed
+commit). `0.7.1` **deliberately skipped** for the 0.8.0 release (2026-11-04, release
+decision on the maintainer's go-ahead): the owed rotation to `0.7.1` would have committed
 registry bytes whose DLLs/PDBs embed the builder's absolute local source path instead of
 `/_/` (the F1 known issue in PUBLISHING.md's release history) — committing them would
 have been NEW public disclosure, and `0.7.1` was metadata-only, so the `0.7.0` baseline
-already validated the identical API. `0.8.0` rotated at `0.8.1` (2026-11-04, owner
+already validated the identical API. `0.8.0` rotated at `0.8.1` (2026-11-04, maintainer
 full-scrub decision — that generation's entries, the registry-served `0.8.0` bytes
 each sha256-verified during the 0.8.0 consumer restore, are in git history at that
 commit), and the skipped `0.7.1` generation is subsumed — superseded, API identical to
-`0.7.0`. `0.8.1` rotated at `0.8.2` (2026-11-07, owner release word "merge and publish
+`0.7.0`. `0.8.1` rotated at `0.8.2` (2026-11-07, maintainer release go-ahead "merge and publish
 when ready"): the table entries above are the registry-served `0.8.1` bytes — sha256
 verified equal to the published artifacts recorded in PUBLISHING.md's release history,
 and disclosure-scanned member-by-member before commit (zero hits). The rotation also removed the last disclosure residual of the `0.7.0` set: their
-nuspec `RepositoryUrl` carried the internal Gitea URL (public since the launch commits,
+nuspec `RepositoryUrl` carried the internal registry URL (public since the launch commits,
 prose since scrubbed) — the `0.8.0` nuspecs carry the GitHub URL, so the current tree is
 clean. Pack the **fresh** `obj/` after rotating (see Consequences): a repack on an
 untouched obj skips validation silently.

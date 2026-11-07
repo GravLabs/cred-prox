@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Auth model** | Per-tenant OAuth 2.0 for integration clients. A Workday API client is configured with a client grant type of **JWT Bearer Grant** (recommended; an X.509 public key is registered on the client) or **Authorization Code + PKCE** — client_credentials is **not offered** (cited: doc.workday.com, "Register API Client" pages; design-architect's docs check 2026-11-05 — the portal is not reachable from this build environment). The CredProx path is `JwtAssertion` in RFC 7523 jwt-bearer-grant mode. |
+| **Auth model** | Per-tenant OAuth 2.0 for integration clients. A Workday API client is configured with a client grant type of **JWT Bearer Grant** (recommended; an X.509 public key is registered on the client) or **Authorization Code + PKCE** — client_credentials is **not offered** (cited: doc.workday.com, "Register API Client" pages; verified 2026-11-05 — the portal is not reachable from this build environment). The CredProx path is `JwtAssertion` in RFC 7523 jwt-bearer-grant mode. |
 | **CredProx credential** | `JwtAssertion` + `Exchange: JwtBearerGrant` — the library signs a JWT assertion and posts `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` + `assertion` to the token endpoint |
 | **Sample** | None — closest verified mechanics: [E8 `samples/GitHubApp`](../../samples/GitHubApp/README.md) (same `JwtAssertion` config shape, different exchange) |
 | **Verification** | The config block is CredProx-valid (CI binds and validates it through the real startup path); the grant-type facts are cited; the token-endpoint path, expected `Audience` value, scope strings and token lifetimes remain `UNVERIFIED`. |

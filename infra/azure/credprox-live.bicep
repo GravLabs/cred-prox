@@ -1,8 +1,8 @@
 // M26 live-validation infrastructure (docs/azure-live-test-plan.md Phase 5).
-// Owner decision 2026-10-31: Bicep over Terraform; the Entra app registration
+// Decision 2026-10-31: Bicep over Terraform; the Entra app registration
 // lives OUTSIDE Bicep (tenant-wide) in scripts/live-e5-app.sh.
 // One-command apply: scripts/live-infra-apply.sh   One-command destroy: scripts/live-infra-destroy.sh
-// Carries names only - no secrets, no per-person GUIDs (the officer principal
+// Carries names only - no secrets, no human-principal GUIDs (the officer principal
 // is a parameter the apply script resolves from the signed-in az identity).
 targetScope = 'resourceGroup'
 

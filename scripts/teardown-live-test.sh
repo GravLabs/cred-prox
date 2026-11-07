@@ -63,7 +63,7 @@ else
   echo "  absent"
 fi
 
-# Class-wide net (architect 2026-11-04): the fixed list missed one-off wiring
+# Class-wide net (finding 2026-11-04): the fixed list missed one-off wiring
 # scratch (m4-*, pc-body, devicecode logs). Anything named /tmp/credprox-* is
 # test scratch by convention and goes; Markdown notes (recaps, handover
 # bodies) are kept - those are seats' durable records, not teardown's to eat.

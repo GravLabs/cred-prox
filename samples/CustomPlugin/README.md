@@ -57,6 +57,6 @@ exactly **one** login — the plugin's cache did the collapsing.
 ## What a plugin does *not* have to do
 
 Nothing about logging hygiene, cache keying, secret plumbing or 401 retry is yours to
-reimplement — the suite's point (§5.2) is that those are core behaviors your provider
+reimplement — the suite's point (§5.2) is that those are core behaviours your provider
 inherits, and the suite proves it does. The built-ins run the identical suites in
 `tests/CredProx.ConformanceTests`; there is no privileged path.

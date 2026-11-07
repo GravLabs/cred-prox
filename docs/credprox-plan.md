@@ -1,17 +1,21 @@
-# CredProx — plan for the first public release (0.3 scope)
+# CredProx — design record and milestone plan (through 0.8.2)
 
 > **CredProx**: outbound credential and policy brokering for third-party APIs, built on YARP.
 > Callers send requests without secrets. CredProx attaches the right credential, enforces the
 > right policy, and forwards the request.
 
-Status: proposal · Source POC: the YARP extensions in `CoreApi/Yarp` and `CoreApi/Domain` of
+**What this document is:** the project's design record and milestone plan — decisions and
+their reasons, milestone by milestone, from the 0.3 first release through the current
+release (0.8.2). It is a record, not user guidance; start with the README.
+
+Status: maintained through 0.8.2 · Source POC: the YARP extensions in `CoreApi/Yarp` and `CoreApi/Domain` of
 `yarp-proxy-custom-extensions` (`CoreFuncs`, `AppHost` and `ServiceDefaults` are out of scope).
 
 **Release strategy.** The earlier draft staged the work as 0.1 → 0.2 → 0.3. This plan goes
 straight to the **0.3 feature set** for the first public release: the credential core, least
 privilege and operations features, traffic shaping, more credential types, and the plugin
 architecture with vendor presets and a testing kit. The three phases are kept as internal
-milestones, each published as a preview to the Gitea package registry so the work gets used
+milestones, each published as a preview to the machine-local package registry so the work gets used
 before the public release (see §7).
 
 ---
@@ -285,9 +289,9 @@ one of the removed built-ins fails at startup with an error pointing at the matc
 
 ### 3.6 Delegated credentials: token exchange (M14 design)
 
-**Status: APPROVED by the person 2026-10-17** — all four open decisions as recommended;
+**Status: APPROVED 2026-10-17** — all four open decisions as recommended;
 one correction applied (Rfc8693 sends `subject_token`/`subject_token_type`, not `assertion`).
-Implementation is M14 (queue row `qitem-20261017220121-101ce895930d66fd`), gated behind M14a
+Implementation is M14, gated behind M14a
 (the caller allow-list fail-closed fix). §8.1 has listed this feature since the first-release
 analysis; this section is its design.
 
@@ -308,7 +312,7 @@ the `JwtAssertion` precedent (one type, wire-shape enum):
   design draft had `aud`), `requested_token_type`, `issued_token_type`, `act`. Keycloak
   and most standards-following IdPs speak this.
 
-*Removed in M27 (owner decision 2026-11-03, ADR-0002): `EntraObo`, Microsoft's
+*Removed in M27 (decision 2026-11-03, ADR-0002): `EntraObo`, Microsoft's
 on-behalf-of profile (jwt-bearer URN, `assertion`, `requested_token_use=on_behalf_of`).
 The `Mode` enum stays so existing `Mode: Rfc8693` config keeps binding; naming the
 removed mode fails loudly at startup binding. The single-vendor profile added no
@@ -338,7 +342,7 @@ minted for any other client becomes exchangeable (token confusion).
 - Missing inbound `Authorization` → `401 credprox.inbound_token_missing`; failed validation →
   `401 credprox.inbound_token_invalid` naming only the failure kind (expired / signature /
   audience / issuer) — never the token value. Neither is forwarded; neither reaches the IdP.
-- **Dependency decision (the person):** validating RS256/ES256 in core means
+- **Dependency decision:** validating RS256/ES256 in core means
   `Microsoft.IdentityModel.Protocols.OpenIdConnect` — the first non-`Microsoft.Extensions.*`
   core dependency beyond YARP (§7), and a deliberate reversal of the `JwtAssertionProvider`
   stance "deliberately not a general JWT library": *signing* a fixed claim set is small,
@@ -429,7 +433,7 @@ worsens nor claims to fix it; DPoP stays the §8.1 answer); header leakage (inbo
 forwarded, never logged); negative-cache poisoning via forged subject (validation precedes
 keying).
 
-**Open decisions for the person.**
+**Open decisions.**
 
 1. **Core dependency:** add `Microsoft.IdentityModel.Protocols.OpenIdConnect` (recommended) —
    vs host-principal trust (rejected: safe path not default) — vs hand-rolled JWKS validation
@@ -444,7 +448,7 @@ keying).
 
 ### 3.7 Per-caller budgets (M15 design)
 
-Person-approved 2026-10-17 ("add per-app limits after M14"). Today throttling is per-cluster
+Approved 2026-10-17 ("add per-app limits after M14"). Today throttling is per-cluster
 only (§3.3, `ThrottleOptions.Clusters`): one chatty app can exhaust a shared upstream for
 everyone (the E13 AI-gateway case). M15 gives each **caller** its own request budget,
 alongside — not replacing — the per-cluster limit.
@@ -512,7 +516,7 @@ reload re-binds limits; unknown key under `Limits` fails startup AND reload (M14
 increments. E13 `samples/AiGateway` gains a per-app limit block and loses its "not available
 yet" note.
 
-**Open decisions for the person.**
+**Open decisions.**
 
 1. **Window type:** fixed window (recommended — matches the existing limiter, `Retry-After`
    is exact to the window reset) — vs sliding window (smoother, ~2× memory, no exact reset
@@ -710,7 +714,7 @@ full setup is plain config in its own isolated sample.
 
 ## 7. Engineering and release
 
-- **Targets:** `net10.0` only (the person dropped .NET 8 at the M5 gate, 2026-10-14; was `net8.0;net10.0`). Core is a class library (`Microsoft.NET.Sdk`), not a web project.
+- **Targets:** `net10.0` only (.NET 8 was dropped at the M5 gate, 2026-10-14; was `net8.0;net10.0`). Core is a class library (`Microsoft.NET.Sdk`), not a web project.
 - **Dependencies (core):** `Yarp.ReverseProxy` 2.3.x, `Microsoft.Extensions.*` abstractions only.
 - **Layout:**
   ```
@@ -728,7 +732,7 @@ full setup is plain config in its own isolated sample.
   samples/                            E1–E16 (§6)
   ```
 - **Repository:** `https://github.com/GravLabs/cred-prox` is the canonical source home
-  (M25, person-approved 2026-10-29); the internal Gitea repo remains the `origin` remote
+  (M25, approved 2026-10-29); the internal repository remains the `origin` remote
   and the package-registry host for the current release line. The POC history is imported
   so the provenance is kept; the POC projects move to `poc/` in M1 and are deleted once
   E6 replaces them.
@@ -737,8 +741,8 @@ full setup is plain config in its own isolated sample.
   runner), coverage gates, offline examples. Nightly: live vendor smoke tests, load tests, Stryker.
   Linux runner is required; a Windows runner is optional (the code has no Windows-specific paths
   except certificate key-storage flags, which get a unit test on each OS when available).
-- **Packages:** previews (`0.3.0-preview.N`, one per phase) publish to the **Gitea NuGet package
-  registry** for internal use; releases publish there too (plan §9 decision 3; nuget.org
+- **Packages:** previews (`0.3.0-preview.N`, one per phase) publish to the **machine-local NuGet
+  package registry** for internal use; releases publish there too (plan §9 decision 3; nuget.org
   postponed — see PUBLISHING.md).
 - **Public source:** resolved by M25 — GitHub (`GravLabs/cred-prox`) is the public home for
   SourceLink, issues and contributions; the launch is a squashed clean-start snapshot, no
@@ -753,11 +757,11 @@ full setup is plain config in its own isolated sample.
 
 | # | Phase | Milestone | Rough effort |
 |---|---|---|---|
-| M1 | A | Repo restructure, `CredProx.Abstractions` + stage model, core skeleton, Gitea Actions CI with coverage | 1.5 days |
+| M1 | A | Repo restructure, `CredProx.Abstractions` + stage model, core skeleton, CI with coverage | 1.5 days |
 | M2 | A | Token cache + secret source (with scoping) + validation, unit tests | 1.5 days |
 | M3 | A | Credential providers (OAuth CC, LoginExchange, StaticKey, TokenCredential) + refresh-on-401, unit + integration tests | 2 days |
 | M4 | A | Destinations, connections/cert reload, client factory subclass, security property tests | 1.5 days |
-| M5 | A | Container E2E (Keycloak, nginx mTLS); examples E1–E6; **preview 1** to Gitea registry | 2.5 days |
+| M5 | A | Container E2E (Keycloak, nginx mTLS); examples E1–E6; **preview 1** to the machine-local registry | 2.5 days |
 | M6 | B | Caller API-key auth, per-caller credentials, operation allow-lists, with tests | 2.5 days |
 | M7 | B | Credential health probes, audit log + redaction + sinks, with tests; example E7; **preview 2** | 2.5 days |
 | M8 | C | Outbound throttling + resilience adapter, load tests | 2 days |
@@ -766,23 +770,23 @@ full setup is plain config in its own isolated sample.
 | M11 | — | Benchmarks, docs, security self-review, examples against packed `.nupkg`, public release `0.3.0` | 2 days |
 | M12 | — | Remove the six built-in presets (breaking, targets `0.4.0`): every vendor an isolated explicit-config sample — E6 split to `samples/ADP`, new E12 `samples/LoginExchange` — removed-preset startup error pointing at the sample | 1 day |
 | M13 | — | Example E13 `samples/AiGateway`: AI provider gateway on existing features — caller keys, `StaticKey` provider-key injection, per-caller operation allow-lists, cluster throttling, audit, SSE passthrough | 0.5 days |
-| M14a | — | Fix (person-approved 2026-10-17, from the M13 finding): the caller allow-list **fails closed on config typos** — unknown keys under `CredProx:Callers` (incl. nested allow-list entries) and `CredProx:CallerAuth` refuse startup and reload with an error naming the caller and key | 0.5 days |
+| M14a | — | Fix (approved 2026-10-17, from the M13 finding): the caller allow-list **fails closed on config typos** — unknown keys under `CredProx:Callers` (incl. nested allow-list entries) and `CredProx:CallerAuth` refuse startup and reload with an error naming the caller and key | 0.5 days |
 | M14 | — | `TokenExchange` credential type (design §3.6, signed off 2026-10-17; starts after M14a): RFC 8693 + Entra OBO modes (OBO removed in M27, ADR-0002), CredProx validates the inbound user token (signature/issuer/audience/lifetime), per-user cache key `(credential, partition + subject)`, `CredentialRequestContext` gains `InboundToken`/`CachePartition`, example E14 `samples/TokenExchange` (Keycloak), adversarial pass before close | 2.5 days |
 | M15 | — | Per-caller request budgets (design §3.7, signed off 2026-10-18): caller `Limits` block (permits per interval, optional per-cluster override), `CallerBudgetFeature` at `Stage.ApplyCallerBudget`, `429 credprox.caller_throttled` + `Retry-After`, M14a unknown-key rejection extended to `Limits`, E13 shows per-app budgets | 1 day |
-| M16 | — | Fail-closed unknown-key validation for `CredProx:Credentials` (person-approved, from the §8.6 backlog): keys the credential's options type does not declare — top level, nested blocks, preset-supplied, or a plugin type's section — refuse startup **and** reload (previous registry keeps serving) with an error naming the credential and key; allowed keys derived from the options type by reflection so plugins declare their own keys; `samples/MicrosoftGraph` variants split their credential files (null-clearing across types is now rejected) | 0.5 days |
-| M17 | — | Fail-closed unknown-key validation for the remaining sections (person-approved 2026-10-19, from the §8.6 backlog): unknown keys under `CredProx:Destinations`/`CredProx:Connections` refuse startup **and** reload (previous registry keeps serving); `CredProx:Audit`/`Health`/`Throttling`/`Resilience` and unknown keys or misspelled section names under the `CredProx` root refuse startup; typed cluster-dictionary entries validated against their options type; the M16 walker extracted into the shared `ConfigKeyValidator` | 0.5 days |
-| M18 | — | Kill switch (person-approved 2026-10-20 as the first of the approved §8 batch, §8.4): `CredProx:KillSwitch` takes clusters and callers out of service by config, live on reload — `Stage.ApplyKillSwitch` answers `503 credprox.vendor_disabled`/`credprox.caller_disabled` before any forwarding or token work, a failed rebind keeps the previous switch state, and the section itself is fail-closed (walker list rule: non-index list entries refuse startup; a blank id or a single value instead of a list too) | 0.5 days |
-| M19 | — | Consent-required signalling (person-approved 2026-10-20 as part of the §8 batch; design signed off with the person: plugin contract, 401): Abstractions gains `ConsentRequiredException(authorizeUrl, message)`; the attach feature maps it to `401 credprox.consent_required` with the `authorize_url` problem extension member (surfaced only for an absolute http(s) URL without credentials) and never forwards; refresh-on-401 keeps the upstream's own 401 when the refresh reports consent (no 500, no retry); `samples/CustomPlugin` demonstrates the plugin-side signal; the future refresh-token grant (§8.1) emits the same signal natively | 0.5 days |
-| M20 | — | Response secret scrubbing (person-approved 2026-10-20, third of the approved §8 batch after M18/M19, §8.2): any value the pipeline injected is removed if upstream reflects it back — streaming-aware byte matcher (cross-chunk, longest-first, UTF-8 safe), response headers + text-like bodies, gzip/deflate/br decoded-scrubbed-forwarded transparently, encoded form covered; default-on with global `CredProx:Scrubbing:Enabled=false` opt-out; ships as the first built-in `IResponseFeature` at the new `Stage.ShapeResponse`, dispatched end-of-pipeline pre-copy; security milestone: adversarial pass before close | 1 day |
-| M21 | — | Example E15 `samples/AgentEgress` (plan §8.3, person-approved 2026-10-20 as the fourth of the approved §8 batch): AI agent egress — an MCP-server/agent runtime holds only its own caller key; per-agent operation allow-lists are the tool boundaries; Salesforce `OAuthClientCredentials` in `FormPost` client-auth as pure config; one shared credential whose cached session token serves both agents (issuance count proves it); the M20/M22 scrubber removes the session token the stub echoes in `debug_authorization`. README carries the MCP production topology and the real-org switch | 0.5 days |
-| M22 | — | SSE event-framed scrubbing (person decision 2026-10-20, found by the E13 smoke after M20 closed): `text/event-stream` was byte-scrubbing, and the matcher's hold-back delayed every event by the longest secret's look-ahead — breaking E13's shipped streaming guarantee. Events now flush as each completes, with exact within-event matching; a secret split across an event boundary is the documented residue; unterminated events past the 64 KiB cap degrade to byte-stream hold-back semantics (memory bounded, no leak). E13 expectations updated: the stub's echoed key now arrives `[redacted]` (the stub's own 200-vs-401 check proves injection happened). Matcher core extracted as the shared `SecretScrubber` primitive — one audited implementation behind both framings | 0.5 days |
-| M23 | — | Session-cookie login (§8.1, person-selected 2026-10-20 for 0.7: "a generic version of the original cayuse example"): `LoginExchangeOptions` gains `Location` (`Header` default, or `Cookie`) and `Name` (cookie mode defaults the name to `ResponseField`); cookie placement replaces the entire `Cookie` header — never merges, so caller cookies never travel to the vendor — with value guards (`;`/CR/LF/NUL refused) and fail-closed startup rules (cookie must be named, `Query` placement and `AttachPrefix` refused for this type); extraction and placement stay independent (`Location: Cookie` with any `Response` mode); cache, refresh-on-401, scrubbing and audit apply unchanged. Example E16 `samples/SessionCookie`: the generic Cayuse-shaped vendor — form login → `Set-Cookie`, `X-API-Env` strict allow-list closing the F6 host-swap bug class, per-environment accounts and secrets, transparent refresh through server-side expiry, scrubbed `debug_cookie` echo | 1 day |
-| M24 | — | Vendor error normalisation (§8.5, person-approved 2026-10-20 as the second of the 0.7 pair, security milestone): a vendor's `4xx`/`5xx` text-like error body becomes a uniform RFC 7807 `application/problem+json` document, default-on — status preserved verbatim, the vendor's payload lossless as the `vendor_detail` extension member (parsed JSON when it parses, raw text otherwise) beside `vendor_content_type` under `extensions.code: credprox.vendor_error`; `type` identifies the origin (`urn:credprox:errors:vendor` for rewrites; proxy-produced problems now carry `urn:credprox:errors:proxy`). Runs strictly on already-scrubbed bytes: registered after the §8.2 scrubber in the same `Stage.ShapeResponse`, an ordering the pipeline's stable sort makes structural, not conventional. Cap `CredProx:Errors:MaxNormalisedBodyBytes` (default 8192, positive enforced) bounds the buffered compressed bytes and the decoded form (a gzip bomb cannot decode past it into the document); over-cap, `HEAD`, `text/event-stream`, non-text/unknown content, declared charsets outside UTF-8/US-ASCII (review F1 — never re-encoded into the embed) and undecodable/chained encodings pass through **byte-identical, never truncated** (buffered prefix + unread remainder — the zero-length probe a copy loop opens with consumes no state). Opt-outs: `CredProx:Errors:Enabled=false` globally, route metadata `"CredProx.ErrorNormalisation": "off"` per route (case-insensitive, near-misses normalise). `CredProx:Errors` joins the fail-closed unknown-key topology. E16 extended: normalised vendor 404 on `/crm/...`, byte-as-written on the opted-out `/crm-raw/...`; ride-alongs: N2 cookie-value hardening (above-ASCII refused — headers travel Latin-1) and the PUBLISHING.md `http-cache --clear` runbook line. Adversarial pass before close | 1 day |
-| M25 | — | GitHub public pivot (person-approved 2026-10-29): the source home becomes `https://github.com/GravLabs/cred-prox` — package metadata, SourceLink and every live link repointed; the PackageValidation baseline moves from LAN-feed restore to the published bytes committed under `build/baselines` (ADR-0001), so validation runs identically here and on a GitHub-hosted runner; `.gitea/` becomes `.github/` with real GitHub Actions workflows; the tracked tree is scrubbed of live internal endpoints and machine-local config. The package registry is unchanged (nuget.org still deferred); no public API change, no version bump | 0.5 days |
-| M26 | — | Live Azure/Entra validation (person-approved 2026-10-30; the plan is `docs/azure-live-test-plan.md`; **executed 2026-11-04**, evidence `docs/live-validation-report.md`): every Microsoft/Azure path proven against the person's **production tenant** instead of fakes — secretless `DefaultAzureCredential` through CredProx against real ARM (P1), Entra client-credentials with scrub assertions against live 401→502 error bodies (P2), Key Vault as the **only** live secret source with rotation-by-overwrite and version-pipe recovery (P4), and one-command Bicep infra apply/destroy proven by a destroy→apply→re-run cycle with paired app-lifecycle scripts (P5, owner design 2026-10-31). Phase 3's OBO/inbound-token set was **dropped by the owner 2026-11-03** (M27, ADR-0002); live-issuer issuance attribution therefore stays fake-level. Consent-free by design (Azure RBAC, no admin consent), one tagged resource group + one `credprox-*` app registration, scripted teardown (role-grant-before-SP; vault purge with read-back), person-present gate on every tenant mutation, local execution only — deliberately no real-tenant credential in public-repo CI secrets. Delivered `src/` delta: zero (the env-override fix was sample-side, disclosed as a finding). Security milestone: adversarial pass done before close — argv scratch-handling defects found and fixed, disclosures in the report | 1 day |
-| M27 | — | Entra on-behalf-of removal (owner decision 2026-11-03, ADR-0002): `TokenExchangeMode.EntraObo` and the jwt-bearer form branch leave the library; `TokenExchange` keeps RFC 8693 as its only wire shape and the single-member `Mode` enum so existing config binds unchanged; a config naming the removed mode fails loudly at startup binding (test-pinned); scoped APICompat suppression cites the ADR; E14 sample (Rfc8693) and all other Azure features untouched | 0.5 days |
-| M28 | — | Vendor config snippets (docs) (owner-approved 2026-11-04, the §8.6 pick; owner scope words: "skip rate limiting" — no throttling work, idempotency never wanted): `docs/vendors/` pages for ADP, Workday, Salesforce, ServiceNow, GitHub Apps (+ Microsoft Graph and Spotify, cheap from existing samples) — one complete `CredProx:` block per page using `secret:` references only, with auth model, required secret names, scopes and gotchas; every block is extracted by a test and bound + validated through the real fail-closed startup path (a misspelled key fails CI); vendor facts sample-traceable ("verified in sample EX"), cited to public vendor docs, or marked `UNVERIFIED:` — no guessed endpoints presented as fact; README Vendors index, CHANGELOG entry; no `src/` change | 0.5 days |
-| M29 | — | Live Azure validation round 2 (owner-approved 2026-11-04; **executed 2026-11-06** under the owner's go with the AME-region correction, evidence `docs/live-validation-report.md` Round 2 + row `qitem-20261105181334-35b50e6f151bebc7`): CredProx hosted **inside** Azure Container Apps (internal-only ingress, caller keys everywhere) under a **real user-assigned managed identity** — P5–P10 PASS on direct battery logs three times, incl. a full material+infra recreate cycle; Key Vault **PEM/PFX material** (not just secrets) drives the JWT-assertion, HMAC and mutual-TLS paths with pinned independent verifiers (P6–P8); P10 rotation witness on the **2-minute stub** per architect ruling B+C (code default 59 unchanged; staleness bound is token lifetime × RefreshFraction, not ReloadInterval — documented library-wide); zero `src/` delta — the 17 fixes live in sample code and the live scripts; scripted teardown polled to read-backs, tenant verified empty; no throttling scope (owner); adversarial pass scheduled (dev-review) | 1 day |
+| M16 | — | Fail-closed unknown-key validation for `CredProx:Credentials` (approved, from the §8.6 backlog): keys the credential's options type does not declare — top level, nested blocks, preset-supplied, or a plugin type's section — refuse startup **and** reload (previous registry keeps serving) with an error naming the credential and key; allowed keys derived from the options type by reflection so plugins declare their own keys; `samples/MicrosoftGraph` variants split their credential files (null-clearing across types is now rejected) | 0.5 days |
+| M17 | — | Fail-closed unknown-key validation for the remaining sections (approved 2026-10-19, from the §8.6 backlog): unknown keys under `CredProx:Destinations`/`CredProx:Connections` refuse startup **and** reload (previous registry keeps serving); `CredProx:Audit`/`Health`/`Throttling`/`Resilience` and unknown keys or misspelled section names under the `CredProx` root refuse startup; typed cluster-dictionary entries validated against their options type; the M16 walker extracted into the shared `ConfigKeyValidator` | 0.5 days |
+| M18 | — | Kill switch (approved 2026-10-20 as the first of the approved §8 batch, §8.4): `CredProx:KillSwitch` takes clusters and callers out of service by config, live on reload — `Stage.ApplyKillSwitch` answers `503 credprox.vendor_disabled`/`credprox.caller_disabled` before any forwarding or token work, a failed rebind keeps the previous switch state, and the section itself is fail-closed (walker list rule: non-index list entries refuse startup; a blank id or a single value instead of a list too) | 0.5 days |
+| M19 | — | Consent-required signalling (approved 2026-10-20 as part of the §8 batch; design signed off: plugin contract, 401): Abstractions gains `ConsentRequiredException(authorizeUrl, message)`; the attach feature maps it to `401 credprox.consent_required` with the `authorize_url` problem extension member (surfaced only for an absolute http(s) URL without credentials) and never forwards; refresh-on-401 keeps the upstream's own 401 when the refresh reports consent (no 500, no retry); `samples/CustomPlugin` demonstrates the plugin-side signal; the future refresh-token grant (§8.1) emits the same signal natively | 0.5 days |
+| M20 | — | Response secret scrubbing (approved 2026-10-20, third of the approved §8 batch after M18/M19, §8.2): any value the pipeline injected is removed if upstream reflects it back — streaming-aware byte matcher (cross-chunk, longest-first, UTF-8 safe), response headers + text-like bodies, gzip/deflate/br decoded-scrubbed-forwarded transparently, encoded form covered; default-on with global `CredProx:Scrubbing:Enabled=false` opt-out; ships as the first built-in `IResponseFeature` at the new `Stage.ShapeResponse`, dispatched end-of-pipeline pre-copy; security milestone: adversarial pass before close | 1 day |
+| M21 | — | Example E15 `samples/AgentEgress` (plan §8.3, approved 2026-10-20 as the fourth of the approved §8 batch): AI agent egress — an MCP-server/agent runtime holds only its own caller key; per-agent operation allow-lists are the tool boundaries; Salesforce `OAuthClientCredentials` in `FormPost` client-auth as pure config; one shared credential whose cached session token serves both agents (issuance count proves it); the M20/M22 scrubber removes the session token the stub echoes in `debug_authorization`. README carries the MCP production topology and the real-org switch | 0.5 days |
+| M22 | — | SSE event-framed scrubbing (decided 2026-10-20, found by the E13 smoke after M20 closed): `text/event-stream` was byte-scrubbing, and the matcher's hold-back delayed every event by the longest secret's look-ahead — breaking E13's shipped streaming guarantee. Events now flush as each completes, with exact within-event matching; a secret split across an event boundary is the documented residue; unterminated events past the 64 KiB cap degrade to byte-stream hold-back semantics (memory bounded, no leak). E13 expectations updated: the stub's echoed key now arrives `[redacted]` (the stub's own 200-vs-401 check proves injection happened). Matcher core extracted as the shared `SecretScrubber` primitive — one audited implementation behind both framings | 0.5 days |
+| M23 | — | Session-cookie login (§8.1, selected 2026-10-20 for 0.7: "a generic version of the original cayuse example"): `LoginExchangeOptions` gains `Location` (`Header` default, or `Cookie`) and `Name` (cookie mode defaults the name to `ResponseField`); cookie placement replaces the entire `Cookie` header — never merges, so caller cookies never travel to the vendor — with value guards (`;`/CR/LF/NUL refused) and fail-closed startup rules (cookie must be named, `Query` placement and `AttachPrefix` refused for this type); extraction and placement stay independent (`Location: Cookie` with any `Response` mode); cache, refresh-on-401, scrubbing and audit apply unchanged. Example E16 `samples/SessionCookie`: the generic Cayuse-shaped vendor — form login → `Set-Cookie`, `X-API-Env` strict allow-list closing the F6 host-swap bug class, per-environment accounts and secrets, transparent refresh through server-side expiry, scrubbed `debug_cookie` echo | 1 day |
+| M24 | — | Vendor error normalisation (§8.5, approved 2026-10-20 as the second of the 0.7 pair, security milestone): a vendor's `4xx`/`5xx` text-like error body becomes a uniform RFC 7807 `application/problem+json` document, default-on — status preserved verbatim, the vendor's payload lossless as the `vendor_detail` extension member (parsed JSON when it parses, raw text otherwise) beside `vendor_content_type` under `extensions.code: credprox.vendor_error`; `type` identifies the origin (`urn:credprox:errors:vendor` for rewrites; proxy-produced problems now carry `urn:credprox:errors:proxy`). Runs strictly on already-scrubbed bytes: registered after the §8.2 scrubber in the same `Stage.ShapeResponse`, an ordering the pipeline's stable sort makes structural, not conventional. Cap `CredProx:Errors:MaxNormalisedBodyBytes` (default 8192, positive enforced) bounds the buffered compressed bytes and the decoded form (a gzip bomb cannot decode past it into the document); over-cap, `HEAD`, `text/event-stream`, non-text/unknown content, declared charsets outside UTF-8/US-ASCII (review F1 — never re-encoded into the embed) and undecodable/chained encodings pass through **byte-identical, never truncated** (buffered prefix + unread remainder — the zero-length probe a copy loop opens with consumes no state). Opt-outs: `CredProx:Errors:Enabled=false` globally, route metadata `"CredProx.ErrorNormalisation": "off"` per route (case-insensitive, near-misses normalise). `CredProx:Errors` joins the fail-closed unknown-key topology. E16 extended: normalised vendor 404 on `/crm/...`, byte-as-written on the opted-out `/crm-raw/...`; ride-alongs: N2 cookie-value hardening (above-ASCII refused — headers travel Latin-1) and the PUBLISHING.md `http-cache --clear` runbook line. Adversarial pass before close | 1 day |
+| M25 | — | GitHub public pivot (approved 2026-10-29): the source home becomes `https://github.com/GravLabs/cred-prox` — package metadata, SourceLink and every live link repointed; the PackageValidation baseline moves from LAN-feed restore to the published bytes committed under `build/baselines` (ADR-0001), so validation runs identically here and on a GitHub-hosted runner; the CI workflow tree becomes `.github/` with real GitHub Actions workflows; the tracked tree is scrubbed of live internal endpoints and machine-local config. The package registry is unchanged (nuget.org still deferred); no public API change, no version bump | 0.5 days |
+| M26 | — | Live Azure/Entra validation (approved 2026-10-30; the plan is `docs/azure-live-test-plan.md`; **executed 2026-11-04**, evidence `docs/live-validation-report.md`): every Microsoft/Azure path proven against the maintainer's **production tenant** instead of fakes — secretless `DefaultAzureCredential` through CredProx against real ARM (P1), Entra client-credentials with scrub assertions against live 401→502 error bodies (P2), Key Vault as the **only** live secret source with rotation-by-overwrite and version-pipe recovery (P4), and one-command Bicep infra apply/destroy proven by a destroy→apply→re-run cycle with paired app-lifecycle scripts (P5, design 2026-10-31). Phase 3's OBO/inbound-token set was **dropped 2026-11-03** (M27, ADR-0002); live-issuer issuance attribution therefore stays fake-level. Consent-free by design (Azure RBAC, no admin consent), one tagged resource group + one `credprox-*` app registration, scripted teardown (role-grant-before-SP; vault purge with read-back), maintainer-present gate on every tenant mutation, local execution only — deliberately no real-tenant credential in public-repo CI secrets. Delivered `src/` delta: zero (the env-override fix was sample-side, disclosed as a finding). Security milestone: adversarial pass done before close — argv scratch-handling defects found and fixed, disclosures in the report | 1 day |
+| M27 | — | Entra on-behalf-of removal (decision 2026-11-03, ADR-0002): `TokenExchangeMode.EntraObo` and the jwt-bearer form branch leave the library; `TokenExchange` keeps RFC 8693 as its only wire shape and the single-member `Mode` enum so existing config binds unchanged; a config naming the removed mode fails loudly at startup binding (test-pinned); scoped APICompat suppression cites the ADR; E14 sample (Rfc8693) and all other Azure features untouched | 0.5 days |
+| M28 | — | Vendor config snippets (docs) (approved 2026-11-04, the §8.6 pick; scope: no throttling work, idempotency never wanted): `docs/vendors/` pages for ADP, Workday, Salesforce, ServiceNow, GitHub Apps (+ Microsoft Graph and Spotify, cheap from existing samples) — one complete `CredProx:` block per page using `secret:` references only, with auth model, required secret names, scopes and gotchas; every block is extracted by a test and bound + validated through the real fail-closed startup path (a misspelled key fails CI); vendor facts sample-traceable ("verified in sample EX"), cited to public vendor docs, or marked `UNVERIFIED:` — no guessed endpoints presented as fact; README Vendors index, CHANGELOG entry; no `src/` change | 0.5 days |
+| M29 | — | Live Azure validation round 2 (approved 2026-11-04; **executed 2026-11-06** with the AME-region correction, evidence `docs/live-validation-report.md` Round 2): CredProx hosted **inside** Azure Container Apps (internal-only ingress, caller keys everywhere) under a **real user-assigned managed identity** — P5–P10 PASS on direct battery logs three times, incl. a full material+infra recreate cycle; Key Vault **PEM/PFX material** (not just secrets) drives the JWT-assertion, HMAC and mutual-TLS paths with pinned independent verifiers (P6–P8); P10 rotation witness on the **2-minute stub** per ruling B+C (code default 59 unchanged; staleness bound is token lifetime × RefreshFraction, not ReloadInterval — documented library-wide); zero `src/` delta — the 17 fixes live in sample code and the live scripts; scripted teardown polled to read-backs, tenant verified empty; no throttling scope; adversarial pass scheduled | 1 day |
 
 Total: about **23–25 focused days (roughly five weeks)**. About half of that is tests, examples
 and documentation. Each preview is usable on its own, so going straight to the 0.3 scope does not
@@ -842,7 +846,7 @@ make this explicit:
 |---|---|---|---|---|
 | Outbound throttling | **Done (M8, 0.3.0)** — per-cluster rate/concurrency limiter (`System.Threading.RateLimiting`), honours `Retry-After` and 429, queues briefly instead of failing | High | M | Pipeline |
 | Resilience adapter **(in 0.3)** | Retry (idempotent only), timeout, circuit breaker via `Microsoft.Extensions.Http.Resilience` | Medium | S | Pipeline |
-| Idempotency keys | Inject `Idempotency-Key` on POST so retries are safe where vendors support it — **open, unscheduled** (owner 2026-11-04: not wanted; the 2026-11-04 idempotency brief was withdrawn before design and superseded by M28) | Low–Med | S | Request |
+| Idempotency keys | Inject `Idempotency-Key` on POST so retries are safe where vendors support it — **open, unscheduled** (decided 2026-11-04: not wanted; the 2026-11-04 idempotency brief was withdrawn before design and superseded by M28) | Low–Med | S | Request |
 | Kill switch **(M18)** | **Done** — `CredProx:KillSwitch` `Clusters`/`Callers` id lists, enforced at the new `Stage.ApplyKillSwitch` with `503 credprox.vendor_disabled` / `credprox.caller_disabled`; live on config reload, failed rebind keeps the previous switch state, section fail-closed like the rest | Medium | S | Request |
 
 ### 8.5 Observability, audit and operations
@@ -864,8 +868,8 @@ make this explicit:
 | `dotnet new credprox` template | Minimal host + sample config | Medium | S |
 | Fail-closed unknown-key validation for the remaining sections | **Done** — M14a (`CredProx:Callers`/`CallerAuth`), M16 (`CredProx:Credentials`, allowed keys = the options properties by reflection, preset layering included, plugins covered), M17 (`CredProx:Destinations`/`Connections` startup + reload; `Audit`/`Health`/`Throttling`/`Resilience` startup; the `CredProx` root rejects unknown keys and misspelled section names). Shared `ConfigKeyValidator`; every `CredProx:` key is now validated somewhere | Medium | S |
 | Aspire integration | `AddCredProx()` resource for .NET Aspire AppHost | Low–Med | S |
-| Graph admin-consent live variants | E5 real-tenant runs scoped to `graph.microsoft.com` (app-permission variants needing admin consent). Parked out of M26 (2026-10-30): the milestone is strictly the consent-free set — Azure RBAC targets need no tenant consent policy cooperation; revisit if the person can self-consent | Low | S |
-| Baseline rotation to published `0.8.0` bytes | **Done** at 0.8.1 (2026-11-04, owner full-scrub decision): `PackageValidationBaselineVersion` → `0.8.0`, `build/baselines/` replaced with the four registry-served `0.8.0` nupkgs (ADR-0001; the `0.7.1` generation subsumed, reasons in ADR-0001). Dropped the legacy internal URL from the current tree (was the `0.7.0` nuspecs' `RepositoryUrl`) | Medium | S |
+| Graph admin-consent live variants | E5 real-tenant runs scoped to `graph.microsoft.com` (app-permission variants needing admin consent). Parked out of M26 (2026-10-30): the milestone is strictly the consent-free set — Azure RBAC targets need no tenant consent policy cooperation; revisit if self-consent is possible | Low | S |
+| Baseline rotation to published `0.8.0` bytes | **Done** at 0.8.1 (2026-11-04, full-scrub decision): `PackageValidationBaselineVersion` → `0.8.0`, `build/baselines/` replaced with the four registry-served `0.8.0` nupkgs (ADR-0001; the `0.7.1` generation subsumed, reasons in ADR-0001). Dropped the legacy internal URL from the current tree (was the `0.7.0` nuspecs' `RepositoryUrl`) | Medium | S |
 
 ### 8.7 Inbound-direction twin (optional)
 
@@ -875,8 +879,8 @@ make this explicit:
 
 ### Suggested roadmap
 
-Shipped releases drifted from the original theme buckets (each release took whatever
-the person approved next), so the table records what actually shipped plus the forward
+Shipped releases drifted from the original theme buckets (each release took what was
+approved next), so the table records what actually shipped plus the forward
 plan; §7 milestone rows stay the detailed record.
 
 | Version | Theme | Contents |
@@ -885,7 +889,8 @@ plan; §7 milestone rows stay the detailed record.
 | 0.4 | Presets removal | Built-in presets removed (breaking): every vendor an isolated explicit-config sample (M12); E13 AiGateway |
 | 0.5 | Delegated | `TokenExchange` (M14/M14a), per-caller budgets (M15), `CredProx:Credentials` unknown-key fail-closed (M16); E14 TokenExchange |
 | 0.6 | Least-privilege & agent batch | Remaining sections unknown-key fail-closed (M17), kill switch (M18), consent-required signalling (M19), response secret scrubbing incl. SSE event framing (M20/M22); E15 AgentEgress (M21) |
-| 0.7 (next) | Vendor shapes | Session-cookie login with a generic successor to the original Cayuse demo (person-selected 2026-10-20; M23, E16 SessionCookie), vendor error normalisation with lossless `vendor_detail` embed and per-route opt-out (M24, §8.5) |
+| 0.7 | Vendor shapes | Session-cookie login with a generic successor to the original Cayuse demo (selected 2026-10-20; M23, E16 SessionCookie), vendor error normalisation with lossless `vendor_detail` embed and per-route opt-out (M24, §8.5) |
+| 0.8 | Public line | Entra on-behalf-of removal (M27, breaking — CHANGELOG is the contract), GitHub clean-start pivot (M25), live Azure validation M26 + round 2 M29 (evidence `docs/live-validation-report.md`), vendor config snippets (M28); 0.8.0–0.8.2 |
 | later | Breadth | `CredProx.Aws` (SigV4), refresh-token grant, placeholder substitution, admin endpoint, metering, idempotency keys, community preset pack |
 | 1.0 | Stable API | `[Experimental]` removed from plugin contract, package validation baseline locked, docs site, external security review |
 
@@ -901,26 +906,26 @@ plan; §7 milestone rows stay the detailed record.
 - **Distributed token cache.** In-memory is fine per instance. Scale-out users may want a shared
   cache. Keep `ITokenCache` an interface and do not build a shared one yet.
 - **Larger first release.** Going straight to the 0.3 scope delays outside feedback by about five
-  weeks. Mitigation: the three phase previews on the Gitea registry, used by the HR integrations
+  weeks. Mitigation: the three phase previews on the machine-local registry, used by the HR integrations
   (E6) from preview 1 onward.
 - **Plugin contract churn.** Opening the plugin API in the first release invites dependents before
   the contract is proven. Mitigation: `[Experimental]` until 1.0, and dogfooding every built-in.
 - **CI capacity.** Container E2E and load tests need Docker on the runner (GitHub's
   ubuntu runners have it); nightly vendor smoke tests need vendor secrets stored as
   repository secrets.
-- **Open decisions — all settled by the person on 2026-10-15 (M11 kickoff):**
+- **Open decisions — all settled 2026-10-15 (M11 kickoff):**
   1. Credential failure status: **`502`**, as §3.4 already says. No code change.
-  2. Public source host: **Gitea** (this instance). SourceLink and package repository URLs
-     point at Gitea; a GitHub push comes later, outside M11.
+  2. Public source host: the internal repository, with a GitHub push planned later.
      **Amended 2026-10-29 (M25): the source home is GitHub
      (`https://github.com/GravLabs/cred-prox`)** — package metadata, SourceLink and live
      links point there; the launch is a squashed clean-start snapshot (no full history);
-     the internal Gitea repo stays the `origin` remote and the registry host.
-  3. nuget.org: **postponed**. `0.3.0` publishes to the Gitea NuGet registry only.
+     the internal repository stays the `origin` remote and the registry host.
+  3. nuget.org: **postponed**. `0.3.0` publishes to the machine-local NuGet registry only
+     (see PUBLISHING.md).
      **Unchanged by M25:** the registry scope stays as-is (machine-local feed per
      PUBLISHING.md); nuget.org remains postponed.
   4. Version: **`0.3.0`**.
-  5. The GitHub `yarp-proxy-custom-extensions` repo: the person will **decommission** it;
+  5. The GitHub `yarp-proxy-custom-extensions` repo: scheduled for **decommissioning**;
      not part of M11.
 
 ---

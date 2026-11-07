@@ -1,9 +1,13 @@
 # Security self-review — 0.3.0 release (M11)
 
-Builder's pass over CredProx's security boundaries for the first public release, per
+A review of CredProx's security boundaries for the first public release, per
 plan §9. Each boundary: the promise, where it is implemented, what pins it, and what
-residual risk remains. The independent adversarial pass (dev-review) is recorded on the
-M11 queue row; this document is the input to it, not a substitute.
+residual risk remains. The independent adversarial review is recorded in M11; this
+document is the input to it, not a substitute.
+
+**What this document is:** the 0.3.0 release security review record — a historical
+document describing the boundaries as shipped at 0.3.0, not user guidance and not a
+statement about the current public surface.
 
 Test-project shorthand: **UT** = `tests/CredProx.Tests`, **ST** =
 `tests/CredProx.SecurityTests`, **CT** = `tests/CredProx.ConformanceTests`, **E2E** =
@@ -67,7 +71,7 @@ rotation is config-level (add, retire).
 ## 4. Destination allow-lists
 
 **Promise.** A templated destination cannot be steered outside its declared allow-list —
-including via percent-encoding, case tricks, or path/host normalization surprises.
+including via percent-encoding, case tricks, or path/host normalisation surprises.
 
 **Implementation.** `Destinations/PartitionSourceBinding.cs` (admission before
 expansion), `DestinationRegistry.cs` (`ResolvePrefix` runs only on admitted values),
@@ -77,7 +81,7 @@ expansion), `DestinationRegistry.cs` (`ResolvePrefix` runs only on admitted valu
 binder/registry suites, E2E, sample E6 smoke (blocked partition).
 
 **Residual.** Kestrel vs TestServer decoding differences are documented in project
-memory and covered by tests (`%2F` survives Kestrel decoding, `%2e` normalizes) — but a
+memory and covered by tests (`%2F` survives Kestrel decoding, `%2e` normalises) — but a
 fronting proxy that re-decodes differently is deployment surface.
 
 ## 5. Header hygiene
@@ -144,9 +148,9 @@ mutation-probed (M10 F1).
 - **No committed secrets.** `git grep` for AWS/GitHub/SSH-key/JWT shapes over tracked
   files: clean. Samples use placeholders, user-secrets or env vars and fail with a
   message naming the missing value (§6 quality bar).
-- **Package contents.** 0.3.0 packs verified: README, internal-Gitea
+- **Package contents.** 0.3.0 packs verified: README, internal-repository
   `repository`/`projectUrl` metadata, SourceLink in the snupkg PDB pointing at the
-  internal Gitea instance's raw-commit URL form (`…/raw/commit/<sha>/*`), symbols,
+  internal repository's raw-commit URL form (`…/raw/commit/<sha>/*`), symbols,
   deterministic build, `EnablePackageValidation`. (M25 moved all package metadata and
   SourceLink to GitHub; the pre-M25 published packages keep their historical URLs.)
 - **Publish from CI, or pack with CI path mapping.** Plain local packs embed the
@@ -154,9 +158,9 @@ mutation-probed (M10 F1).
   maps it to `/_/`. Publish the CI artifact, or pack locally with
   `-p:ContinuousIntegrationBuild=true` — the runbook ([`/PUBLISHING.md`](../PUBLISHING.md))
   states the steps and the pre-push symbol assertion.
-- **Gitea web reachability (historical, pre-M25).** During M11 the baked metadata
-  carried the wrong port, which refused connections; the person confirmed the correct
-  internal Gitea instance URL on 2026-10-16 and it answered from the dev machine, and
+- **Internal source-host reachability (historical, pre-M25).** During M11 the baked metadata
+  carried the wrong port, which refused connections; the maintainer confirmed the correct
+  internal repository URL on 2026-10-16 and it answered from the dev machine, and
   the baked URLs were corrected to it. The lesson — baked package URLs must point at a
   live endpoint or every consumer's source links break — carried into the M25 move to
   GitHub, whose reachability CI asserts.

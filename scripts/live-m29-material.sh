@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # M29 R2.2 vault material for the round-2 live test: create | destroy.
-# Writes ONLY into credprox-m29-kv (vault data plane - owner-word gated step).
+# Writes ONLY into credprox-m29-kv (vault data plane - maintainer-approved gated step).
 # Secret hygiene (M26 Phase-4 discipline): values are generated in a scratch
 # dir that a trap removes, uploaded via `--file` (never argv, never printed);
 # evidence lines carry secret NAMES only.
@@ -53,7 +53,7 @@ LEGACY_FLAT_NAMES=(CredProx--jwt-public CredProx--mtls-ca
        CredProx--mtls-ca-b64 CredProx--caller-key-hash)
 
 [[ "$(az account get-access-token -o none 2>/dev/null; echo $?)" == 0 ]] \
-  || { echo "az sign-in required (person-present)"; exit 1; }
+  || { echo "az sign-in required (run manually)"; exit 1; }
 az keyvault show -n "$VAULT" -g "$RG" -o none 2>/dev/null \
   || { echo "vault $VAULT absent - run scripts/live-infra-apply-r2.sh first"; exit 1; }
 

@@ -88,7 +88,7 @@ itself is exercised end to end by `samples/MutualTls` and the nginx mTLS E2E tes
 cd samples/ADP && ./smoke.sh
 ```
 
-Checks the behavior above and prints `SMOKE OK`.
+Checks the behaviour above and prints `SMOKE OK`.
 
 ## What just happened
 

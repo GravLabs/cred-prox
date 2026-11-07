@@ -94,7 +94,7 @@ vendor that wants `Authorization: Bearer <session>` instead of the bare token, s
 cd samples/LoginExchange && ./smoke.sh
 ```
 
-Checks all three behaviors above and prints `SMOKE OK`.
+Checks all three behaviours above and prints `SMOKE OK`.
 
 ## What just happened
 

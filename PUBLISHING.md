@@ -1,7 +1,7 @@
 # Publishing CredProx
 
 The release runbook. **Publishing is deliberately not automated**: no CI job pushes
-packages, and pushing a tag does not publish anything. The person approves each publish
+packages, and pushing a tag does not publish anything. The maintainer approves each publish
 (plan §9 decision 3: the CredProx NuGet registry only; nuget.org postponed).
 
 **Two homes since M25.** `https://github.com/GravLabs/cred-prox` is the canonical source
@@ -11,26 +11,29 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-04): `0.8.1` is **published on the registry** — same code and
-API as `0.8.0`, repacked from the **rewritten public history** (owner decisions
-2026-11-04: full scrub of an internal hostname found in public metadata and prose,
-ship `0.8.1`, GitHub noreply authoring). The rewrite is done and pushed: GitHub `main`
-and tag `0.8.1` peel to `48140d51` (tree identical to the internal release commit
-`78a65ad`), tags `0.7.0`/`0.7.1`/`0.8.0` re-pointed to their scrubbed commits, CI green
-(Actions run 41903045364). `0.8.1` shipped end to end: packed once from that tip, all
-eight pushes `201`, consumer restore byte-identical, QuickStart smoke green —
-source links resolve to the publicly resident `48140d51`. `0.8.0` also shipped end to
-end but its mirror commit `2d036703` is no longer on any branch or tag, so its source
-links resolve only while GitHub retains the unreferenced commit (no support purge was
-requested) — `0.8.1`, whose links resolve to the publicly referenced `48140d51`, is the
-supported version (see the `0.8.0` history entry). Both releases ship
-the Entra on-behalf-of removal — **breaking** for `Mode: EntraObo` users; the CHANGELOG
-entry is the consumer contract. Both `0.7.1` known issues stay resolved under the same
-ceremony (F1: CI-path-mapped PDBs; F2: packed from a publicly resident commit); the
-`0.7.0`/`0.7.1` published packages keep their historical metadata (immutable). The
-baseline rotation skipped at `0.8.0` (Rules addendum + ADR-0001) **ran with `0.8.1`**,
-and the next rotation **ran with the `0.8.2` prep**: `build/baselines/` now holds the
-published `0.8.1` bytes (sha256-verified; ADR-0001).
+Current state (2026-11-07): `0.8.2` is **published on the registry** — library code
+**identical to `0.8.1`** (the only in-package content change is the AzureKeyVault
+README docs); it ships via the tree the M28 vendor config snippets, the M29 Azure
+live round-2 tooling, sample and validation report, and the Azure Container Apps
+sample. The public line is now **collapsed** (decided 2026-11-05): GitHub
+`main` and tag `0.8.2` sit on **one root commit**
+`4f663ac90d14dfbd048a008b9379ebd88a592dcd` (noreply author; tree identical to the
+internal release commit `ec79b35`); tags `0.7.0`/`0.7.1`/`0.8.0`/`0.8.1` were deleted
+from the public repo and `main` moved with `--force-with-lease`. CI green on the
+collapsed commit (Actions run 42320666021). `0.8.2` shipped end to end: packed once
+from the collapsed public commit, all eight package PUTs accepted with each package
+exactly once, consumer restore byte-identical, QuickStart smoke green on the
+downloaded bytes — its source links resolve to the publicly referenced root commit.
+Source links for `0.8.1` and earlier point at commits that are off every branch and
+tag; they resolve only while GitHub retains the unreferenced objects (no support
+purge was requested) — **unsupported-by-construction** (see the `0.8.1` history
+entry). `0.8.2` is the supported version. The Entra on-behalf-of removal shipped at
+`0.8.0` stays **breaking** for `Mode: EntraObo` users; the CHANGELOG entry remains
+the consumer contract. The `0.7.1` known issues stay resolved (F1: CI-path-mapped
+PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1` published
+packages keep their historical metadata (immutable). The baseline rotation **ran
+with the `0.8.2` prep**: `build/baselines/` holds the published `0.8.1` bytes
+(sha256-verified; ADR-0001); the next rotation runs at `0.8.3` per the rule below.
 
 ## What gets published
 
@@ -52,7 +55,7 @@ Feed: the `credprox` source from machine-local NuGet config (anonymous download 
 3. **A publishing API key** for the registry account, kept in the user-level NuGet
    config keyed by the `credprox` source name. Keep it out of the repo.
 4. **The release tag exists**: `git tag <version> <release-commit>` — pushing the tag
-   needs the person's explicit OK, like any push.
+   needs the maintainer's explicit OK, like any push.
 5. **The baseline folder is current**: `build/baselines/` holds the *previously
    published* version's four nupkgs (see Rules and ADR-0001).
 
@@ -134,7 +137,7 @@ dotnet nuget locals http-cache --clear
   forward. (Locally, repacking the same version needs the NuGet global-cache folder for
   that version evicted first, or samples silently run the old extraction.)
 - **GitHub is a release mirror, not a history archive** (precedent set at `0.7.1`,
-  2026-10-31; **history collapsed at `0.8.2`** per owner decisions 2026-11-05: "squash
+  2026-10-31; **history collapsed at `0.8.2`** per the decisions of 2026-11-05: "squash
   the github commits during the next push", "delete the tags"): with `0.8.2` the public
   line becomes **one commit with no parent**, built from the sanitized release tree;
   tags `0.7.0`/`0.7.1`/`0.8.0`/`0.8.1` are deleted from the public and `main` moves
@@ -178,11 +181,45 @@ dotnet nuget locals http-cache --clear
 
 ## Release history
 
+- `0.8.2` (GitHub `4f663ac90d14dfbd048a008b9379ebd88a592dcd`, internal release commit
+  `ec79b35`): published 2026-11-07 — **library code unchanged from `0.8.1`** (the only
+  in-package content change is the AzureKeyVault README docs); ships via the tree the
+  M28 vendor config snippets, the M29 Azure live round-2 tooling, sample and validation
+  report, and the Azure Container Apps sample. First release on the **collapsed public
+  line** (decided 2026-11-05): ONE root commit (no parent) was built
+  from the sanitized release tree with the noreply identity, audited a fresh object set,
+  moved `main` with `--force-with-lease`, deleted the public tags `0.7.0`/`0.7.1`/
+  `0.8.0`/`0.8.1` and tagged `0.8.2` on the collapsed commit; CI green (Actions run
+  42320666021). Ceremony: packed **once** from a clean detached worktree at the PUBLIC
+  commit (SourceLink embeds the pack-time HEAD — provenance rule), tree equality with
+  the reviewed `ec79b35` verified first, `-p:ContinuousIntegrationBuild=true` from fresh
+  obj into an isolated package cache with `ValidatePackage.semaphore` swept; sanity loop
+  ×4 passed (SourceLink carries the full public SHA, `/_/`-mapped PDBs, no builder-home
+  paths); APICompat against the rotated `0.8.1` baselines green; extended disclosure scan
+  over every member of all eight packages (incl the `*Content_Types*` glob) zero hits.
+  Registry state after the single push round: all eight artifacts present, each version
+  exactly once (non-2xx would have raised — it did not). Nupkg sha256: `CredProx`
+  `14d6044a598ab043cf9468dcabf9deb9d1e3e326b4ef5c6741edf3d727a87b6f`,
+  `CredProx.Abstractions`
+  `f4cdd0f87946d4c03ba6f267f0ac311539eea8419b1c8c411a0f39c9b1cf9b40`,
+  `CredProx.AzureKeyVault`
+  `0459800055597ad0ebd5ce3ac8484f979b559b3926fe1ce1d5c1a52a51a27ff2`,
+  `CredProx.Testing`
+  `6b414927800a9438b952c785e7aef0b8a0536b354a46bc1a973b51bba8115342`. Consumer verify:
+  http-cache cleared, out-of-repo scratch project (the repo-level source mapping pins
+  `CredProx*` to the local feed, so an in-tree restore cannot prove the registry),
+  isolated package cache, all four downloads byte-identical to the pushed artifacts,
+  `samples/QuickStart` smoke green on the downloaded bytes (WireMock journal shows the
+  credential attached; the caller's echo shows it redacted). Independent registry
+  independent re-check: 4/4 sha256 match, zero disclosure hits, nuspec commit
+  `4f663ac9`, raw source URL answers 200. Review: fresh-context spot-check PASS at the
+  internal tip `ec79b35` (docs coherent, baseline provenance closed on three independent
+  sources, reviewer-runs battery green, real APICompat re-validation).
 - `0.8.1` (GitHub `48140d51ea1c2b0f4126c33128b27378751f0238`, internal release commit
   `78a65ad`): published 2026-11-04 — the **same code and API as `0.8.0`, repacked from
-  the rewritten public history** (owner decisions: full scrub of the internal hostname
+  the rewritten public history** (decided: full scrub of the internal hostname
   found in pre-`0.8.0` committed baseline nuspecs and one prose mention; GitHub noreply
-  authoring). The architect rebuilt the public line from sanitized trees: `main` and the
+  authoring). The public line was rebuilt from sanitized trees: `main` and the
   annotated `0.8.1` tag (tag object `8d0e85f7`) at `48140d51`, tags `0.7.0`→`de3a34e8`,
   `0.7.1`→`9f9a8910`, `0.8.0`→`beb080e8` (objects `7e0064f2`/`2a577437`/`8e129586`),
   original dates kept, noreply author/committer/tagger; a fresh-clone audit of the whole
@@ -234,7 +271,7 @@ dotnet nuget locals http-cache --clear
   ADR-0001 (the served `0.7.1` bytes embed builder-local PDB paths — committing them
   would be new disclosure; metadata-only release, API identical to `0.7.0`).
   **Post-release:** the 2026-11-04 public-history rewrite (internal-hostname scrub,
-  owner decision) takes mirror commit `2d036703` off every branch and tag. This
+  decision) takes mirror commit `2d036703` off every branch and tag. This
   release's source links resolve only while GitHub retains the unreferenced commit —
   no support purge was requested, and the raw URL still answered 200 at rewrite time —
   so the links are unsupported-by-construction, not broken today. `0.8.1` repacks the
@@ -250,7 +287,7 @@ dotnet nuget locals http-cache --clear
   artifacts embed commit `726b5e4` (the release tree was packed just before its commit;
   content is identical to `4d158ff`). **Known issue (F1, found post-publish by review):**
   all four served `0.7.1` symbol packages embed the builder's local source paths instead
-  of normalized `/_/` paths — the ceremony packed reused obj compiled without
+  of normalised `/_/` paths — the ceremony packed reused obj compiled without
   `ContinuousIntegrationBuild` (the flag maps paths at compile time; see the note under
   Publish steps). Independently confirmed: served PDBs `/…/home/`-present, `/_/`-absent,
   4/4; the `0.7.0` served bytes are correct. No secret content; byte-identical checks
@@ -261,7 +298,7 @@ dotnet nuget locals http-cache --clear
   registry by `0.7.1` (metadata-only); now the committed APICompat baseline (ADR-0001).
 - `0.6.0` (`61dcca9`), `0.5.0`, `0.4.0`, `0.3.0`: published earlier releases, all on the
   registry; each was verified with a scratch-project consumer restore.
-- Pre-M25, all source links and history pointed at the internal Gitea instance, and CI
+- Pre-M25, all source links and history pointed at the internal repository, and CI
   ran locally because that instance has no workflow runners registered (zero Actions
   runs across its history) — every release above was gated by the full local battery on
   the release commit.

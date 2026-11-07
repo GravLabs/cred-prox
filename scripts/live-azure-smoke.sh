@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # M26 live Azure/Entra validation battery (docs/azure-live-test-plan.md).
 #
-# Runs the phase smokes against the person's REAL tenant/subscription and
+# Runs the phase smokes against the maintainer's REAL tenant/subscription and
 # prints PASS/FAIL/SKIP evidence lines. Safe to commit: this file carries
 # resource NAMES and env-var KEYS only — never a secret value, never a
 # tenant/subscription GUID.
@@ -11,16 +11,16 @@
 # Phases whose preconditions (app registrations, env-provided secret) are
 # absent SKIP individually.
 #
-# Prerequisites (person-present setup, see the plan's ground rules):
+# Prerequisites (manual setup by the maintainer, see the plan's ground rules):
 #   az login                                        (Phase 1)
 #   CREDPROX_LIVE_CLIENT_ID / CREDPROX_LIVE_CLIENT_SECRET
 #     from the credprox-e5-oauth app registration, its SP Reader on the
 #     credprox-live-test resource group                      (Phase 2; when
 #     unset, phase 2 falls back to the e5-oauth lookup + a vault fetch)
 #   credprox-live-kv vault + CREDPROX_LIVE_CLIENT_SECRET again
-#     (Phase 4 WRITES the vault - owner-word scope; only run it deliberately)
+#     (Phase 4 WRITES the vault - maintainer-approved scope; only run it deliberately)
 #
-# Phase 3 (Entra OBO) was dropped by the owner 2026-11-03 - OBO is removed
+# Phase 3 (Entra OBO) was dropped by decision 2026-11-03 - OBO is removed
 # from the library in M27; the e14 tenant objects were deleted the same day.
 #
 # Usage: scripts/live-azure-smoke.sh [1|2|4|5..10 ...]   (default: all)
@@ -160,7 +160,7 @@ phase2() {
 phase4() {
   note "Phase 4: Key Vault as the only secret source (E5 KeyVault:Uri + overwrite rotation)"
   if ! az keyvault show -n credprox-live-kv -g "$RG" -o none 2>/dev/null; then
-    EVIDENCE+=("P4 SKIP: credprox-live-kv not present (create person-present per plan)")
+    EVIDENCE+=("P4 SKIP: credprox-live-kv not present (create manually per plan)")
     say "SKIP: vault credprox-live-kv absent"
     return 0
   fi
@@ -170,14 +170,14 @@ phase4() {
   [[ -z "$CID" ]] && CID=$(az ad app list --display-name credprox-e5-oauth --query "[0].appId" -o tsv 2>/dev/null || true)
   [[ -z "$CID" ]] && { EVIDENCE+=("P4 SKIP: client id unavailable (env or credprox-e5-oauth lookup)"); say "SKIP: client id unavailable"; return 0; }
   # Correct-value seed has two modes: E = env channel; V = the vault already holds the
-  # value (owner piped `az ad app credential reset --append` straight into
+  # value (the maintainer piped `az ad app credential reset --append` straight into
   # `az keyvault secret set` - value never shown, never on disk). No UAI needed;
   # the vault provider reads run as the az CLI identity.
   local MODE=V
   [[ -n "${CREDPROX_LIVE_CLIENT_SECRET:-}" ]] && MODE=E
   if [[ "$MODE" == V ]] && ! az keyvault secret show --vault-name credprox-live-kv --name "$KVNAME" -o none 2>/dev/null; then
-    EVIDENCE+=("P4 SKIP: vault secret absent and CREDPROX_LIVE_CLIENT_SECRET unset (seed person-present: env channel or owner reset-pipe)")
-    say "SKIP: vault secret absent and no env secret (person-present seed required)"
+    EVIDENCE+=("P4 SKIP: vault secret absent and CREDPROX_LIVE_CLIENT_SECRET unset (seed manually: env channel or maintainer reset-pipe)")
+    say "SKIP: vault secret absent and no env secret (manual seed required)"
     return 0
   fi
   local tenant
@@ -190,7 +190,7 @@ phase4() {
   export KeyVault__Uri="https://credprox-live-kv.vault.azure.net/"
   # NO PROXY_SECRET here: the only secret channel into the process is the vault.
 
-  # 1. E mode: seed the vault from the env channel (owner-word scope; OVERWRITE
+  # 1. E mode: seed the vault from the env channel (maintainer-approved scope; OVERWRITE
   # semantics). The value enters az through a pipe (--file on a process
   # substitution), never as a --value argument: argv is readable via
   # /proc/*/cmdline while the process lives (finding 2026-11-04).
@@ -289,7 +289,7 @@ r2_run_job() { # start ONE execution with the job's current args, wait for a
                # The battery exits non-zero on FAIL lines -> execution 'Failed'
                # is a RESULT to parse, not an infra error.
   local exec_name status i tries=3 rc_start=1
-  # fix 13+14 (live 2026-11-06): retry ONLY a refused start (409
+  # live finding 2026-11-06: retry ONLY a refused start (409
   # ContainerAppsJobOperationInProgress while an args PUT provisions - nonzero rc).
   # An ACCEPTED start can return rc=0 with an EMPTY properties.name while it has
   # ALREADY launched the execution - restarting on empty name duplicates runs
@@ -317,7 +317,7 @@ r2_run_job() { # start ONE execution with the job's current args, wait for a
   done
   case "$status" in
     Succeeded|Failed)
-      # fix 13 (live 2026-11-06): --format text lines arrive DECORATED
+      # live finding 2026-11-06: --format text lines arrive DECORATED
       # ("<ts> stdout F P6 PASS") - strip the per-line log routing prefix so the
       # ^Pn greps actually match live output (they only matched the offline
       # battery's bare stdout; against raw live logs every line-anchored check
@@ -326,14 +326,14 @@ r2_run_job() { # start ONE execution with the job's current args, wait for a
         --container battery --tail 300 --format text 2>/dev/null \
         | sed -E 's/^[^ ]+ (stdout|stderr) [A-Z] //'
       return 0 ;;
-    # fix 14: r2_run_job runs inside $(...) - its stdout IS the battery log, so
+    # live 2026-11-06: r2_run_job runs inside $(...) - its stdout IS the battery log, so
     # every diagnostic goes to stderr or it vanishes into the caller's $out.
     *) say "job execution $exec_name did not finish (last status: $status)" >&2; return 1 ;;
   esac
 }
 
 r2_job_args() { # rewrite the battery container's startup args via a full-document
-  # PUT (fix 12, live finding 2026-11-06): the CLI's --args cannot carry values that
+  # PUT (live finding 2026-11-06): the CLI's --args cannot carry values that
   # BEGIN with '--' - az parses "--mode" as its own option and dies with
   # "unrecognized arguments", and the old callers swallowed that into /dev/null,
   # so P10's retargeting silently never happened (its "jwtprobe" executions ran
@@ -358,7 +358,7 @@ next(c for c in doc["properties"]["template"]["containers"] if c["name"] == "bat
 with open(put_path, "w") as fh:
     json.dump(doc, fh)
 PY
-  # fix 13 (live 2026-11-06): the PUT can hit 409 ContainerAppsJobOperationInProgress
+  # live finding 2026-11-06: the PUT can hit 409 ContainerAppsJobOperationInProgress
   # while a prior provisioning operation (an earlier args PUT, or a job start) is
   # still active - retry loudly, three times, 20 s apart, then fail visibly.
   rc=1
@@ -371,7 +371,7 @@ PY
   done
   rm -f /tmp/r2-jobargs.get.json /tmp/r2-jobargs.put.json /tmp/r2-jobargs.put.err
   [[ $rc -eq 0 ]] || return 1
-  # fix 13: '--phase' + value are TWO elements: full battery = 4, with a phase = 6.
+  # live finding: '--phase' + value are TWO elements: full battery = 4, with a phase = 6.
   # The want=5 here was the bug - the live read-back showed the PUT had landed the
   # CORRECT 6-element jwtprobe list while the verifier called it a mismatch.
   local want=4 n
@@ -494,7 +494,7 @@ phase10() {
   if [[ ! -s "$orig" ]]; then say "SKIP: current key unreadable (material not seeded?)"; EVIDENCE+=("P10 SKIP: current jwt key unreadable"); return 0; fi
 
   local i out res=""
-  # fix 12: thin delegates to r2_job_args (az --args cannot carry '--mode' values)
+  # live finding: thin delegates to r2_job_args (az --args cannot carry '--mode' values)
   r2_set_probe() { r2_job_args "$1" jwtprobe; }
   r2_restore_args() { r2_job_args "$1" ""; }
   # The counterparty pinned its public-key pin at STARTUP (static for the

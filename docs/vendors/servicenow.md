@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Auth model** | Per-instance OAuth 2.0 provider. An **OAuth API client** (client-credentials grant) is registered in the instance's OAuth application registry; tokens are issued by that instance at `https://<instance>.service-now.com/oauth_token.do`. **Cited (2026-11-05):** the inbound client-credentials grant and that token-endpoint form are documented in the SailPoint ServiceNow connector docs (fetched 2026-11-05: <https://documentation.sailpoint.com/connectors/servicenow/identity_governance/help/integrating_snow_identity_governance_connector/oauth2.0_auth.html>) and ServiceNow's OAuth-Inbound docs (design-architect's docs check 2026-11-05: <https://www.servicenow.com/docs/r/hX5GtoLUEU58KgyL7CW5Ag/1E8_x~A4Gcv7fjPNqX8lKg>). Scope syntax and token lifetimes remain **UNVERIFIED**. |
+| **Auth model** | Per-instance OAuth 2.0 provider. An **OAuth API client** (client-credentials grant) is registered in the instance's OAuth application registry; tokens are issued by that instance at `https://<instance>.service-now.com/oauth_token.do`. **Cited (2026-11-05):** the inbound client-credentials grant and that token-endpoint form are documented in the SailPoint ServiceNow connector docs (fetched 2026-11-05: <https://documentation.sailpoint.com/connectors/servicenow/identity_governance/help/integrating_snow_identity_governance_connector/oauth2.0_auth.html>) and ServiceNow's OAuth-Inbound docs (verified 2026-11-05: <https://www.servicenow.com/docs/r/hX5GtoLUEU58KgyL7CW5Ag/1E8_x~A4Gcv7fjPNqX8lKg>). Scope syntax and token lifetimes remain **UNVERIFIED**. |
 | **CredProx credential** | `OAuthClientCredentials` (no sample) |
 | **Sample** | None — the closest verified mechanics are [E2 `samples/OAuthKeycloak`](../../samples/OAuthKeycloak/README.md) (plain client credentials) and [E4](../../samples/Spotify/README.md)/[E5](../../samples/MicrosoftGraph/README.md) for header-vs-form client auth variants |
 | **Verification** | The config block is CredProx-valid (CI binds and validates it through the real startup path); the grant type and token-endpoint form are cited; scope syntax and token lifetimes remain `UNVERIFIED`. |
@@ -75,7 +75,7 @@ CredProx config once the `<...>` values are real.
 - **Client-credentials must be enabled on the instance:** the system property
   `glide.oauth.inbound.client.credential.grant_type.enabled` must exist with value
   `true`, or inbound token requests are refused (ServiceNow KB1645212; cited via
-  design-architect's docs check, 2026-11-05).
+  a docs verification pass, 2026-11-05).
 - **The OAuth API client must have an integration user assigned**, or the token
   request fails with `unauthorized_client` (same citation as the property above).
 - **Token expiry is instance-profile configuration** — **UNVERIFIED** default;

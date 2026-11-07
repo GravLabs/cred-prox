@@ -344,7 +344,7 @@ internal static class CounterpartyRunner
 
         var jwtRsa = RSA.Create();
         jwtRsa.ImportFromPem(jwtPublicPem);
-        // Stub token lifetime (architect ruling B, 2026-11-06): CONFIGURABLE because the
+        // Stub token lifetime (ruling B, 2026-11-06): CONFIGURABLE because the
         // P10 live rotation witness is gated by the proxy's EXCHANGED-TOKEN refresh point
         // (lifetime x RefreshFraction 0.8), not by the vault reload interval - at 59 min
         // the wrong key is never refused inside any sane witness window. Live deploy sets
@@ -841,7 +841,7 @@ internal sealed class SmokeTokenCredential : TokenCredential
 // HTTP endpoint: only ClientOptions.Transport is swapped, so the requests reach the loopback stub
 // (tools/keyvault-stub.py) while the vault URI keeps its real https vault form. A plain
 // file or in-memory config source would not exercise the provider's polling and does not
-// count (M29 verdict qitem-20261106035640-f8ba48a7, architect pin 2026-11-06).
+// count (M29 verdict, pinned 2026-11-06).
 internal static class ReloadProofRunner
 {
     public static async Task<int> RunAsync()
