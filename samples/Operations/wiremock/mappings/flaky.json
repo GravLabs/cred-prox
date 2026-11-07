@@ -1,0 +1,73 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "urlPath": "/flaky"
+      },
+      "response": {
+        "status": 500,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "error": "boom" }
+      },
+      "scenarioName": "flaky",
+      "requiredScenarioState": "Started",
+      "newScenarioState": "Failing2"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPath": "/flaky"
+      },
+      "response": {
+        "status": 500,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "error": "boom" }
+      },
+      "scenarioName": "flaky",
+      "requiredScenarioState": "Failing2",
+      "newScenarioState": "Failing3"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPath": "/flaky"
+      },
+      "response": {
+        "status": 500,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "error": "boom" }
+      },
+      "scenarioName": "flaky",
+      "requiredScenarioState": "Failing3",
+      "newScenarioState": "Failing4"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPath": "/flaky"
+      },
+      "response": {
+        "status": 500,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "error": "boom" }
+      },
+      "scenarioName": "flaky",
+      "requiredScenarioState": "Failing4",
+      "newScenarioState": "Recovered"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPath": "/flaky"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "ok": true, "vendor": "recovered" }
+      },
+      "scenarioName": "flaky",
+      "requiredScenarioState": "Recovered"
+    }
+  ]
+}

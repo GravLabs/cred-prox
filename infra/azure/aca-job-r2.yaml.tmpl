@@ -1,0 +1,69 @@
+# M29 R2.4 battery Job definition (az containerapp job create --yaml, rendered
+# by scripts/live-m29-deploy-app.sh via envsubst). G2 replaced `az containerapp
+# exec` (an interactive SSH-like shell - needs a TTY, unattended use unreliable)
+# with this Manual-trigger job: the SAME image run as --mode battery, the SAME
+# user-assigned identities, IN-CLUSTER against the app's internal ingress FQDN.
+# Zero public listeners either way; scripts/live-azure-smoke.sh starts
+# executions and reads the P<n> PASS/FAIL summary from the container logs.
+# Image pull is IDENTITY-based exactly like the app: the kubelet UAI (holds
+# AcrPull from the Bicep) is attached here AND selected via
+# configuration.registries[].identity - environment-level identity does not
+# activate pull (live finding 2026-11-06; the old "no registries section is
+# deliberately correct" comment was the root error). The JOB pull path stays
+# the plan's stated live unknown until this run proves it.
+# SHAPE (live finding 2026-11-06): the current az CLI job IaC model reads the
+# container from properties.template.containers[] - the legacy flat
+# configuration.image/args/env shape is dropped on create and the RP rejects
+# the job ("Must specify at least one container"). NO identity section: the
+# --yaml path does not carry userAssignedIdentities reliably (app-side live
+# finding the same day); both identities attach via
+# `az containerapp job identity assign` in the deploy script - a job pulls
+# only at execution start, which begins after that step.
+# location must equal the environment's region - the deploy script reads it back
+# from the environment resource, so the job follows the chosen fallback region.
+# Substitutions: $REGISTRY $ENV_ID $UAI_CLIENT_ID $VAULT_URI $APP_FQDN $LOCATION $KUBELET_ID $DEPLOY_IMAGE_DIGEST
+name: credprox-m29-battery
+location: $LOCATION
+properties:
+  configuration:
+    registries:
+      - server: $REGISTRY
+        identity: $KUBELET_ID
+    triggerType: Manual
+    # Manual jobs REQUIRE the (empty) manualTriggerConfig object in the
+    # current API - absent -> ContainerAppsJobTriggerConfigurationMissing
+    # (live finding 2026-11-06).
+    manualTriggerConfig: {}
+    # battery runtime is seconds; the cap bounds a wedged probe run only
+    replicaTimeout: 900
+    replicaRetryLimit: 0
+    completionMode: Succeeded
+  template:
+    containers:
+      - name: battery
+        image: $REGISTRY/credprox-m29:latest
+        args: ["--mode", "battery", "--proxy", "https://$APP_FQDN"]
+        env:
+          # runtime identity binding (same live findings as the app): 2 attached
+          # UAIs, unset -> ManagedIdentityCredential 400 "Unable to load the
+          # proper Managed Identity"; NO containers[].identity schema field at
+          # any served api-version; and the env hint alone does NOT reach the
+          # ACA identity-proxy wire (mic-stub capture) - Program.cs
+          # RuntimeIdentity.Credential() threads this value through
+          # DefaultAzureCredentialOptions.ManagedIdentityClientId, the form that
+          # does (see aca-app-r2.yaml.tmpl header for the full trace).
+          - name: MANAGED_IDENTITY_CLIENT_ID
+            value: "$UAI_CLIENT_ID"
+          # build stamp (see app template): forces fresh template + proven build
+          - name: DEPLOY_IMAGE_DIGEST
+            value: "$DEPLOY_IMAGE_DIGEST"
+          # the battery fetches ONLY the caller key (vault secret, via the same
+          # identity); no other material, no secret values in this file
+          - name: KeyVault__Uri
+            value: "$VAULT_URI"
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi
+    scale:
+      executorCount: 1
+  environmentId: $ENV_ID

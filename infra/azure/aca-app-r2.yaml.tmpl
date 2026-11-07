@@ -1,0 +1,121 @@
+# M29 R2.3 Container App definition (az containerapp create --yaml, rendered
+# from this template by scripts/live-m29-deploy-app.sh via envsubst).
+# Two containers, ONE image, role via args - the plan's host shape:
+#   proxy        CredProx forwarder, the only ingress'd container (INTERNAL:
+#                external=false - zero public listener; the battery reaches it
+#                over the internal ingress FQDN from the credprox-m29-battery
+#                job - see aca-job-r2.yaml.tmpl, G2)
+#   counterparty the three verifiers (JWT assertion / HMAC / mTLS client-cert),
+#                localhost-only (no ingress rules route to it)
+# Config carries ONLY the vault URI + plain plumbing: no secret material in
+# env or files anywhere (that is the test). Registry pull is IDENTITY-based,
+# not credential-based: registries[].identity selects the kubelet UAI (holds
+# AcrPull from the Bicep), which the deploy script ATTACHES via
+# `az containerapp identity assign` - identity selection on a workload that
+# does not have the identity attached is inert. Environment-level identity
+# does NOT activate pull (live finding 2026-11-06: UNAUTHORIZED until the app
+# itself selects the identity. docs: azure container-apps
+# managed-identity-image-pull). Still no username/password anywhere:
+# registries carries server + identity only.
+# Substitutions: $REGISTRY $ENV_ID $UAI_CLIENT_ID $KUBELET_ID $VAULT_URI $CALLER_HASH $CA_B64 $DEPLOY_IMAGE_DIGEST
+# RUNTIME IDENTITY BINDING: with 2 UAIs attached, unset binding dies at
+# startup - ManagedIdentityCredential 400 "Unable to load the proper Managed
+# Identity" in every runtime container (live finding 2026-11-06). There is NO
+# containers[].identity schema field to fix that with: live GET schema probes
+# at every api-version this RP serves (2024-08-02-preview, 2025-01-01,
+# 2026-07-01) show no such key, and PATCHing one is rejected 400 "Unknown
+# properties identity in ContainerAppContainer". The pin is carried in env as
+# MANAGED_IDENTITY_CLIENT_ID, but the ENVIRONMENT HINT ITSELF IS NOT THE
+# MECHANISM INSIDE ACA: wire capture (loopback MIC stub + the ACA identity-proxy
+# env contract, Azure.Identity 1.13.1) shows the SDK does NOT append that env
+# hint to the identity-proxy request here (it is honored only on the IMDS path).
+# samples/AzureContainerApps Program.cs RuntimeIdentity.Credential() reads the
+# value and passes it as DefaultAzureCredentialOptions.ManagedIdentityClientId -
+# only that form reaches the wire as &client_id=... Value = the RUNTIME UAI's
+# CLIENT id (a public identifier, resolved live by the deploy script - never
+# the kubelet UAI, which exists only to pull images via registries[].identity
+# and holds no vault/data-plane role: the identity-plane split this milestone
+# proves).
+#   $CALLER_HASH vault secret CredProxTest--caller-key-hash ("sha256:<hex>") - the
+#                caller registry stores ONLY the hash; the key VALUE stays a
+#                vault secret the battery fetches (samples/AzureContainerApps
+#                appsettings wiring: CredProx__Callers__battery__Keys__0__*)
+#   $CA_B64      vault secret CredProxTest--mtls-ca-b64 (base64 PEM of the test CA)
+#                - PUBLIC trust anchor: the entrypoint installs it into the
+#                container trust store so the counterparty server cert chains;
+#                no secret material travels this path (vault stays the only
+#                secret channel - see the sample README honesty notes)
+name: credprox-m29-app
+# NO workload-level identity section - two live findings 2026-11-06: nested
+# under properties the CLI silently ignored it (app read back None); at top
+# level the --yaml path delivered identity.type without userAssignedIdentities
+# and ARM rejected the whole request ("requires identities to be assigned").
+# Both identities (runtime UAI + the kubelet pull identity selectable by
+# registries[].identity) are ATTACHED by scripts/live-m29-deploy-app.sh via
+# `az containerapp identity assign`, the documented path, before the final
+# spec pass. registries[] below is tolerated by the RP while dangling.
+properties:
+  managedEnvironmentId: $ENV_ID
+  configuration:
+    registries:
+      - server: $REGISTRY
+        identity: $KUBELET_ID
+    ingress:
+      external: false
+      targetPort: 8081
+      allowInsecure: false
+    secrets: []
+  template:
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+    containers:
+      - name: proxy
+        image: $REGISTRY/credprox-m29:latest
+        args: ["--mode", "proxy"]
+        env:
+          - name: MANAGED_IDENTITY_CLIENT_ID
+            value: "$UAI_CLIENT_ID"
+          # BUILD STAMP: current digest of the :latest tag (resolved live by the
+          # deploy script). Any new push changes this value -> the template
+          # changes -> a new revision is forced and pulls the fresh image;
+          # every process echoes it (Program.cs build witness line).
+          - name: DEPLOY_IMAGE_DIGEST
+            value: "$DEPLOY_IMAGE_DIGEST"
+          - name: ASPNETCORE_URLS
+            value: "http://+:8081"
+          - name: KeyVault__Uri
+            value: "$VAULT_URI"
+          - name: CredProx__Callers__battery__Keys__0__KeyId
+            value: "battery-key-1"
+          - name: CredProx__Callers__battery__Keys__0__KeyHash
+            value: "$CALLER_HASH"
+          - name: CREDPROX_TEST_CA_PEM_B64
+            value: "$CA_B64"
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi
+      - name: counterparty
+        image: $REGISTRY/credprox-m29:latest
+        args: ["--mode", "counterparty"]
+        env:
+          # NO ASPNETCORE_URLS: the counterparty owns its ports in code
+          # (Kestrel ListenAnyIP 8082 http + 8443 https with client certs) -
+          # the https endpoint needs the client-cert options the URL channel
+          # cannot carry, so one owner for both is the only consistent shape.
+          - name: MANAGED_IDENTITY_CLIENT_ID
+            value: "$UAI_CLIENT_ID"
+          - name: DEPLOY_IMAGE_DIGEST
+            value: "$DEPLOY_IMAGE_DIGEST"
+          - name: KeyVault__Uri
+            value: "$VAULT_URI"
+          # Architect ruling B (2026-11-06): 2-minute stub tokens for the live P10
+          # rotation witness. The proxy re-mints only at the EXCHANGED-token refresh
+          # (lifetime x RefreshFraction 0.8), so at the 59-min default a rotation is
+          # never refused inside the witness window. Default 59 (offline/unset) is
+          # unchanged in code; the report states this 2-minute stub explicitly.
+          - name: CredProxTest__stub-token-minutes
+            value: "2"
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi

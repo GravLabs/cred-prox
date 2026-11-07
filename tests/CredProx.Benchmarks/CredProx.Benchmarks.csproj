@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- .NET 10 only: the person dropped the .NET 8 target at the M5 gate (2026-10-14). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Benchmarks use the experimental contract on purpose. -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
+  </ItemGroup>
+
+</Project>

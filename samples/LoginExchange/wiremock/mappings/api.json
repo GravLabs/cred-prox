@@ -1,0 +1,13 @@
+{
+  "priority": 2,
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/acme/api/.*"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "text/plain" },
+    "body": "Acme stub received: Authorization = {{request.headers.Authorization}}",
+    "transformers": ["response-template"]
+  }
+}

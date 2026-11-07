@@ -1,0 +1,42 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # One stable issuer for every route (the classic IdP-behind-a-proxy shape): tokens
+      # minted through the host port and exchanges called over the docker network must
+      # agree on the issuer — Keycloak validates the subject_token's issuer against the
+      # request's own issuer, and every client reaches the keys over the docker network.
+      KC_HOSTNAME: http://keycloak:8080
+    ports:
+      - "5094:8080"
+    volumes:
+      - ./realm:/opt/keycloak/data/import:ro
+
+  api:
+    image: credprox-e14-sample
+    build:
+      context: ../..
+      dockerfile: samples/TokenExchange/Dockerfile
+    command: ["dotnet", "/app/TokenExchange.dll", "--role", "api"]
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+    depends_on:
+      - keycloak
+    ports:
+      - "5088:8080"
+
+  proxy:
+    image: credprox-e14-sample
+    build:
+      context: ../..
+      dockerfile: samples/TokenExchange/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+    depends_on:
+      - keycloak
+      - api
+    ports:
+      - "5092:8080"

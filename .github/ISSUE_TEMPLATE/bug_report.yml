@@ -1,0 +1,59 @@
+name: Bug report
+description: Something CredProx does not do as documented
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you paste anything:** remove every real secret from config excerpts,
+        logs and curl commands — vendor tokens, client secrets, caller keys, SAS URLs.
+        Use placeholders like `<client-secret>`. See SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The behaviour you saw, with the exact status code and `credprox.*` error code if there was one.
+      placeholder: |
+        Request to /spotify/tracks returned 502 with body
+        {"error":"credprox.credential_failed","credential":"spotify"}.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant CredProx configuration
+      description: The credential/destination/route sections involved — with every secret value replaced by a placeholder.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the QuickStart sample (`dotnet run` in samples/QuickStart)
+        2. `curl -H "X-CredProx-Key: <caller-key>" http://localhost:5000/headers`
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: CredProx version
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: .NET SDK/runtime version, OS, hosting (Kestrel, container, …)
+      placeholder: .NET 10.0, Debian 13, Kestrel in a container
+    validations:
+      required: true

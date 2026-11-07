@@ -1,0 +1,36 @@
+# Nightly layer (plan §5.1): load tests with real clocks and threads, plus the
+# vendor-account example smokes (E4 Spotify, E5 Graph) that need live credentials.
+#
+# GitHub fires schedule triggers on the default branch only; `workflow_dispatch`
+# (Actions → Run workflow) works from any branch, so the nightly layer can always
+# be started by hand.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  load:
+    name: Load tests (§5.1 nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore tests/CredProx.LoadTests/CredProx.LoadTests.csproj
+
+      - name: Build
+        run: dotnet build tests/CredProx.LoadTests/CredProx.LoadTests.csproj --configuration Release --no-restore
+
+      - name: Test
+        run: >-
+          dotnet test tests/CredProx.LoadTests/CredProx.LoadTests.csproj
+          --configuration Release --no-build

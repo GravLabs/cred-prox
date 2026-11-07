@@ -1,0 +1,91 @@
+# ADR-0001: PackageValidation baseline from committed packages
+
+Date: 2026-10-30
+Status: accepted (M25, GitHub public pivot)
+
+## Context
+
+Every `dotnet pack` runs APICompat against the last published release
+(`<PackageValidationBaselineVersion>`, currently `0.8.1`) so a public-surface removal
+fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
+Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
+declared the internal LAN NuGet registry (anonymous download), and the SDK's
+`PackageValidationBaselineVersion` support does a `PackageDownload` of that version.
+
+M25 makes `https://github.com/GravLabs/cred-prox` the canonical source home. A public
+tree cannot declare a LAN endpoint as a package source, and a GitHub-hosted runner has no
+route to it — so the baseline restore had to stop depending on any feed.
+
+## Decision
+
+Commit the **published baseline packages** under `build/baselines/` and point
+`<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
+
+```
+build/baselines/CredProx.0.8.1.nupkg               f8cd3415fb1e228920233f6b29bf7d1d6905d0d7e0c2bf7396818a6ae8f2bcf6
+build/baselines/CredProx.Abstractions.0.8.1.nupkg  f3703d687bcb1e7eed17102f921752fbb369d1b29bbe8254098d5690003fbfc4
+build/baselines/CredProx.AzureKeyVault.0.8.1.nupkg e6bd305e5d93f913a463f78efead83f5a357c24541134988ac61d44b2c8e6bab
+build/baselines/CredProx.Testing.0.8.1.nupkg       ed232aef8acaf343c35b7df70ee6f451ead0f491e0374f80152562ab01e575ec
+```
+
+The files are the bytes downloaded from the registry that published them (sha256 above;
+recorded here so a later audit can prove which bytes were blessed). `.gitignore` carries
+one exception (`!build/baselines/*.nupkg`) for exactly these files. In the SDK, a
+non-empty `PackageValidationBaselinePath` **skips the feed-based restore entirely**
+(`Microsoft.NET.ApiCompat.targets`); the version property stays as the baseline identity
+and the filename convention. Each release bumps the baseline to the previously published
+version: download its four nupkgs from the registry, replace the folder, update this list.
+Rotations executed: `0.6.0` at M25 (2026-10-30, hashes in git history at that commit);
+`0.7.0` for the 0.7.1 metadata release (2026-10-30; hashes in git history at that
+commit). `0.7.1` **deliberately skipped** for the 0.8.0 release (2026-11-04, architect
+decision on the owner's release word): the owed rotation to `0.7.1` would have committed
+registry bytes whose DLLs/PDBs embed the builder's absolute local source path instead of
+`/_/` (the F1 known issue in PUBLISHING.md's release history) — committing them would
+have been NEW public disclosure, and `0.7.1` was metadata-only, so the `0.7.0` baseline
+already validated the identical API. `0.8.0` rotated at `0.8.1` (2026-11-04, owner
+full-scrub decision — that generation's entries, the registry-served `0.8.0` bytes
+each sha256-verified during the 0.8.0 consumer restore, are in git history at that
+commit), and the skipped `0.7.1` generation is subsumed — superseded, API identical to
+`0.7.0`. `0.8.1` rotated at `0.8.2` (2026-11-07, owner release word "merge and publish
+when ready"): the table entries above are the registry-served `0.8.1` bytes — sha256
+verified equal to the published artifacts recorded in PUBLISHING.md's release history,
+and disclosure-scanned member-by-member before commit (zero hits). The rotation also removed the last disclosure residual of the `0.7.0` set: their
+nuspec `RepositoryUrl` carried the internal Gitea URL (public since the launch commits,
+prose since scrubbed) — the `0.8.0` nuspecs carry the GitHub URL, so the current tree is
+clean. Pack the **fresh** `obj/` after rotating (see Consequences): a repack on an
+untouched obj skips validation silently.
+
+## Consequences
+
+- Validation needs **no network and no LAN feed**: this machine and any GitHub-hosted
+  runner compare against byte-identical baselines committed in the tree.
+- The stale-baseline-cache failure mode that twice masked real breaks (PUBLISHING.md
+  operational guard — a repacked local copy silently replacing the published baseline in
+  the global cache) is **structurally gone**: there is no cache lookup to poison, and a
+  wrong baseline byte changes the committed file, which is reviewable in the diff.
+- Cost: ~250 KB of binaries in the repo per baseline generation, and one manual swap step
+  per release (written into PUBLISHING.md).
+- The repo-level `NuGet.Config` no longer declares the registry at all. Publishing
+  machines keep the `credprox` source (and its token) in their **user-level** NuGet
+  config; nothing outside this machine needs it.
+- Validation is **incremental per `obj/` directory**: `RunPackageValidation`
+  (`Microsoft.NET.ApiCompat.ValidatePackage.targets`) keys its incrementality on a
+  semaphore under `obj/`, so within one `obj/` the gate runs on the first pack and every
+  later repack with untouched inputs silently skips it. CI checkouts are always fresh, so
+  the gate is structurally honest there — but a green local repack is **not** proof the
+  gate ran. Reviewers and the baseline-rotation step must pack a fresh `obj/` (or delete
+  `obj/**/*.ApiCompat.ValidatePackage.semaphore`) before trusting a local negative probe.
+
+## Rejected options
+
+- **Keep the LAN feed in the repo config.** Fails the pivot outright — a public tree must
+  not carry a live internal endpoint, and a GitHub runner cannot reach it anyway.
+- **Skip baseline validation when the feed is unreachable** (conditional property).
+  A validation gate that silently disables itself off-LAN is worse than none: the break
+  ships with a green build.
+- **Publish the 0.x baselines to nuget.org.** Reopens a settled scope decision
+  (plan §9 decision 3: nuget.org postponed); a release channel for old bits is more
+  surface than a 250 KB folder.
+- **`PackageDownload` with an explicit per-machine source name** (baseline restored from
+  `credprox` only where declared). Still feed-dependent, still silently skippable, and
+  keeps machine state on the critical path of a build gate.

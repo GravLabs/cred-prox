@@ -1,0 +1,48 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "urlPath": "/vendor"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "ok": true, "vendor": "throttling" }
+      },
+      "scenarioName": "vendor-throttle",
+      "requiredScenarioState": "Started",
+      "newScenarioState": "Throttled"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPath": "/vendor"
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "2"
+        },
+        "jsonBody": { "error": "rate_limited" }
+      },
+      "scenarioName": "vendor-throttle",
+      "requiredScenarioState": "Throttled",
+      "newScenarioState": "Resumed"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "urlPath": "/vendor"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "ok": true, "vendor": "throttling" }
+      },
+      "scenarioName": "vendor-throttle",
+      "requiredScenarioState": "Resumed"
+    }
+  ]
+}

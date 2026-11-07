@@ -1,0 +1,43 @@
+name: Feature request
+description: A capability CredProx should have
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem you are solving
+      description: The vendor, deployment or workflow that does not work today — and what you tried instead.
+      placeholder: |
+        My vendor's token endpoint returns the token in a non-standard field and needs
+        a custom client-auth header; LoginExchange cannot express it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The configuration or API you wish existed, sketched as concretely as you can.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Credential type / vendor preset
+        - Secret source
+        - Caller authentication / allow-lists
+        - Destinations / connections / mTLS
+        - Throttling / resilience
+        - Caching
+        - Audit / health / observability
+        - Samples / documentation
+        - Packaging
+  - type: textarea
+    id: plugin
+    attributes:
+      label: Could a plugin cover it?
+      description: >-
+        CredProx is extensible (ICredentialProvider, IPresetSource, ISecretSource,
+        IAuditSink, pipeline features — see CONTRIBUTING.md and samples/CustomPlugin).
+        If you considered a plugin and it does not fit, say where the contract falls short.
