@@ -135,4 +135,76 @@ public sealed class LoginExchangeOptionsValidatorTests
         Assert.Equal("X-Session", attachment.Name);
         Assert.Equal("Bearer ", attachment.Prefix);
     }
+
+    // --- M31 mutation triage: the cookie rules fired but no assertion pinned WHICH
+    // message the operator gets (survivors :59, :65, :69), and two rules never fired
+    // at all (NoCoverage :47 missing endpoint, :75 unsupported method). Each failure
+    // message is the operator's fix-it text; a mutant blanking it must not survive. ---
+
+    [Fact]
+    public void RejectsMissingLoginEndpoint_MessageNamesTheKey()
+    {
+        var options = Valid();
+        options.LoginEndpoint = null;
+
+        var result = new LoginExchangeOptionsValidator().Validate("c", options);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("LoginEndpoint is required", result.FailureMessage!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("PUT")]
+    [InlineData("delete")]
+    [InlineData("")]
+    public void RejectsUnsupportedMethod_MessageNamesTheVerbs(string method)
+    {
+        var options = Valid();
+        options.Method = method;
+
+        var result = new LoginExchangeOptionsValidator().Validate("c", options);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("is not supported; use GET or POST", result.FailureMessage!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CookieWithAttachPrefix_MessageExplainsRawCookie()
+    {
+        var options = Valid();
+        options.Location = CredentialLocation.Cookie;
+        options.AttachPrefix = "Bearer";
+
+        var result = new LoginExchangeOptionsValidator().Validate("c", options);
+
+        Assert.Contains("AttachPrefix is not supported when Location is Cookie; a cookie carries the raw value",
+            result.FailureMessage!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CookieWithoutAnyName_MessageNamesBothKeysAndWhy()
+    {
+        var options = Valid();
+        options.Location = CredentialLocation.Cookie;
+        options.Response = LoginExchangeResponse.RawBody;
+        options.ResponseField = null;
+
+        var result = new LoginExchangeOptionsValidator().Validate("c", options);
+
+        Assert.Contains("Name or ResponseField is required when Location is Cookie: the cookie to replay must be named",
+            result.FailureMessage!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CookieInvalidName_MessageNamesTheCookieAndRfc6265()
+    {
+        var options = Valid();
+        options.Location = CredentialLocation.Cookie;
+        options.Name = "bad name";
+
+        var result = new LoginExchangeOptionsValidator().Validate("c", options);
+
+        Assert.Contains("Cookie name 'bad name' is not a valid RFC 6265 cookie name",
+            result.FailureMessage!, StringComparison.Ordinal);
+    }
 }

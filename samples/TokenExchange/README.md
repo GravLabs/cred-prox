@@ -106,6 +106,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ALICE" http:
       "Mode": "Rfc8693",
       "Issuer": "http://keycloak:8080/realms/credprox",
       "JwksUri": "http://keycloak:8080/realms/credprox/protocol/openid-connect/certs",
+      "RequireHttpsMetadata": false,         // demo-only opt-out: this Keycloak serves keys over http on the docker network; production default is true (ADR-0003)
       "Audience": "credprox-proxy",          // mandatory: inbound tokens must be minted for THIS proxy
       "TokenEndpoint": "http://keycloak:8080/realms/credprox/protocol/openid-connect/token",
       "ClientId": "credprox-proxy",
@@ -117,6 +118,11 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ALICE" http:
   "Audit": { "Enabled": true }
 }
 ```
+
+`RequireHttpsMetadata` defaults to `true` (ADR-0003): the JWKS / discovery document is
+the key material that validates your inbound user tokens, and fetching it over http lets
+a network attacker substitute their own keys. This sample opts out because the
+docker-network Keycloak serves http; a production IdP on https needs no such line.
 
 The route carries `CredProx.Credential=downstream`. The cache key is
 `(downstream, u:<sub>)` — one exchanged token per user, refreshed on 401 for exactly

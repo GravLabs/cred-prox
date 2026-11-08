@@ -5,6 +5,7 @@ using System.Text.Json;
 using CredProx;
 using CredProx.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -325,6 +326,69 @@ public sealed class HmacSignFeatureTests
         await feature.ApplyAsync(context, default);
 
         Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+    }
+
+    [Fact]
+    public async Task CredentialDoesNotResolve_Aborts502WithCodeTitleAndWarning()
+    {
+        // The Secret reference is configured but names nothing the source can answer:
+        // the provider's obtain throws inside the feature's try, the catch answers the
+        // uniform credential problem (code + caller-safe title) and warns with the
+        // per-request reason. §5.2 "unobtainable credential" row, signing stage.
+        var configuration = TestConfig.Root(HmacConfig(("Credentials:signer:Components:0", "method"))
+            .Select(e => (Key: "CredProx:" + e.Key, Value: e.Value))
+            .Where(e => e.Key != "CredProx:Secrets:hmac-key") // the reference names nothing
+            .ToArray());
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentials(configuration);
+        var logger = new CapturingLogger();
+        var feature = new HmacSignFeature(
+            services.BuildServiceProvider().GetRequiredService<CredentialRegistryProvider>(),
+            new FakeTimeProvider(T0),
+            logger);
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        await feature.ApplyAsync(context, default);
+
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.True(state.IsAborted);
+        Assert.Equal(502, context.Response.StatusCode);
+        using var problem = JsonDocument.Parse(M4Contexts.ResponseBody(context));
+        Assert.Equal(
+            "credprox.credential_unavailable",
+            problem.RootElement.GetProperty("extensions").GetProperty("code").GetString());
+        Assert.Equal(
+            "The outbound credential could not be obtained.",
+            problem.RootElement.GetProperty("title").GetString());
+        Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+
+        // The warning carries the credential name and the obtain failure for operators —
+        // it is the only place the per-request reason surfaces (the body stays static).
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("signer", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be obtained", entry.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class CapturingLogger : ILogger<HmacSignFeature>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     private static string GetHeader(HttpRequestMessage request, string name) =>

@@ -214,6 +214,29 @@ internal sealed class TokenExchangeOptionsValidator : IValidateOptions<TokenExch
             failures.Add("Authority and JwksUri are mutually exclusive; pick one validation source.");
         }
 
+        // The key material that validates INBOUND tokens is a different risk class from
+        // outbound token endpoints (docs/adr/0003): over plain http anyone on the network
+        // path can swap the signing keys and forge an inbound token CredProx exchanges.
+        // https is the default; a private-network http IdP must opt out explicitly, and
+        // the refusal names the option. A template that hides the scheme passes startup;
+        // the runtime fetch fails closed on the same rule.
+        if (options.RequireHttpsMetadata)
+        {
+            if (TokenExchangeOptions.IsPlainHttp(options.Authority))
+            {
+                failures.Add(
+                    "Authority uses plain http, but the keys that validate inbound tokens must arrive over https. " +
+                    $"Set {nameof(TokenExchangeOptions.RequireHttpsMetadata)} to false to allow a private-network http IdP.");
+            }
+
+            if (TokenExchangeOptions.IsPlainHttp(options.JwksUri))
+            {
+                failures.Add(
+                    "JwksUri uses plain http, but the keys that validate inbound tokens must arrive over https. " +
+                    $"Set {nameof(TokenExchangeOptions.RequireHttpsMetadata)} to false to allow a private-network http IdP.");
+            }
+        }
+
         if (!hasAuthority && !string.IsNullOrEmpty(options.Issuer) && !hasJwks)
         {
             failures.Add("Issuer requires JwksUri (with Authority the issuer is discovered).");

@@ -417,3 +417,6 @@ samples/**/secrets.d/
 
 # az bicep build output stays a build artifact (round-1 convention: bicep only)
 infra/azure/*.json
+
+# Stryker.NET mutation-run output (plan 5.4; rerun per area)
+StrykerOutput/

@@ -10,9 +10,9 @@
          1.5+ drags Core 1.61 which re-exposes DefaultAzureCredential and collides
          (CS0433) with the repo-pinned Azure.Identity 1.13.1. -->
     <PackageVersion Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.3.2" />
-    <PackageVersion Include="CredProx" Version="0.8.2" />
-    <PackageVersion Include="CredProx.AzureKeyVault" Version="0.8.2" />
-    <PackageVersion Include="CredProx.Testing" Version="0.8.2" />
+    <PackageVersion Include="CredProx" Version="0.9.0" />
+    <PackageVersion Include="CredProx.AzureKeyVault" Version="0.9.0" />
+    <PackageVersion Include="CredProx.Testing" Version="0.9.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageVersion Include="Azure.Identity" Version="1.13.1" />
   </ItemGroup>
@@ -38,6 +38,9 @@
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.0.0" />
+    <!-- M31 (plan 5.4): in-process fuzzing entrypoint for the AFL++ harnesses; version
+         pinned here like every other tool. Only tests/CredProx.Fuzz consumes it. -->
+    <PackageVersion Include="SharpFuzz" Version="2.3.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>

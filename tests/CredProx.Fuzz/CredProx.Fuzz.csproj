@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- M31 coverage-guided fuzzing harnesses (plan 5.4). Deliberately NOT in CredProx.slnx:
+       excluded from the CI build, the five suites, the coverage gate and the pack. Built
+       host-side for smoke runs and inside the pinned AFL++ container for real runs. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Fuzz targets are internal; CredProx grants InternalsVisibleTo to this assembly,
+         and the internal gates it targets carry the experimental marker on purpose. -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpFuzz" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
+  </ItemGroup>
+
+</Project>

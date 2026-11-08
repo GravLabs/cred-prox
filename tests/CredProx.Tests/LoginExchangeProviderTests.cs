@@ -235,4 +235,240 @@ public sealed class LoginExchangeProviderTests
 
         Assert.Contains("PUT", error.Message);
     }
+
+    // --- M31 mutation triage: every failure message here is the operator's diagnosis
+    // of a live vendor response shape; none was asserted, and the runtime guards
+    // (null args, missing endpoint, empty templates) had no test at all. ---
+
+    [Fact]
+    public void Type_IsLoginExchange()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "t"));
+
+        Assert.Equal("LoginExchange", provider.Type);
+    }
+
+    [Fact]
+    public async Task NullOptions_Throws_NamingOptions()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "t"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(null!, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Equal("options", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task NullSecrets_Throws_NamingSecrets()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "t"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(AcmeOptions(), null!, Context(), default).AsTask());
+
+        Assert.Equal("secrets", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task NullContext_Throws_NamingContext()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "t"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(AcmeOptions(), AcmeSecrets(), null!, default).AsTask());
+
+        Assert.Equal("context", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task MissingLoginEndpoint_FailsNamingTheCredential_AndNoRequestIsSent()
+    {
+        var (provider, handler) = Create(new StubHttpHandler(HttpStatusCode.OK, "t"));
+
+        var options = AcmeOptions();
+        options.LoginEndpoint = null;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Contains("credential 'acme' has no LoginEndpoint configured", error.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Basic_NullUser_ExpandsToEmpty_AndPairIsColonLed()
+    {
+        // ExpandAsync(null) -> "": a null template must produce the empty half of the
+        // pair, never the literal template text or a crash.
+        var (provider, handler) = Create(new StubHttpHandler(HttpStatusCode.OK, "t"));
+
+        var options = AcmeOptions();
+        options.Basic = new LoginExchangeCredentials { User = null, Password = "p4ss" };
+
+        await provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default);
+
+        var expected = Convert.ToBase64String(Encoding.UTF8.GetBytes(":p4ss"));
+        Assert.Equal(expected, Assert.Single(handler.Requests).Headers.Authorization!.Parameter);
+    }
+
+    [Fact]
+    public async Task RawBody_OnlyWhitespace_FailsNamingWhatWasEmpty()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "   \n "));
+
+        var options = AcmeOptions();
+        options.Response = LoginExchangeResponse.RawBody;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Contains("credential 'acme' has an empty response body", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task JsonPath_ValueIsNotAString_FailsNamingThePath()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, """{"data":{"token":5}}"""));
+
+        var options = AcmeOptions();
+        options.Response = LoginExchangeResponse.JsonPath;
+        options.ResponseField = "data.token";
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Contains("JSON path 'data.token'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("is not a token string", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task JsonPath_MalformedJson_FailsWithJsonExceptionInside()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "{not json"));
+
+        var options = AcmeOptions();
+        options.Response = LoginExchangeResponse.JsonPath;
+        options.ResponseField = "token";
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Contains("returned malformed JSON", error.Message, StringComparison.Ordinal);
+        Assert.IsAssignableFrom<System.Text.Json.JsonException>(error.InnerException);
+    }
+
+    [Fact]
+    public async Task HeaderMode_HeaderAbsent_FailsNamingTheHeader()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "ignored"));
+
+        var options = AcmeOptions();
+        options.Response = LoginExchangeResponse.Header;
+        options.ResponseField = "X-Auth-Token";
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Contains("has no header 'X-Auth-Token'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AValuelessHeader_IsNotTreatedAsPresent_EquivalenceBasisForFirstVsFirstOrDefault()
+    {
+        // :184 FirstOrDefault -> First survived as an EQUIVALENCE mutant, and this is
+        // the evidence: the BCL never reports a zero-value header as present, so the
+        // value list at :184 is non-empty whenever FirstOrDefault is reached and First
+        // can never see an empty sequence. If a future runtime changes this contract,
+        // this test goes red and the equivalence row in the M31 report is re-opened.
+        var response = new HttpResponseMessage(HttpStatusCode.OK);
+        response.Headers.Add("X-Auth-Token", Array.Empty<string>());
+
+        Assert.False(response.Headers.TryGetValues("X-Auth-Token", out _));
+    }
+
+    [Fact]
+    public async Task CookieMode_CookieAbsent_FailsNamingTheCookie()
+    {
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "ignored"));
+
+        var options = AcmeOptions();
+        options.Response = LoginExchangeResponse.Cookie;
+        options.ResponseField = "SESSION";
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Contains("has no cookie 'SESSION'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CookieMode_MalformedPairsBeforeTarget_SkippedAndTargetFound()
+    {
+        // The '=' separator scan must skip pairs with no separator or an empty name,
+        // then keep scanning — first-match, not first-attempt.
+        var handler = new StubHttpHandler((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ignored") };
+            response.Headers.TryAddWithoutValidation("Set-Cookie", "=novalue; Path=/");
+            response.Headers.TryAddWithoutValidation("Set-Cookie", "junk-pair-no-equals");
+            response.Headers.TryAddWithoutValidation("Set-Cookie", "SESSION=ok; Path=/; HttpOnly");
+            return response;
+        });
+        var (provider, _) = Create(handler);
+
+        var options = AcmeOptions();
+        options.Response = LoginExchangeResponse.Cookie;
+        options.ResponseField = "SESSION";
+
+        var token = await provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default);
+
+        Assert.Equal("ok", token);
+    }
+
+    [Fact]
+    public async Task ResponseFieldRequired_Missing_FailsNamingMode()
+    {
+        // Runtime reachability: the validator refuses this combo at startup, but a
+        // provider called directly must still diagnose it, never NullReference.
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, """{"token":"t"}"""));
+
+        var options = AcmeOptions();
+        options.Response = LoginExchangeResponse.JsonPath;
+        options.ResponseField = null;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Contains("needs ResponseField for Response mode 'JsonPath'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UndefinedResponseMode_FailsNamingTheValue()
+    {
+        // Same binder quirk as TokenExchangeMode (M27 review N1): an undefined enum
+        // NUMBER reaches the provider; the default arm's message is the diagnosis.
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "t"));
+
+        var options = AcmeOptions();
+        options.Response = (LoginExchangeResponse)99;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, AcmeSecrets(), Context(), default).AsTask());
+
+        Assert.Contains("Response mode '99' is not supported", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetCredentialAsync_NullSecrets_ThrowsSynchronouslyNamingSecrets()
+    {
+        // The guard fires at call time — a null accessor must not reach the cache and
+        // surface later (or wrapped) from the exchange factory.
+        var (provider, _) = Create(new StubHttpHandler(HttpStatusCode.OK, "unused"));
+
+        var error = Assert.Throws<ArgumentNullException>(
+            () => provider.GetCredentialAsync(AcmeOptions(), null!, Context(), default));
+
+        Assert.Equal("secrets", error.ParamName);
+    }
 }

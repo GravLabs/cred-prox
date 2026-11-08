@@ -95,6 +95,53 @@ public sealed class AzureTokenCredentialProviderTests
         Assert.Equal("Bearer ", attachment.Prefix);
     }
 
+    // M31 mutation survivors: the argument guards on the provider and the add-on, and
+    // the registered type name, were untested at their own level.
+
+    [Fact]
+    public void Type_IsTheRegisteredCredentialTypeName()
+    {
+        var provider = CreateProvider(new FakeTokenCredential("t", TimeSpan.FromHours(1)));
+
+        Assert.Equal("TokenCredential", provider.Type);
+    }
+
+    [Fact]
+    public async Task NullOptions_Throws()
+    {
+        var provider = CreateProvider(new FakeTokenCredential("t", TimeSpan.FromHours(1)));
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(
+                null!, TestSecrets.AccessorFor(new()), Context(), default).AsTask());
+    }
+
+    [Fact]
+    public async Task NullContext_Throws()
+    {
+        var provider = CreateProvider(new FakeTokenCredential("t", TimeSpan.FromHours(1)));
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(
+                new TokenCredentialOptions { Scope = "scope" },
+                TestSecrets.AccessorFor(new()), null!, default).AsTask());
+    }
+
+    [Fact]
+    public void AddCredProxAzureTokenCredential_NullServices_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            AzureKeyVaultServiceCollectionExtensions.AddCredProxAzureTokenCredential(
+                null!, new FakeTokenCredential("t", TimeSpan.FromHours(1))));
+    }
+
+    [Fact]
+    public void AddCredProxAzureTokenCredential_NullCredential_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new ServiceCollection().AddCredProxAzureTokenCredential(null!));
+    }
+
     [Fact]
     public async Task AddCredProxAzureTokenCredential_BindsThroughTheBinder()
     {

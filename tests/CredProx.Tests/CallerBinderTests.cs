@@ -365,6 +365,148 @@ public sealed class CallerBinderTests
             binder.Rebind(new CallerRegistry(new Dictionary<string, CallerDefinition>())));
     }
 
+    [Fact]
+    public void KeyHashMissing_Fails_NamingKey()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+        }).Bind());
+
+        Assert.Contains(ex.Failures, f => f.Contains("key 'k1' has no KeyHash", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ExpiresAtNotADateTime_Fails_NamingKey()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = Hash("v1"),
+            ["CredProx:Callers:app-a:Keys:0:ExpiresAt"] = "tomorrow",
+        }).Bind());
+
+        Assert.Contains(
+            ex.Failures, f => f.Contains("key 'k1' has an ExpiresAt that is not a date-time", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NegativeCallerPermits_Fails()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = Hash("v1"),
+            ["CredProx:Callers:app-a:Limits:PermitsPerInterval"] = "-1",
+        }).Bind());
+
+        Assert.Contains(
+            ex.Failures, f => f.Contains("PermitsPerInterval '-1', which must be a non-negative integer", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ClusterPermitsNotAnInteger_Fails_NamingClusterPath()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = Hash("v1"),
+            ["CredProx:Callers:app-a:Limits:Clusters:c1:PermitsPerInterval"] = "many",
+        }).Bind());
+
+        Assert.Contains(
+            ex.Failures,
+            f => f.Contains("Limits:Clusters:c1:PermitsPerInterval 'many', which must be a non-negative integer", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ClusterIntervalZero_Fails()
+    {
+        // A zero-length window cannot hold a budget; only a positive TimeSpan is admitted.
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = Hash("v1"),
+            ["CredProx:Callers:app-a:Limits:Clusters:c1:Interval"] = "00:00:00",
+        }).Bind());
+
+        Assert.Contains(
+            ex.Failures,
+            f => f.Contains("Limits:Clusters:c1:Interval '00:00:00', which must be a positive TimeSpan", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ClusterIntervalNegative_Fails()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = Hash("v1"),
+            ["CredProx:Callers:app-a:Limits:Clusters:c1:Interval"] = "-00:00:10",
+        }).Bind());
+
+        Assert.Contains(
+            ex.Failures,
+            f => f.Contains("which must be a positive TimeSpan", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ClusterLimitsValid_BindThrough()
+    {
+        var registry = Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = Hash("v1"),
+            ["CredProx:Callers:app-a:Limits:Clusters:c1:PermitsPerInterval"] = "2",
+            ["CredProx:Callers:app-a:Limits:Clusters:c1:Interval"] = "00:00:10",
+        }).Bind();
+
+        var cluster = registry.Get("app-a").Limits!.Clusters["c1"];
+        Assert.Equal(2, cluster.PermitsPerInterval);
+        Assert.Equal(TimeSpan.FromSeconds(10), cluster.Interval);
+    }
+
+    [Fact]
+    public void EmptyRouteOperation_Fails()
+    {
+        // An empty Route is a mistake, not "any route": any-route is omitting the key.
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = Hash("v1"),
+            ["CredProx:Callers:app-a:Operations:0:Route"] = "",
+        }).Bind());
+
+        Assert.Contains(ex.Failures, f => f.Contains("operation with an empty Route", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void EmptySecretHash_Fails_NamingKey()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = "secret:hash-ref",
+            ["CredProx:Secrets:hash-ref"] = "",
+        }).Bind());
+
+        Assert.Contains(ex.Failures, f => f.Contains("resolved an empty KeyHash secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UnknownKey_Fails_ListingKnownKeysInOrdinalOrder()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        {
+            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = Hash("v1"),
+            ["CredProx:Callers:app-a:Bogus"] = "x",
+        }).Bind());
+
+        Assert.Contains(ex.Failures, f => f.Contains("unknown configuration key 'Bogus'", StringComparison.Ordinal));
+        Assert.Contains(ex.Failures, f => f.Contains("Known keys at that level: Keys, Limits, Operations.", StringComparison.Ordinal));
+    }
+
     private static CallerBinder Binder(Dictionary<string, string?> entries)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();

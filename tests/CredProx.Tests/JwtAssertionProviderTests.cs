@@ -352,4 +352,226 @@ public sealed class JwtAssertionProviderTests : IDisposable
         Assert.Contains("malformed", ex.Message);
         Assert.DoesNotContain("echoed", ex.Message);
     }
+
+    // --- M31 mutation triage: the argument guards and Type identity had no test;
+    // the assertion header and jti format survived string mutants; the expires_in
+    // comparator survived sign mutants; and every certificate-diagnosis message
+    // (wrong key type, unloadable material) was never asserted. ---
+
+    [Fact]
+    public void Type_IsJwtAssertion()
+    {
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        Assert.Equal("JwtAssertion", provider.Type);
+    }
+
+    [Fact]
+    public async Task NullOptions_Throws_NamingOptions()
+    {
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(null!, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Equal("options", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task NullSecrets_Throws_NamingSecrets()
+    {
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(AssertionOptions(), null!, Context(), default).AsTask());
+
+        Assert.Equal("secrets", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task NullContext_Throws_NamingContext()
+    {
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), null!, default).AsTask());
+
+        Assert.Equal("context", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task EmptySigningMaterial_FailsBeforeAnyRequest()
+    {
+        var (provider, _, handler) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var options = AssertionOptions();
+        options.SigningKey = string.Empty;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("signing key does not resolve", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task MintedAssertion_HeaderNamesAlgorithmAndType_JtiIsUndashedGuid()
+    {
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok"}"""));
+
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+
+        var form = ParseForm(handler.Body(0)!);
+        var (header, payload, _, _) = ParseJwt(form["client_assertion"]);
+        using var headerJson = JsonDocument.Parse(header);
+        Assert.Equal("RS256", headerJson.RootElement.GetProperty("alg").GetString());
+        Assert.Equal("JWT", headerJson.RootElement.GetProperty("typ").GetString());
+        using var payloadJson = JsonDocument.Parse(payload);
+        Assert.Matches("^[0-9a-f]{32}$", payloadJson.RootElement.GetProperty("jti").GetString());
+    }
+
+    [Fact]
+    public async Task EmptyIssuer_FailsNamingMissingRequiredValue()
+    {
+        var (provider, _, handler) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var options = AssertionOptions();
+        options.Issuer = string.Empty;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("missing a required value", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task UnsupportedAlgorithmValue_FailsNamingIt()
+    {
+        // Same undefined-enum-number shape as the validator's Mode guard (M27 review N1),
+        // reachable when options are constructed in code.
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var options = AssertionOptions();
+        options.Algorithm = (JwtAssertionAlgorithm)99;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("Unsupported JWT assertion algorithm '99'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExpiresIn_Zero_IgnoresVendorValue_KeepsDefaultLifetime()
+    {
+        // expires_in 0 must fall back to DefaultLifetime (the > 0 bound in TryReadSeconds):
+        // a token 'expiring' at mint would make every proxied call re-mint. A mutant
+        // accepting 0 refetches immediately and shows two vendor calls.
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok","expires_in":0}"""));
+
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ExpiresIn_BeyondDefaultLifetime_ExtendsTheCacheWindow()
+    {
+        // The sign mutant ('seconds < 0') discards the vendor's 7200 and stores the
+        // 1 h default: its token hits the 80 % refresh point at 48 min. The real
+        // token lasts 2 h (refresh at 96 min), so at 55 min exactly one fetch happened.
+        var time = new FakeTimeProvider();
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok","expires_in":7200}"""), time);
+
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+        time.Advance(TimeSpan.FromMinutes(55));
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+
+        Assert.Single(handler.Requests);
+    }
+
+    private static string PfxBase64For(RSA rsa) =>
+        PfxBase64(new CertificateRequest(
+            new X500DistinguishedName("CN=credprox-test"), rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+
+    private static string PfxBase64For(ECDsa ecdsa) =>
+        PfxBase64(new CertificateRequest(new X500DistinguishedName("CN=credprox-test"), ecdsa, HashAlgorithmName.SHA256));
+
+    private static string PfxBase64(CertificateRequest request)
+    {
+        using var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        return Convert.ToBase64String(cert.Export(X509ContentType.Pfx));
+    }
+
+    [Fact]
+    public async Task RsaAlgorithmWithEcdsaCertificate_FailsNamingMissingRsaKey()
+    {
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var options = AssertionOptions();
+        options.SigningKey = null;
+        options.SigningCertificate = PfxBase64For(_ecdsa);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("The signing certificate has no RSA private key", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EcdsaAlgorithmWithRsaCertificate_FailsNamingMissingEcdsaKey()
+    {
+        // The :314 conditional mutant routes certificate material through the plain
+        // PEM import instead: it cannot load a PKCS #12 blob and dies with a raw
+        // cryptographic error instead of this diagnosis.
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var options = AssertionOptions();
+        options.Algorithm = JwtAssertionAlgorithm.ES256;
+        options.SigningKey = null;
+        options.SigningCertificate = PfxBase64For(_rsa);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("The signing certificate has no ECDSA private key", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CertificateMaterial_ValidBase64ButGarbage_FailsAsCouldNotBeLoaded()
+    {
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var options = AssertionOptions();
+        options.SigningKey = null;
+        options.SigningCertificate = Convert.ToBase64String([1, 2, 3, 4, 5, 6, 7, 8]);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("The signing certificate could not be loaded", ex.Message, StringComparison.Ordinal);
+        Assert.IsAssignableFrom<CryptographicException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task CertificateMaterial_NotBase64AtAll_FailsAsCouldNotBeLoaded()
+    {
+        // M31 triage fix: the FormatException from the Base-64 decode is wrapped like
+        // every other unloadable-material shape, never surfaced raw.
+        var (provider, _, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var options = AssertionOptions();
+        options.SigningKey = null;
+        options.SigningCertificate = "not base64 at all!!";
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("The signing certificate could not be loaded", ex.Message, StringComparison.Ordinal);
+        Assert.IsAssignableFrom<FormatException>(ex.InnerException);
+    }
 }

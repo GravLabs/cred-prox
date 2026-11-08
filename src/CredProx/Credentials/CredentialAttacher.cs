@@ -28,7 +28,11 @@ internal static class CredentialAttacher
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrEmpty(name);
-        ArgumentNullException.ThrowIfNull(value);
+        // An empty credential is a misconfiguration, and for a BCL-known header name it is
+        // worse than useless: the header store silently refuses to hold an empty value, so
+        // placement would 'succeed' while nothing reaches the wire (M31 fuzz triage).
+        // Refuse loudly at placement instead of attaching nothing silently.
+        ArgumentException.ThrowIfNullOrEmpty(value);
 
         var content = string.IsNullOrEmpty(prefix) ? value : prefix + value;
 
@@ -36,8 +40,46 @@ internal static class CredentialAttacher
         {
             // Remove-then-add: a caller-supplied header is replaced, not merged
             // (§3.4 header hygiene: Authorization is replaced, not merged).
-            request.Headers.Remove(name);
-            request.Headers.Add(name, content);
+            try
+            {
+                request.Headers.Remove(name);
+                request.Headers.Add(name, content);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // The BCL store answers well-formed but restricted names ('Content-Length',
+                // response-only names, ...) with InvalidOperationException ('Misused header
+                // name'). Every other placement rejection here is an ArgumentException, so
+                // translate — the pipeline surfaces one documented reject type, not a raw
+                // BCL type, for an operator-set header name (M31 fuzz triage).
+                throw new ArgumentException(
+                    $"'{name}' cannot be used as a credential header name: {ex.Message}",
+                    nameof(name));
+            }
+            catch (FormatException ex)
+            {
+                // A parsed known name also refuses values outside its grammar with a raw
+                // FormatException ('te' + "a b"); same translation, same single reject type.
+                throw new ArgumentException(
+                    $"'{name}' cannot be used as a credential header name: {ex.Message}",
+                    nameof(name));
+            }
+
+            // Read-back probe: some well-formed, unrestricted names are BCL-parsed headers
+            // ('te', 'date', 'range', ...) whose stored value is re-serialized on read and
+            // on the wire — the credential would silently become its parsed form (M31 fuzz
+            // P-5). A credential must reach the vendor byte-identical, so placement that
+            // cannot preserve the value refuses, same reject type as above.
+            if (!request.Headers.TryGetValues(name, out var stored)
+                || stored.Count() != 1
+                || stored.First() != content)
+            {
+                request.Headers.Remove(name);
+                throw new ArgumentException(
+                    $"'{name}' is parsed by the HTTP header store and would not carry the credential verbatim.",
+                    nameof(name));
+            }
+
             return;
         }
 

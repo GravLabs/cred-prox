@@ -1,0 +1,10 @@
+{
+  "stryker-config": {
+    "reporters": ["progress", "Html", "Json"],
+    "thresholds": { "high": 80, "low": 70 },
+    "concurrency": 8,
+    "solution": "CredProx.slnx",
+    "target-framework": "net10.0",
+    "test-case-filter": "FullyQualifiedName!~PresetTests&FullyQualifiedName!~KeycloakOAuthTests&FullyQualifiedName!~NginxMTlsTests"
+  }
+}

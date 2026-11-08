@@ -50,6 +50,49 @@ public sealed class StaticKeyProviderTests
                 TestSecrets.AccessorFor(new()), Context(), default).AsTask());
 
         Assert.Contains("api-key", error.Message);
+        // The two failure messages are different diagnoses ('nothing configured' vs
+        // 'reference does not resolve'); pin which one this input must produce.
+        Assert.Contains("no Secret configured", error.Message, StringComparison.Ordinal);
+    }
+
+    // M31 mutation triage: argument guards whose removal stays silent on the
+    // literal-secret path, so the assertion is the exception itself.
+    [Fact]
+    public async Task NullOptions_Throws_NamingOptions()
+    {
+        var provider = new StaticKeyProvider();
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(
+                null!, TestSecrets.AccessorFor(new()), Context(), default).AsTask());
+
+        Assert.Equal("options", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task NullSecrets_Throws_NamingSecrets()
+    {
+        var provider = new StaticKeyProvider();
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(
+                new StaticKeyOptions { Secret = "plain-key", Name = "X-Api-Key" },
+                null!, Context(), default).AsTask());
+
+        Assert.Equal("secrets", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task NullContext_Throws_NamingContext()
+    {
+        var provider = new StaticKeyProvider();
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(
+                new StaticKeyOptions { Secret = "plain-key", Name = "X-Api-Key" },
+                TestSecrets.AccessorFor(new()), null!, default).AsTask());
+
+        Assert.Equal("context", ex.ParamName);
     }
 
     [Fact]
@@ -94,6 +137,69 @@ public sealed class CredentialAttacherTests
         Assert.Equal("key-1", Assert.Single(request.Headers.GetValues("X-Api-Key")));
     }
 
+    // M31 fuzz triage: an empty credential value used to 'succeed' while attaching
+    // nothing (the BCL header store refuses to hold an empty value for known names,
+    // and nothing reaches the wire). Every placement must refuse it by name instead.
+    [Theory]
+    [InlineData(CredentialLocation.Header)]
+    [InlineData(CredentialLocation.Cookie)]
+    [InlineData(CredentialLocation.Query)]
+    public void EmptyValue_IsRefused_NamingValue(CredentialLocation location)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api");
+
+        var ex = Assert.Throws<ArgumentException>(
+            () => CredentialAttacher.Apply(request, location, "X-Api-Key", string.Empty));
+
+        Assert.Equal("value", ex.ParamName);
+    }
+
+    // Well-formed but restricted header names are refused as documented ArgumentExceptions,
+    // never as a raw BCL 'Misused header name' InvalidOperationException at request time.
+    [Fact]
+    public void RestrictedHeaderName_IsRefused_NamingName()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api");
+
+        var ex = Assert.Throws<ArgumentException>(
+            () => CredentialAttacher.Apply(request, CredentialLocation.Header, "Content-Length", "k"));
+
+        Assert.Equal("name", ex.ParamName);
+        Assert.Contains("cannot be used as a credential header name", ex.Message, StringComparison.Ordinal);
+    }
+
+    // M31 fuzz P-5: well-formed, unrestricted names that the BCL header store PARSES
+    // ('te', ...) used to accept a credential whose stored — and therefore wire — form
+    // differed from what was configured ('te' + "\ta " came back as "a"). Placement
+    // read-backs and refuses: the credential reaches the vendor byte-identical or not at all.
+    [Theory]
+    [InlineData("te", "\ta ")]  // parses, but re-serializes as "a" — the read-back refuse
+    [InlineData("te", "a b")]   // outside the parsed grammar — the raw FormatException translated
+    public void BclParsedHeaderName_WouldNotPreserveValue_IsRefused_NamingName(string name, string value)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api");
+
+        var ex = Assert.Throws<ArgumentException>(
+            () => CredentialAttacher.Apply(request, CredentialLocation.Header, name, value));
+
+        Assert.Equal("name", ex.ParamName);
+        Assert.False(request.Headers.Contains(name)); // a refused placement leaves nothing behind
+    }
+
+    // The probe must not over-refuse: names whose parsed form IS the value (and unknown
+    // names, stored verbatim) still attach exactly once verbatim.
+    [Theory]
+    [InlineData("te", "trail")]
+    [InlineData("X-Api-Key", "key-1")]
+    public void HeaderName_KeptVerbatim_StillAttaches(string name, string value)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api");
+
+        CredentialAttacher.Apply(request, CredentialLocation.Header, name, value);
+
+        Assert.Equal(value, Assert.Single(request.Headers.GetValues(name)));
+    }
+
     [Fact]
     public void Query_ReplacesExistingParameterAndKeepsOthers()
     {
@@ -120,12 +226,14 @@ public sealed class CredentialAttacherTests
     }
 
     [Fact]
-    public void Query_WithoutUri_Fails()
+    public void Query_WithoutUri_Fails_NamingTheMissingUri()
     {
         var request = new HttpRequestMessage(HttpMethod.Get, (string?)null);
 
-        Assert.Throws<InvalidOperationException>(() =>
+        var ex = Assert.Throws<InvalidOperationException>(() =>
             CredentialAttacher.Apply(request, CredentialLocation.Query, "api_key", "k1"));
+
+        Assert.Contains("no URI to attach a query credential", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -186,5 +294,96 @@ public sealed class CredentialAttacherTests
         Assert.True(CredentialAttacher.IsValidCookieName("CRMSESSION"));
         Assert.True(CredentialAttacher.IsValidCookieName("JSESSIONID"));
         Assert.True(CredentialAttacher.IsValidCookieName("auth-token_v2"));
+    }
+
+    // --- M31 mutation triage: guards and boundaries that survived because no
+    // assertion pinned exception type, paramName, message, or the exact boundary
+    // character. ---
+
+    [Fact]
+    public void NullRequest_Throws_NamingRequest()
+    {
+        var ex = Assert.Throws<ArgumentNullException>(() =>
+            CredentialAttacher.Apply(null!, CredentialLocation.Header, "X-Api-Key", "v"));
+
+        Assert.Equal("request", ex.ParamName);
+    }
+
+    // The BCL header store would throw its own ArgumentNullException('name') for a
+    // header placement, so the null-name guard is proven via cookie placement,
+    // where its absence would surface as the cookie-name ArgumentException instead.
+    [Fact]
+    public void Cookie_NullName_Throws_NamingName()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api");
+
+        var ex = Assert.Throws<ArgumentNullException>(() =>
+            CredentialAttacher.Apply(request, CredentialLocation.Cookie, null!, "v"));
+
+        Assert.Equal("name", ex.ParamName);
+    }
+
+    [Fact]
+    public void Cookie_NullValue_Throws_NamingValue()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api");
+
+        var ex = Assert.Throws<ArgumentNullException>(() =>
+            CredentialAttacher.Apply(request, CredentialLocation.Cookie, "CRMSESSION", null!));
+
+        Assert.Equal("value", ex.ParamName);
+    }
+
+    [Fact]
+    public void Cookie_InvalidName_MessageNamesRfc6265()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api");
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            CredentialAttacher.Apply(request, CredentialLocation.Cookie, "bad name", "v"));
+
+        Assert.Contains("not a valid RFC 6265 cookie name", ex.Message, StringComparison.Ordinal);
+    }
+
+    // Cookie placement must not touch the request URI (falls through to the query
+    // rebuild if the branch's return disappears).
+    [Fact]
+    public void Cookie_Placement_LeavesRequestUriUntouched()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api?keep=yes");
+
+        CredentialAttacher.Apply(request, CredentialLocation.Cookie, "CRMSESSION", "session-1");
+
+        Assert.Equal("https://vendor.example/api?keep=yes", request.RequestUri!.ToString());
+    }
+
+    // Boundary characters: '(' is tspecial #1 (IndexOf == 0 defeats an off-by-one
+    // scan), DEL (0x7f) is refused by the ASCII rule's boundary.
+    [Theory]
+    [InlineData("(x")]
+    [InlineData("a\u007fb")]
+    public void IsValidCookieName_RejectsBoundaryCharacters(string name) =>
+        Assert.False(CredentialAttacher.IsValidCookieName(name));
+
+    [Fact]
+    public void IsValidCookieName_EmptyOrNull_False()
+    {
+        Assert.False(CredentialAttacher.IsValidCookieName(string.Empty));
+        Assert.False(CredentialAttacher.IsValidCookieName(null!));
+    }
+
+    // The refusal message is the operator's fix-it text: all three consequences
+    // must survive edits.
+    [Fact]
+    public void Cookie_UnsafeValueMessage_NamesAllThreeConsequences()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://vendor.example/api");
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            CredentialAttacher.Apply(request, CredentialLocation.Cookie, "CRMSESSION", "value;evil=1"));
+
+        Assert.Contains("must be ASCII", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("split the request", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Latin-1 framing", ex.Message, StringComparison.Ordinal);
     }
 }

@@ -21,6 +21,8 @@
     <InternalsVisibleTo Include="CredProx.SecurityTests" />
     <InternalsVisibleTo Include="CredProx.LoadTests" />
     <InternalsVisibleTo Include="CredProx.Benchmarks" />
+    <!-- M31 (plan 5.4): coverage-guided fuzz harnesses target internal gates directly. -->
+    <InternalsVisibleTo Include="CredProx.Fuzz" />
   </ItemGroup>
 
   <PropertyGroup>

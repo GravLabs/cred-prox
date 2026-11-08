@@ -31,6 +31,30 @@ public sealed class CallerStoreTests
     }
 
     [Fact]
+    public async Task NullKeyValue_Throws_NamingKeyValue()
+    {
+        var store = Store(("caller-a", [("k1", KeyA, null)]));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(
+            () => store.ResolveKeyAsync(null!, default).AsTask());
+
+        Assert.Equal("keyValue", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task CancelledToken_StopsResolution()
+    {
+        // A client that hung up mid-auth must not keep the request hashing the whole
+        // key set; the cancellation surfaces as cancellation, not as a resolved key.
+        var store = Store(("caller-a", [("k1", KeyA, null)]));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => store.ResolveKeyAsync(KeyA, cts.Token).AsTask());
+    }
+
+    [Fact]
     public async Task UnknownKey_ResolvesToNull()
     {
         var store = Store(("caller-a", [("k1", KeyA, null)]));

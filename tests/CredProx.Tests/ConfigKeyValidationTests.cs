@@ -406,6 +406,154 @@ public sealed class ConfigKeyValidationTests
         Assert.NotNull(services);
     }
 
+    // ---- M31 mutation triage: walker branches the product-shape tests never reached ----
+
+    [Fact]
+    public void TypeKeyAtOptionsSectionRoot_IsUnknown_OnlyCredentialsOwnIt()
+    {
+        // The startup wrapper validates a section without the credential-only Type/Preset
+        // keys: Type at the Throttling root is a stray key, not the credential discriminator.
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => new ServiceCollection().AddCredProxThrottling(Root(new()
+            {
+                ["CredProx:Throttling:Type"] = "StaticKey",
+            })));
+
+        Assert.Contains("unknown configuration key 'Type'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TypeKeyInsideNestedComplexBlock_IsUnknown()
+    {
+        // Descending into a nested complex block (an Hmac credential's Partition) must not
+        // re-add the credential-root keys: Partition:Type is a stray key, not a discriminator.
+        var config = Root(new()
+        {
+            ["CredProx:Credentials:svc:Type"] = "Hmac",
+            ["CredProx:Credentials:svc:Secret"] = "secret:k",
+            ["CredProx:Credentials:svc:Name"] = "X-Hmac",
+            ["CredProx:Credentials:svc:Partition:Type"] = "StaticKey",
+            ["CredProx:Secrets:k"] = "v",
+        });
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(config);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentials(config);
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => services.BuildServiceProvider().GetRequiredService<CredentialRegistryProvider>());
+
+        Assert.Contains("Partition:Type", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PresetKeyInsideClusterEntry_IsUnknown()
+    {
+        // A dictionary entry is validated against the value type alone: the credential-only
+        // keys are not allowed a third level down either.
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => new ServiceCollection().AddCredProxThrottling(Root(new()
+            {
+                ["CredProx:Throttling:Clusters:vendor:Preset"] = "x",
+            })));
+
+        Assert.Contains("Clusters:vendor:Preset", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnknownKeyWithChildren_YieldsOnlyTheUnknownKeyError()
+    {
+        // The walker must not also report 'nested block' under a key it already named
+        // unknown — one problem, one diagnosis.
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => new ServiceCollection().AddCredProxThrottling(Root(new()
+            {
+                ["CredProx:Throttling:QueueLimi:Inner"] = "1",
+            })));
+
+        Assert.Single(ex.Failures);
+        Assert.Contains("unknown configuration key", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("nested block", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BlockUnderIntegerScalar_IsScalarNesting_NotListIndex()
+    {
+        // The scalar-list detector must only fire for real IEnumerable<T> properties: an int
+        // with a block under it is the M16 scalar-nesting class, not a misindexed list entry.
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => new ServiceCollection().AddCredProxThrottling(Root(new()
+            {
+                ["CredProx:Throttling:QueueLimit:Block"] = "1",
+            })));
+
+        Assert.Contains("nested block under 'QueueLimit'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("must be indexed", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ScalarNestingMessage_ListsEveryChildByFullPath_InOrdinalOrder()
+    {
+        // Insertion order here is b before A; the diagnosis must sort ordinally (A, b) and
+        // give each found key its full path, so the operator can grep it.
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => new ServiceCollection().AddCredProxThrottling(Root(new()
+            {
+                ["CredProx:Throttling:MaxPause:b"] = "1",
+                ["CredProx:Throttling:MaxPause:A"] = "2",
+            })));
+
+        Assert.Contains("(found MaxPause:A, MaxPause:b)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("The binder cannot bind both a value and a block", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("remove the nesting or move the keys to the block that owns them", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ListIndexMessage_PinsItsWholeDiagnosis()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(() => BindDestinations(
+            ("Destinations:acme:Template", "https://acme.example/"),
+            ("Destinations:acme:Allowed:oops", "prod")));
+
+        Assert.Contains("List entries must be indexed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("the binder ignores every other key", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("index it or remove it.", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnknownKeyMessage_PinsItsWholeDiagnosis()
+    {
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => new ServiceCollection().AddCredProxThrottling(Root(new()
+            {
+                ["CredProx:Throttling:QueueLimiit"] = "5",
+            })));
+
+        Assert.Contains("An unknown key is ignored by the binder", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("silently drop the setting it was meant to control", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("fix the spelling or remove the key.", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NestedBlockUnderNullableClusterOverride_FailsStartup()
+    {
+        // A Nullable<T> override is a leaf after unwrapping: a block under
+        // Clusters:<id>:Interval (the Nullable shape's own property names) is the typo
+        // class — it must be refused, not silently treated as the property's parts.
+        var services = new ServiceCollection();
+        var config = Root(new Dictionary<string, string?>
+        {
+            ["CredProx:Throttling:Clusters:vendor:Interval:Value"] = "00:00:05",
+            ["CredProx:Throttling:Clusters:vendor:MaxPause:HasValue"] = "true",
+        });
+
+        var ex = Assert.Throws<OptionsValidationException>(() => services.AddCredProxThrottling(config));
+
+        Assert.Contains("Interval", ex.Message, StringComparison.Ordinal);
+    }
+
     // ---- helpers ----
 
     private static IConfiguration Root(Dictionary<string, string?> entries) =>

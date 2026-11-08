@@ -263,8 +263,11 @@ public sealed class KillSwitchTests
     [Fact]
     public async Task Rejections_IncrementMeter_WithKindAndIdTags()
     {
+        // Unique caller id + id-filtered callback: MeterListener is process-wide, so
+        // rejections from parallel kill-switch tests would land in `seen` and break
+        // Assert.Single — only THIS test's caller counts here.
         var feature = Feature(
-            ("KillSwitch:Callers:0", "app-a"),
+            ("KillSwitch:Callers:0", "ks-meter-caller"),
             ("KillSwitch:Clusters:0", "some-other-cluster"));
 
         using var listener = new MeterListener();
@@ -292,15 +295,18 @@ public sealed class KillSwitchTests
                 }
             }
 
-            seen.Add((kind!, id!));
+            if (id == "ks-meter-caller")
+            {
+                seen.Add((kind!, id));
+            }
         });
         listener.Start();
 
-        Assert.True(Aborted(await Apply(feature, "app-a"))); // caller
+        Assert.True(Aborted(await Apply(feature, "ks-meter-caller"))); // caller
         Assert.False(Aborted(await Apply(feature, "app-b"))); // passes; no measurement
 
         Assert.Single(seen);
-        Assert.Equal(("caller", "app-a"), seen[0]);
+        Assert.Equal(("caller", "ks-meter-caller"), seen[0]);
     }
 
     // ---- helpers ----

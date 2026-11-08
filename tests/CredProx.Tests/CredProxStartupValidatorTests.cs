@@ -385,4 +385,192 @@ public sealed class CredProxStartupValidatorTests
 
         await validator.StartAsync(default);
     }
+
+    // --- M31 mutation triage: the eager-resolution catches and the caller-route /
+    // dynamic-shape edges. Every registry whose bind can throw gets a witness that its
+    // failures land in the collected startup report (a swallowed catch would turn a
+    // loud startup failure back into a first-request surprise); the caller operation
+    // Route cross-check is pinned both ways; and the fully-dynamic warning fires only on
+    // shapes with no literal left, never on templates with literal affixes. ---
+
+    [Fact]
+    public async Task BrokenCredentialsSection_LandsInStartupReport()
+    {
+        var configuration = Config();
+        using var services = BuildServices(
+            configuration,
+            mutate: e => e["CredProx:Credentials:broken:Type"] = "Magic");
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => validator.StartAsync(default));
+
+        Assert.Contains("broken", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BrokenDestinationsSection_LandsInStartupReport()
+    {
+        var configuration = Config();
+        using var services = BuildServices(
+            configuration,
+            mutateServices: s => s.AddSingleton<DestinationRegistry>(
+                _ => throw new OptionsValidationException("Destinations", typeof(DestinationRegistry), ["simulated destination bind failure"])));
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => validator.StartAsync(default));
+
+        Assert.Contains("simulated destination bind failure", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BrokenConnectionsSection_LandsInStartupReport()
+    {
+        var configuration = Config();
+        using var services = BuildServices(
+            configuration,
+            mutateServices: s => s.AddSingleton<ConnectionRegistry>(
+                _ => throw new OptionsValidationException("Connections", typeof(ConnectionRegistry), ["simulated connection bind failure"])));
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => validator.StartAsync(default));
+
+        Assert.Contains("simulated connection bind failure", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BrokenCallersSection_LandsInStartupReport()
+    {
+        // The caller registry is optional, but when it is registered its bind failure is
+        // a startup failure — resolved eagerly here precisely for that reason.
+        var configuration = Config();
+        using var services = BuildServices(
+            configuration,
+            mutateServices: s => s.AddSingleton<CallerRegistry>(
+                _ => throw new OptionsValidationException("Callers", typeof(CallerRegistry), ["caller 'app-a' has no keys"])));
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => validator.StartAsync(default));
+
+        Assert.Contains("caller 'app-a' has no keys", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BrokenKillSwitchSection_LandsInStartupReport()
+    {
+        // M18: an unreadable switch is a startup failure, never an unarmed switch.
+        var configuration = Config();
+        using var services = BuildServices(
+            configuration,
+            mutateServices: s => s.AddSingleton<KillSwitchRegistry>(
+                _ => throw new OptionsValidationException("KillSwitch", typeof(KillSwitchRegistry), ["simulated kill switch bind failure"])));
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => validator.StartAsync(default));
+
+        Assert.Contains("simulated kill switch bind failure", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CallerOperation_UnknownRoute_Fails()
+    {
+        var extras = new (string Key, string? Value)[]
+        {
+            ("CredProx:Callers:app-a:Keys:0:KeyId", "k1"),
+            ("CredProx:Callers:app-a:Keys:0:KeyHash", "sha256:" + new string('a', 64)),
+            ("CredProx:Callers:app-a:Operations:0:Route", "ghost-route"),
+            ("CredProx:Callers:app-a:Operations:0:Methods:0", "GET"),
+        };
+        var configuration = Config(extras);
+        using var services = BuildServices(
+            configuration,
+            mutate: e => { foreach (var (key, value) in extras) e[key] = value; },
+            mutateServices: s => s.AddCredProxCallerAuthentication(Config(extras)));
+        var validator = Validator(
+            services,
+            configuration,
+            new ProxySpec([new RouteConfig { RouteId = "r1" }]));
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => validator.StartAsync(default));
+
+        Assert.Contains("caller 'app-a' declares an operation for unknown route 'ghost-route'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CallerOperation_ExistingRoute_Starts()
+    {
+        var extras = new (string Key, string? Value)[]
+        {
+            ("CredProx:Callers:app-a:Keys:0:KeyId", "k1"),
+            ("CredProx:Callers:app-a:Keys:0:KeyHash", "sha256:" + new string('a', 64)),
+            ("CredProx:Callers:app-a:Operations:0:Route", "r1"),
+            ("CredProx:Callers:app-a:Operations:0:Methods:0", "GET"),
+        };
+        var configuration = Config(extras);
+        using var services = BuildServices(
+            configuration,
+            mutate: e => { foreach (var (key, value) in extras) e[key] = value; },
+            mutateServices: s => s.AddCredProxCallerAuthentication(Config(extras)));
+        var validator = Validator(
+            services,
+            configuration,
+            new ProxySpec([new RouteConfig { RouteId = "r1" }]));
+
+        await validator.StartAsync(default);
+    }
+
+    [Fact]
+    public async Task EmptyMetadataValues_AreOptOuts_NotUnknownReferences()
+    {
+        // An empty CredProx.Credential / CredProx.Destination value opts out of that
+        // cross-check; it is not a reference to the empty name.
+        var configuration = Config();
+        using var services = BuildServices(configuration);
+        var validator = Validator(
+            services,
+            configuration,
+            new ProxySpec(
+                [
+                    new RouteConfig
+                    {
+                        RouteId = "r1",
+                        Metadata = new Dictionary<string, string>
+                        {
+                            [CredProxMetadata.Credential] = string.Empty,
+                            [CredProxMetadata.Destination] = string.Empty,
+                        },
+                    },
+                ]));
+
+        await validator.StartAsync(default);
+    }
+
+    [Fact]
+    public async Task LiteralSecretDeclaration_NoDynamicWarning()
+    {
+        var configuration = Config();
+        using var services = BuildServices(configuration);
+        var validator = Validator(services, configuration);
+
+        await validator.StartAsync(default);
+
+        Assert.DoesNotContain(_logger.Messages, m => m.Contains("fully-dynamic", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("secret:tok-{partition}")]  // literal prefix survives the placeholder strip
+    [InlineData("secret:{partition}-suffix")] // literal suffix survives the closing brace
+    public async Task TemplateSecretDeclaration_NoDynamicWarning(string declaration)
+    {
+        // Only shapes with no literal residue admit every name; a template anchored by
+        // any literal is bounded and must start silently.
+        var configuration = Config(("CredProx:Credentials:contoso:Secret", declaration));
+        using var services = BuildServices(
+            configuration,
+            mutate: e => e["CredProx:Credentials:contoso:Secret"] = declaration);
+        var validator = Validator(services, configuration);
+
+        await validator.StartAsync(default);
+
+        Assert.DoesNotContain(_logger.Messages, m => m.Contains("fully-dynamic", StringComparison.Ordinal));
+    }
 }

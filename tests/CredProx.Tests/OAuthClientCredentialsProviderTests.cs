@@ -290,6 +290,75 @@ public sealed class OAuthClientCredentialsProviderTests
         Assert.Empty(handler.Requests);
     }
 
+    // --- M31 mutation triage: Type identity and the null-argument guards had no
+    // assertion, and the expires_in comparator mutants (accept 0, accept unparseable)
+    // survived because no test pinned what an unusable expires_in must do: fall back
+    // to the default lifetime — never a zero-lived or crashing cache entry. ---
+
+    [Fact]
+    public void Type_IsOAuthClientCredentials()
+    {
+        var (provider, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        Assert.Equal("OAuthClientCredentials", provider.Type);
+    }
+
+    [Fact]
+    public async Task NullOptions_Throws_NamingOptions()
+    {
+        var (provider, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(null!, Secrets(), Context(), default).AsTask());
+
+        Assert.Equal("options", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task NullSecrets_Throws_NamingSecrets()
+    {
+        var (provider, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(OAuthOptions(OAuthClientAuthentication.BasicHeader), null!, Context(), default).AsTask());
+
+        Assert.Equal("secrets", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task NullContext_Throws_NamingContext()
+    {
+        var (provider, _) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            provider.GetCredentialAsync(OAuthOptions(OAuthClientAuthentication.BasicHeader), Secrets(), null!, default).AsTask());
+
+        Assert.Equal("context", ex.ParamName);
+    }
+
+    [Theory]
+    [InlineData("0")]        // number zero: expired at mint is never a lifetime
+    [InlineData("\"0\"")]    // string zero, same rule through the string arm
+    [InlineData("-5")]       // negative
+    [InlineData("\"soon\"")] // unparseable
+    [InlineData("null")]     // JSON null reaches neither arm
+    public async Task UnusableExpiresIn_FallsBackToDefaultLifetime_AndIsCached(string json)
+    {
+        // The boundary mutants (seconds >= 0, IsFinite || seconds > 0, always-true)
+        // all store a zero/negative/throwing lifetime here: the second call would
+        // re-fetch (or the first would crash) instead of hitting the cache.
+        var (provider, handler) = CreateProvider(new StubHttpHandler(
+            HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}"""));
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+        var token = await provider.GetCredentialAsync(options, Secrets(), Context(), default);
+        var again = await provider.GetCredentialAsync(options, Secrets(), Context(), default);
+
+        Assert.Equal("tok-1", token);
+        Assert.Equal("tok-1", again);
+        Assert.Single(handler.Requests);
+    }
+
     private static Dictionary<string, string> ParseForm(string body) =>
         body.Split('&', StringSplitOptions.RemoveEmptyEntries)
             .Select(pair => pair.Split('=', 2))

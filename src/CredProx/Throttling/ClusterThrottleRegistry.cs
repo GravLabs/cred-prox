@@ -21,10 +21,7 @@ internal sealed class ClusterThrottleRegistry(ThrottleOptions options, TimeProvi
         int QueueLimit,
         TimeSpan MaxQueueWait,
         bool PauseOnVendorThrottle,
-        TimeSpan MaxPause)
-    {
-        public bool HasLimits => PermitsPerInterval > 0 || MaxConcurrency > 0;
-    }
+        TimeSpan MaxPause);
 
     /// <summary>Permits the merged options for a cluster (defaults plus its overrides).</summary>
     internal Effective GetEffective(string clusterId)

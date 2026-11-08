@@ -37,6 +37,29 @@ public sealed class TokenExchangeOptions : IHasAttachment, IHasPartitionConfig, 
     public string? JwksUri { get; set; }
 
     /// <summary>
+    /// Requires the key material that validates inbound user tokens — the authority
+    /// discovery document and any directly configured <see cref="JwksUri"/> — to be
+    /// fetched over https. Default <see langword="true"/>, the ASP.NET Core JwtBearer
+    /// contract: over plain http anyone on the network path can swap the signing keys and
+    /// forge an inbound token that CredProx then exchanges. Setting <see langword="false"/>
+    /// supports a private-network http IdP and is a deliberate security trade (docs/adr/0003).
+    /// The startup validator refuses an http <see cref="Authority"/> or <see cref="JwksUri"/>
+    /// unless opted out; runtime fetches fail closed on the same rule, including for a
+    /// template-expanded http URL.
+    /// </summary>
+    public bool RequireHttpsMetadata { get; set; } = true;
+
+    /// <summary>
+    /// Scheme test for the <see cref="RequireHttpsMetadata"/> rule: a literal
+    /// <c>http://</c> prefix (case-insensitive) on the TRIMMED value — the URI parser
+    /// strips surrounding whitespace, so <c>" http://…"</c> is still an http URL.
+    /// A §3.2 template that hides the scheme cannot be judged at startup; the runtime
+    /// fetch judges the expanded value.
+    /// </summary>
+    internal static bool IsPlainHttp(string? value) =>
+        value is not null && value.Trim().StartsWith("http://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// The required inbound token audience — mandatory. Without an audience check any token
     /// the issuer minted for any other client becomes exchangeable (token confusion, §3.6).
     /// Accepts the §3.2 template forms.

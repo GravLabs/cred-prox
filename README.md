@@ -91,6 +91,16 @@ published to the CredProx NuGet registry (the feed is machine-local; publishing
 machines declare it in their user-level NuGet config — see PUBLISHING.md). Target
 framework: `net10.0`. See [CHANGELOG.md](CHANGELOG.md).
 
+## Requirements and compatibility
+
+.NET 10 only — `net8.0`/`net9.0` consumers get an exact `NU1202` refusal at
+restore, not a surprise at runtime. Host shapes, dependency drift, container
+publish, trimming/AOT and the `CredProx.Testing` consumer story are measured,
+not assumed: see [docs/consumer-compatibility.md](docs/consumer-compatibility.md)
+and `scripts/consumer-compat.sh`. Trimming and NativeAOT are **not supported**
+yet; the standard DI-based proxy setup is warning-clean under
+`-warnaserror` without suppression.
+
 ## Status
 
 **0.6.0** — kill switch (take a cluster or caller out of service by config, live on reload),

@@ -6,7 +6,7 @@ Status: accepted (M25, GitHub public pivot)
 ## Context
 
 Every `dotnet pack` runs APICompat against the last published release
-(`<PackageValidationBaselineVersion>`, currently `0.8.1`) so a public-surface removal
+(`<PackageValidationBaselineVersion>`, currently `0.8.2`) so a public-surface removal
 fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
 Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
 declared the internal LAN NuGet registry (anonymous download), and the SDK's
@@ -22,10 +22,10 @@ Commit the **published baseline packages** under `build/baselines/` and point
 `<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
 
 ```
-build/baselines/CredProx.0.8.1.nupkg               f8cd3415fb1e228920233f6b29bf7d1d6905d0d7e0c2bf7396818a6ae8f2bcf6
-build/baselines/CredProx.Abstractions.0.8.1.nupkg  f3703d687bcb1e7eed17102f921752fbb369d1b29bbe8254098d5690003fbfc4
-build/baselines/CredProx.AzureKeyVault.0.8.1.nupkg e6bd305e5d93f913a463f78efead83f5a357c24541134988ac61d44b2c8e6bab
-build/baselines/CredProx.Testing.0.8.1.nupkg       ed232aef8acaf343c35b7df70ee6f451ead0f491e0374f80152562ab01e575ec
+build/baselines/CredProx.0.8.2.nupkg               14d6044a598ab043cf9468dcabf9deb9d1e3e326b4ef5c6741edf3d727a87b6f
+build/baselines/CredProx.Abstractions.0.8.2.nupkg  f4cdd0f87946d4c03ba6f267f0ac311539eea8419b1c8c411a0f39c9b1cf9b40
+build/baselines/CredProx.AzureKeyVault.0.8.2.nupkg 0459800055597ad0ebd5ce3ac8484f979b559b3926fe1ce1d5c1a52a51a27ff2
+build/baselines/CredProx.Testing.0.8.2.nupkg       6b414927800a9438b952c785e7aef0b8a0536b354a46bc1a973b51bba8115342
 ```
 
 The files are the bytes downloaded from the registry that published them (sha256 above;
@@ -47,9 +47,10 @@ full-scrub decision — that generation's entries, the registry-served `0.8.0` b
 each sha256-verified during the 0.8.0 consumer restore, are in git history at that
 commit), and the skipped `0.7.1` generation is subsumed — superseded, API identical to
 `0.7.0`. `0.8.1` rotated at `0.8.2` (2026-11-07, maintainer release go-ahead "merge and publish
-when ready"): the table entries above are the registry-served `0.8.1` bytes — sha256
+when ready"): those registry-served `0.8.1` bytes — sha256
 verified equal to the published artifacts recorded in PUBLISHING.md's release history,
-and disclosure-scanned member-by-member before commit (zero hits). The rotation also removed the last disclosure residual of the `0.7.0` set: their
+and disclosure-scanned member-by-member before commit (zero hits) — are in git history
+at that commit. The `0.8.2` rotation also removed the last disclosure residual of the `0.7.0` set: their
 nuspec `RepositoryUrl` carried the internal registry URL (public since the launch commits,
 prose since scrubbed) — the `0.8.0` nuspecs carry the GitHub URL, so the current tree is
 clean. Pack the **fresh** `obj/` after rotating (see Consequences): a repack on an

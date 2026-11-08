@@ -93,4 +93,19 @@ public sealed class AuditRecorderGuardTests
 
         Assert.Same(body, context.Response.Body);
     }
+
+    [Fact]
+    public void Ctor_NullSinks_ThrowsArgumentNullNamingSinks()
+    {
+        // The ToArray behind the guard absorbs a null with its own ANE named "source";
+        // the documented contract names "sinks" (M31 mutation triage).
+        var error = Assert.Throws<ArgumentNullException>(() => new CredProxAuditRecorder(
+            null!,
+            new CredProxAuditOptions(),
+            TimeProvider.System,
+            NullLogger<CredProxAuditRecorder>.Instance,
+            new CredProxCoreOptions(),
+            callerKeyOptions: null));
+        Assert.Equal("sinks", error.ParamName);
+    }
 }

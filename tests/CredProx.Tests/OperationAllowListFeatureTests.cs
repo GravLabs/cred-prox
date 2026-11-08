@@ -64,6 +64,79 @@ public sealed class OperationAllowListFeatureTests
     }
 
     [Fact]
+    public async Task MultipleRules_AnyMatchIsEnough()
+    {
+        // At least one matching entry is enough: a non-matching entry must not poison
+        // a matching one (one entry per declared dimension is the configured shape).
+        var (feature, context) = Setup(
+            operations: [new Rule("other", null, null), new Rule("reports", null, null)],
+            identity: new CallerIdentity("app-a", "k1"),
+            path: "/reports/q1",
+            routeId: "reports");
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(Aborted(context));
+    }
+
+    [Fact]
+    public async Task PathBase_IsStrippedBeforeMatching()
+    {
+        // A host mounted under a path base (§4 Phase B, pattern matching on the
+        // PathBase-stripped path): the rule talks about /send, the request is /api/send.
+        var (feature, context) = Setup(
+            operations: [new Rule(null, ["GET"], ["/send"])],
+            identity: new CallerIdentity("app-a", "k1"),
+            path: "/api/send");
+        context.Request.PathBase = "/api";
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(Aborted(context));
+    }
+
+    [Fact]
+    public async Task PathBase_NotAPrefixOfPath_IsNotStripped()
+    {
+        // Segment-wise prefix semantics: /apixyz merely *starts with* the characters of
+        // /api; stripping its length would match the wrong operation.
+        var (feature, context) = Setup(
+            operations: [new Rule(null, ["GET"], ["/apixyz"])],
+            identity: new CallerIdentity("app-a", "k1"),
+            path: "/apixyz");
+        context.Request.PathBase = "/api";
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(Aborted(context));
+    }
+
+    [Fact]
+    public async Task PathEqualToPathBase_IsMatchedAsRoot()
+    {
+        // The base itself is the root operation, not the empty path: the empty residue
+        // becomes "/" before any pattern is consulted.
+        var (feature, context) = Setup(
+            operations: [new Rule(null, ["GET"], ["/"])],
+            identity: new CallerIdentity("app-a", "k1"),
+            path: "/api");
+        context.Request.PathBase = "/api";
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(Aborted(context));
+    }
+
+    [Fact]
+    public async Task NullContext_Throws()
+    {
+        var provider = Registry([("app-a", null)]);
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => new OperationAllowListFeature(provider).ApplyAsync(null!, default).AsTask());
+    }
+
+    [Fact]
     public async Task WrongMethod_403()
     {
         var (feature, context) = Setup(

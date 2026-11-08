@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -434,5 +435,174 @@ public sealed class ResponseScrubFeatureTests
 
         Assert.False(ResponseScrubFeature.ScrubHeaders(headers, ["token"]));
         Assert.Equal("Token differs in case", Assert.Single(headers.GetValues("X-Keep")));
+    }
+
+    [Fact]
+    public void ScrubHeaders_NullArguments_Throw_NamingEach()
+    {
+        var headers = new HttpResponseMessage().Headers;
+
+        var nullHeaders = Assert.Throws<ArgumentNullException>(() => ResponseScrubFeature.ScrubHeaders(null!, ["s"]));
+        Assert.Equal("headers", nullHeaders.ParamName);
+
+        var nullSecrets = Assert.Throws<ArgumentNullException>(() => ResponseScrubFeature.ScrubHeaders(headers, null!));
+        Assert.Equal("secrets", nullSecrets.ParamName);
+    }
+
+    [Fact]
+    public void ScrubHeaders_ReturnsTrue_OnlyWhenAValueChanged()
+    {
+        var clean = new HttpResponseMessage().Headers;
+        clean.TryAddWithoutValidation("X-Keep", "value");
+        Assert.False(ResponseScrubFeature.ScrubHeaders(clean, ["NOPE"]));
+
+        var dirty = new HttpResponseMessage().Headers;
+        dirty.TryAddWithoutValidation("X-Echo", Secret);
+        Assert.True(ResponseScrubFeature.ScrubHeaders(dirty, [Secret]));
+    }
+
+    // ---- operator-visible outcomes of the two forward-untouched paths (M31 triage) ----
+
+    [Fact]
+    public async Task UndecodableEncoding_LogsWarning_NamingTheEncoding()
+    {
+        var logs = new CapturingLoggerFactory();
+        var payload = Encoding.UTF8.GetBytes($"echo {Secret}");
+        var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(payload),
+        };
+        response.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("text/plain");
+        response.Content.Headers.TryAddWithoutValidation("Content-Encoding", "zstd");
+        var context = Context(response, out var registry);
+        registry.Register(Secret);
+
+        await new ResponseScrubFeature(
+            new CredProxScrubbingOptions { Enabled = true },
+            new Logger<ResponseScrubFeature>(logs)).ApplyAsync(context, CancellationToken.None);
+
+        var warning = Assert.Single(logs.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("zstd", warning.Message);
+        Assert.Contains("forwarded untouched", warning.Message);
+    }
+
+    [Fact]
+    public async Task ChainedEncodings_LogsWarning_NamingTheChain()
+    {
+        var logs = new CapturingLoggerFactory();
+        var payload = Encoding.UTF8.GetBytes($"echo {Secret}");
+        var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(payload),
+        };
+        response.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("text/plain");
+        response.Content.Headers.TryAddWithoutValidation("Content-Encoding", "gzip, br");
+        var context = Context(response, out var registry);
+        registry.Register(Secret);
+
+        await new ResponseScrubFeature(
+            new CredProxScrubbingOptions { Enabled = true },
+            new Logger<ResponseScrubFeature>(logs)).ApplyAsync(context, CancellationToken.None);
+
+        var warning = Assert.Single(logs.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("gzip", warning.Message);
+        Assert.Contains("forwarded untouched", warning.Message);
+    }
+
+    [Fact]
+    public async Task ScrubbedBody_LogsDebug_ConfirmingReplacement()
+    {
+        var logs = new CapturingLoggerFactory();
+        var response = ResponseWith($"echo {Secret}", "text/plain");
+        var context = Context(response, out var registry);
+        registry.Register(Secret);
+
+        await new ResponseScrubFeature(
+            new CredProxScrubbingOptions { Enabled = true },
+            new Logger<ResponseScrubFeature>(logs)).ApplyAsync(context, CancellationToken.None);
+
+        Assert.Contains(logs.Entries, e => e.Level == LogLevel.Debug && e.Message.Contains("scrubbed"));
+    }
+
+    // ---- M31 batch-4b survivors: the framing gate and the empty-value guard ----
+
+    [Fact]
+    public async Task EventStreamBody_KeepsBoundarySpanningSecretResidue_ByteFramingWouldRedactIt()
+    {
+        // A secret whose bytes straddle the blank line matches in the joined byte
+        // stream but in no single event. The documented event-framing residue means this
+        // body must pass verbatim — the feature-level witness that SSE bodies really
+        // take the event stream (the gate's conditional was otherwise unobserved).
+        const string CrossBoundarySecret = "he\n\nlo";
+        var input = $"data: x{CrossBoundarySecret[..2]}\n\n{CrossBoundarySecret[4..]} y\n\n";
+        var response = ResponseWith(input, "text/event-stream");
+        var context = Context(response, out var registry);
+        registry.Register(CrossBoundarySecret);
+
+        await Feature().ApplyAsync(context, CancellationToken.None);
+
+        Assert.Equal(input, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task ByteFramedBody_RedactsBoundaryStraddlingSecret_EventFramingWouldNot()
+    {
+        // The byte/framing switch seen from the other side: the same secret that the
+        // event framing must miss (straddling the blank line) must REDACT on a plain
+        // body — the witness that byte bodies really take the byte stream (M31 :129
+        // triage: the always-event variant was otherwise unobserved).
+        const string CrossBoundarySecret = "he\n\nlo";
+        var input = $"x{CrossBoundarySecret[..2]}\n\n{CrossBoundarySecret[4..]} y";
+        var response = ResponseWith(input, "application/json");
+        var context = Context(response, out var registry);
+        registry.Register(CrossBoundarySecret);
+
+        await Feature().ApplyAsync(context, CancellationToken.None);
+
+        Assert.Equal("x[redacted] y", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public void ScrubHeaders_NoValueMatches_ReportsUnchanged_KeepingEveryValue()
+    {
+        // "Nothing changed" is an observable answer: the caller only logs the
+        // credential-leak warning when this returns true (M31 :168 triage — a dropped
+        // not-changed continue turns every untouched header into a false change).
+        var headers = new HttpResponseMessage().Headers;
+        headers.TryAddWithoutValidation("X-A", "plain");
+        headers.TryAddWithoutValidation("X-B", "other");
+
+        Assert.False(ResponseScrubFeature.ScrubHeaders(headers, [Secret]));
+
+        var seen = new Dictionary<string, string>();
+        foreach (var (name, values) in headers)
+        {
+            seen[name] = string.Join("|", values);
+        }
+
+        Assert.Equal("plain", seen["X-A"]);
+        Assert.Equal("other", seen["X-B"]);
+    }
+
+    [Fact]
+    public void ScrubHeaders_EmptyValueHeader_IsEnumeratedButNeverAScrubSite()
+    {
+        // The BCL does enumerate an empty header value; the guard must pass it through
+        // untouched (nothing matches, nothing reports changed) while a real secret in
+        // the same header set still redacts (M31 :166 triage).
+        var headers = new HttpResponseMessage().Headers;
+        headers.TryAddWithoutValidation("X-Empty", string.Empty);
+        headers.TryAddWithoutValidation("X-Echo", Secret);
+
+        Assert.True(ResponseScrubFeature.ScrubHeaders(headers, [Secret]));
+
+        var seen = new Dictionary<string, string>();
+        foreach (var (name, values) in headers)
+        {
+            seen[name] = string.Join("|", values);
+        }
+
+        Assert.Equal(string.Empty, seen["X-Empty"]);
+        Assert.Equal("[redacted]", seen["X-Echo"]);
     }
 }

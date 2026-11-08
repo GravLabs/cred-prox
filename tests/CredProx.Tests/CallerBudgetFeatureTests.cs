@@ -4,10 +4,12 @@ using System.Text;
 using CredProx;
 using CredProx.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
+using Yarp.ReverseProxy.Forwarder;
 using Yarp.ReverseProxy.Model;
 
 namespace CredProx.Tests;
@@ -173,7 +175,11 @@ public sealed class CallerBudgetFeatureTests
     [Fact]
     public async Task Rejection_IncrementsMeter_WithCallerAndClusterTags()
     {
-        var (feature, _) = Setup(permits: 1);
+        // Unique caller + caller-filtered callback: MeterListener is process-wide, and
+        // other suites reject under the shared "app-a" name — an unfiltered counter made
+        // this an intermittent 1-vs-N while parallel integration tests ran.
+        const string MeterCaller = "budget-meter-caller";
+        var (feature, _) = Setup(permits: 1, caller: MeterCaller);
 
         using var listener = new MeterListener();
         var rejections = 0;
@@ -188,34 +194,117 @@ public sealed class CallerBudgetFeatureTests
         };
         listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
         {
-            rejections++;
+            string? eventCaller = null;
+            string? eventCluster = null;
             foreach (var tag in tags)
             {
                 if (tag.Key == "credprox.caller")
                 {
-                    callerTag = (string?)tag.Value;
+                    eventCaller = (string?)tag.Value;
                 }
 
                 if (tag.Key == "credprox.cluster")
                 {
-                    clusterTag = (string?)tag.Value;
+                    eventCluster = (string?)tag.Value;
                 }
             }
+
+            if (eventCaller != MeterCaller)
+            {
+                return;
+            }
+
+            rejections++;
+            callerTag = eventCaller;
+            clusterTag = eventCluster;
         });
         listener.Start();
 
-        await Apply(feature); // admitted, no measurement
-        await Apply(feature); // rejected
+        await Apply(feature, caller: MeterCaller); // admitted, no measurement
+        await Apply(feature, caller: MeterCaller); // rejected
 
         Assert.Equal(1, rejections);
-        Assert.Equal("app-a", callerTag);
+        Assert.Equal(MeterCaller, callerTag);
         Assert.Equal("cluster-1", clusterTag);
     }
 
-    private static async Task<DefaultHttpContext> Apply(
-        CallerBudgetFeature feature, string keyId = "k1")
+    [Fact]
+    public async Task NullContext_Throws()
     {
-        var context = Context(new CallerIdentity("app-a", keyId));
+        var (feature, _) = Setup(permits: 1);
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => feature.ApplyAsync(null!, default).AsTask());
+    }
+
+    [Fact]
+    public async Task ClusterId_FallsBackToRouteConfig_WhenClusterFeatureAbsent()
+    {
+        // Destination resolution runs before this stage (§3.7), but a host may carry the
+        // cluster id on the route alone; per-cluster overrides must still find it.
+        var (feature, _) = Setup(permits: 50, clusterOverrides: ("route-only", "1", null));
+
+        Assert.False(Aborted(await ApplyWithCluster(feature, routeClusterId: "route-only", clusterId: null)));
+        Assert.True(Aborted(await ApplyWithCluster(feature, routeClusterId: "route-only", clusterId: null)));
+    }
+
+    [Fact]
+    public async Task ClusterFeatureWins_OverRouteConfig()
+    {
+        // Both present with different ids: the resolved destination's cluster governs,
+        // not whatever cluster id the route config happens to name.
+        var (feature, _) = Setup(permits: 50, clusterOverrides: ("cluster-1", "1", null));
+
+        Assert.False(Aborted(await ApplyWithCluster(feature, routeClusterId: "other", clusterId: "cluster-1")));
+        Assert.True(Aborted(await ApplyWithCluster(feature, routeClusterId: "other", clusterId: "cluster-1")));
+    }
+
+    [Fact]
+    public async Task ClusterInterval_WinsOverDefault_InRetryAfter()
+    {
+        // Field-by-field override: the 10s cluster window, not the caller's minute, is
+        // what the 429 asks the client to wait for.
+        var (feature, _) = Setup(
+            permits: 5, interval: "00:01:00", clusterOverrides: ("cluster-1", "1", "00:00:10"));
+
+        Assert.False(Aborted(await Apply(feature)));
+        var rejected = await Apply(feature);
+        Assert.Equal("10", rejected.Response.Headers.RetryAfter.ToString());
+    }
+
+    private static async Task<DefaultHttpContext> ApplyWithCluster(
+        CallerBudgetFeature feature, string? routeClusterId, string? clusterId)
+    {
+        var context = M4Contexts.Create(out _);
+        context.Features.Set<IReverseProxyFeature>(new ClusterFeature(routeClusterId, clusterId));
+        context.Features.Set(new CallerIdentity("app-a", "k1"));
+        await feature.ApplyAsync(context, default);
+        return context;
+    }
+
+    private sealed class ClusterFeature(string? routeClusterId, string? clusterId) : IReverseProxyFeature
+    {
+        public RouteModel Route { get; } = new(
+            new Yarp.ReverseProxy.Configuration.RouteConfig { RouteId = "r", ClusterId = routeClusterId },
+            cluster: null, HttpTransformer.Default);
+
+        public ClusterModel Cluster { get; } = clusterId is null
+            ? null!
+            : new ClusterModel(
+                new Yarp.ReverseProxy.Configuration.ClusterConfig { ClusterId = clusterId },
+                new HttpMessageInvoker(new SocketsHttpHandler()));
+
+        public IReadOnlyList<DestinationState> AllDestinations { get; } = [];
+
+        public IReadOnlyList<DestinationState> AvailableDestinations { get; set; } = [];
+
+        public DestinationState? ProxiedDestination { get; set; }
+    }
+
+    private static async Task<DefaultHttpContext> Apply(
+        CallerBudgetFeature feature, string keyId = "k1", string caller = "app-a")
+    {
+        var context = Context(new CallerIdentity(caller, keyId));
         await feature.ApplyAsync(context, default);
         return context;
     }
@@ -234,11 +323,12 @@ public sealed class CallerBudgetFeatureTests
         int? permits,
         string? interval = null,
         (string Cluster, string? Permits, string? Interval)? clusterOverrides = null,
-        FakeTimeProvider? time = null)
+        FakeTimeProvider? time = null,
+        string caller = "app-a")
     {
         time ??= new FakeTimeProvider();
 
-        var provider = Registry(("app-a", permits, interval, clusterOverrides));
+        var provider = Registry((caller, permits, interval, clusterOverrides));
         var budgets = new CallerBudgetRegistry(time);
         return (new CallerBudgetFeature(provider, budgets), budgets);
     }

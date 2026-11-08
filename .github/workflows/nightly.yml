@@ -34,3 +34,24 @@ jobs:
         run: >-
           dotnet test tests/CredProx.LoadTests/CredProx.LoadTests.csproj
           --configuration Release --no-build
+
+  # The fuzz harness is deliberately outside CredProx.slnx, so the solution
+  # build never compiles it — this build-only job is the rot check (it cannot
+  # silently drift from the library internals it calls). No fuzzing here.
+  fuzz-build:
+    name: Fuzz harness compiles (§5.4 rot check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore tests/CredProx.Fuzz/CredProx.Fuzz.csproj
+
+      - name: Build
+        run: dotnet build tests/CredProx.Fuzz/CredProx.Fuzz.csproj --configuration Release --no-restore

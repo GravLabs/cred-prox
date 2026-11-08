@@ -42,6 +42,32 @@ public sealed class CallerPartitionSourceTests
     }
 
     [Fact]
+    public async Task FeatureIdentityWins_OverPrincipalClaims()
+    {
+        // Both present with different ids: the CredProx caller-auth feature is the
+        // authoritative identity, the ambient User must not shadow it.
+        var context = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(
+                new System.Security.Claims.ClaimsIdentity(
+                    [new System.Security.Claims.Claim(CallerIdentity.CallerClaimType, "app-shadow")],
+                    authenticationType: "test")),
+        };
+        context.Features.Set(new CallerIdentity("app-a", "k1"));
+
+        var partition = await new CallerPartitionSource().GetPartitionAsync(context, default);
+
+        Assert.Equal("app-a", partition);
+    }
+
+    [Fact]
+    public async Task NullContext_Throws()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => new CallerPartitionSource().GetPartitionAsync(null!, default).AsTask());
+    }
+
+    [Fact]
     public async Task Unauthenticated_HasNoPartition()
     {
         var partition = await new CallerPartitionSource()
@@ -100,8 +126,14 @@ public sealed class CallerPartitionSourceTests
     }
 
     [Fact]
-    public void Factory_RejectsNonEmptyArgument() =>
-        Assert.Throws<ArgumentException>(() => new CallerPartitionSourceFactory().CreateSource("app-a"));
+    public void Factory_RejectsNonEmptyArgument_NamingArgument()
+    {
+        var ex = Assert.Throws<ArgumentException>(
+            () => new CallerPartitionSourceFactory().CreateSource("app-a"));
+
+        Assert.Equal("argument", ex.ParamName);
+        Assert.Contains("takes no argument", ex.Message);
+    }
 
     [Fact]
     public void Factory_SchemeIsCaller() =>

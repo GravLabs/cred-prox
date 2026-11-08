@@ -338,7 +338,12 @@ minted for any other client becomes exchangeable (token confusion).
 - Config: `Authority` (OIDC discovery) **or** explicit `Issuer` + `JwksUri`; `Audience`
   required; `SubjectClaim` default `sub`; `ClockSkew` default five minutes (the JwtBearer
   convention). JWKS is fetched lazily and cached, refreshed on unknown `kid` (the shape
-  JwtBearer's configuration manager uses).
+  JwtBearer's configuration manager uses). `RequireHttpsMetadata` default **`true`**
+  (M31, ADR-0003 — the JwtBearer contract): the key material that validates inbound tokens
+  is fetched over https; a plain-http private IdP must set it `false` explicitly, since
+  over http an on-path attacker can swap the keys and forge an inbound token. Startup
+  refuses http `Authority`/`JwksUri` unless opted out; runtime fetches fail closed the
+  same way.
 - Missing inbound `Authorization` → `401 credprox.inbound_token_missing`; failed validation →
   `401 credprox.inbound_token_invalid` naming only the failure kind (expired / signature /
   audience / issuer) — never the token value. Neither is forwarded; neither reaches the IdP.
@@ -661,6 +666,81 @@ feature is previewed. All rows must exist before the public release.
 Coverage reports are attached to every PR (CI job summary / artifact). A PR that lowers core
 coverage below the gate fails. Coverage is a floor, not the goal: §5.2 is the real definition of
 "tested".
+
+### 5.4 Mutation testing and coverage-guided fuzzing (M31 design)
+
+Both suites in §5.1–§5.3 are written by the same minds that write the code; coverage says a line
+ran, not that the test would notice it broken. Mutation testing and coverage-guided fuzzing are the
+two tools that do not share those blind spots. M31 adds them as measurement tools — the deliverable
+is findings and the tests they earn, not a score for its own sake. All numbers below are measured
+on the dev box (20 cores, .NET SDK 10.0.114), not estimated, except where marked projected.
+
+**Mutation — Stryker.NET, host-side, repo-local tool.** `dotnet-stryker 5.0.0` pinned in
+`dotnet-tools.json` (restore with `dotnet tool restore`; runs on net10.0 against `src/CredProx`
+with `CredProx.Tests` as the test project, coverage-based mode). No host installs needed — unlike
+fuzzing, mutation is pure managed tooling. Measured:
+
+| Run | Mutate scope | Tested mutants | Result | Wall time |
+|---|---|---|---|---|
+| Spike 1 | one file (`Pipeline/TokenRefreshTargets.cs`) | 1 | 1 killed, 100% | 2 min 13 s |
+| Spike 2 | `Callers/**` (caller auth + allow-lists) | 411 | 346 killed / 65 survived, 79.7% | 3 min 12 s |
+
+Fixed overhead is ~2 min 14 s (whole-project mutant generation + test discovery); the marginal cost
+after that is ~0.14 s per mutant with 20 parallel workers. Projected full-core run: Callers' 1.5k
+lines yielded 411 testable mutants (~0.28/line) → the 14.4k-line core is roughly 4k testable
+mutants ≈ 10–15 min wall. Per-area runs (1–3 min each) fit a PR; the whole core fits nightly. Two
+honest caveats: Stryker generates mutants project-wide and discards 1,235 as compile errors before
+the mutate filter (score denominators exclude them; they are generator noise, not code quality),
+and `dotnet stryker` in Stryker 5 has no `--log-level` flag (it fast-fails rather than ignore it).
+
+Phase B scope, in priority order (security-critical first): `Callers/` (caller authentication,
+path/operation allow-lists), credential attach + header hygiene (`Yarp/`, `Pipeline/`), response
+scrubbing (`Scrubbing/`), token cache + refresh (`TokenCaching/`, `Credentials/` cache paths),
+config validation (`Startup/`, binding), JWT/HMAC signing (`Credentials/` signing). Then the rest
+of `src/CredProx` nightly if the schedule stays sane. Every surviving mutant is triaged as either
+(a) a test gap — fixed by a test that fails without the source fix, testing behaviour someone
+relies on, not a mutant-specific poke — or (b) equivalent/unkillable with a one-line justification
+(and checked by independent review). Scores are reported per area before and after.
+
+**Fuzzing — AFL++ in a pinned container.** The dev box has no clang and nothing may be installed on
+it, so the whole toolchain lives in a container: `aflplusplus/aflplusplus` pinned by digest
+(`sha256:9b168a35bf0d5a270ed96b5017d7012805a8cedb37e40d9fea8f4e8c57200d24`) with the .NET 10 SDK
+installed inside (dotnet-install, channel 10.0), `SharpFuzz` + `SharpFuzz.CommandLine` 2.3.0
+pinned (Central Package Management). The spike proves the loop works on net10.0: publish the
+harness framework-dependent, `sharpfuzz` instruments the managed `CredProx.dll` in place, and
+`afl-fuzz` runs it through the plain `dotnet` host. Measured: **44,010 execs/sec** single-core, 37
+queue items grown from 4 seeds in 87 s, and the seeded canary violation was caught and minimized
+to `/allowed/x` in 15 s — so instrumentation feedback and crash capture both work. No ReadyToRun
+stripping was needed (framework-dependent build output is plain IL). The required incantation,
+recorded in `tests/CredProx.Fuzz/spike-in-container.sh`: `AFL_SKIP_BIN_CHECK=1` (the ELF target is
+the uninstrumented `dotnet` muxer), `DOTNET_TieredCompilation=0`, `DOTNET_ReadyToRun=0`.
+
+Harness layout: `tests/CredProx.Fuzz` — deliberately **not** in `CredProx.slnx`, so it is out of
+the CI build, the five suites, the coverage gate and the pack. `src/CredProx` grants it
+`InternalsVisibleTo` so targets are the real internal gates, not a public-API shadow of them. Each
+target is a `Fuzzer.OutOfProcess.Run` loop with a stated invariant; an invariant violation is a
+crash, minimized with `afl-cmin`/`afl-tmin` in the same container. Phase B targets and invariants:
+
+| Target | Invariant (crash = violation) |
+|---|---|
+| Path patterns / allow-list matching | a path with a dot segment or encoded separator is never admitted to a caller pattern |
+| Header/credential attach hygiene | no CR/LF/NUL survives into a forwarded header value; inbound credential headers never re-appear upstream |
+| Response secret scrubber | an injected secret never appears in the output, whatever the chunk boundaries |
+| SSE event framing | no secret survives; framing round-trips (events in = events out) |
+| Config key validation | unknown keys refuse without crashing; nothing throws uncaught |
+| Small parsers (`Retry-After`, media-type charset, HMAC canonical string) | never throw on any input; canonical strings are injective |
+
+Time-boxed runs (hours, not days), corpora kept scrubbed and small (seeds above carry no real
+material), crashes reproduced as regression tests under `tests/` with the root cause written up; a
+crash that is a library bug is fixed in `src/` as its own commit and called out as security-
+relevant if it touches the gates in §5.2. Reporting lands in `docs/testing-report-m31.md`: scores
+per area, every finding, and an explicit list of what these tools did **not** cover. Rerun scripts
+alongside the harness.
+
+**Nightly-CI fit (proposed, not wired):** nightly job runs the full-core mutation sweep (~15 min)
+and a fixed-seed 30-min-per-target fuzz session in the container, artifacts = Stryker report + new
+crashes only; PR jobs run only the changed-area mutation scope. Nightly mutation score is reported,
+not a hard gate, matching the §5.3 row.
 
 ---
 

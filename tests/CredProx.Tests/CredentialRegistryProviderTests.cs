@@ -89,6 +89,35 @@ public sealed class CredentialRegistryProviderTests
     }
 
     [Fact]
+    public void BrokenReload_LogsError_NamingBothConsequences()
+    {
+        // M31 mutation triage: the fallback kept traffic serving (asserted above), but
+        // nothing pinned what the OPERATOR learns — the log must say the rebind failed
+        // AND that the previous registry is still serving. Both halves must survive.
+        var logs = new CapturingLoggerFactory();
+        var source = new ReloadableMemoryConfigurationSource(Entries());
+        var config = new ConfigurationBuilder().Add(source).Build();
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(config);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentials(config);
+        services.AddSingleton<Microsoft.Extensions.Logging.ILoggerFactory>(logs);
+        _ = services.BuildServiceProvider().GetRequiredService<CredentialRegistryProvider>();
+        var reloadable = (ReloadableMemoryConfigurationProvider)config.Providers
+            .OfType<ReloadableMemoryConfigurationProvider>().Single();
+
+        reloadable.Set("CredProx:Credentials:broken:Type", "Magic"); // unknown type
+        reloadable.Reload();
+
+        Assert.Contains(logs.Entries, e =>
+            e.Level == Microsoft.Extensions.Logging.LogLevel.Error
+            && e.Message.Contains("failed to rebind", StringComparison.Ordinal)
+            && e.Message.Contains("keeping the previous registry", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BadInitialConfig_FailsAtConstruction()
     {
         var entries = Entries();

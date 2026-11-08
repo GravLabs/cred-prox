@@ -25,6 +25,10 @@ public sealed class PathPatternsTests
     [InlineData("/reports", "/REPORTS", false)]
     [InlineData("/a/b", "/a/*/c", false)]                 // literal tail mismatch
     [InlineData("/a/b/c", "/a/*/c", true)]
+    [InlineData("/p", "", false)]                         // empty pattern never matches
+    [InlineData("/x", "x", false)]                        // slash-less pattern: refuse, never index-match
+    [InlineData("", "/p", false)]                         // empty path never matches
+    [InlineData("p", "/p", false)]                        // slash-less path: refuse
     public void Matches(string path, string pattern, bool expected) =>
         Assert.Equal(expected, PathPatterns.Matches(path, pattern));
 
@@ -69,6 +73,13 @@ public sealed class PathPatternsTests
     [InlineData("/a//b", "/a//b", false)]                 // interior empty segment
     [InlineData("//a", "//a", false)]                     // leading empty segment
     [InlineData("/a/b/", "/a/b/", true)]                  // single trailing slash stays fine
+    // The escape scan fires only on a real '%': harmless digit pairs that merely spell
+    // an escape must not make the path unsafe.
+    [InlineData("/file2f", "/file2f", true)]
+    [InlineData("/x5cy", "/x5cy", true)]
+    // Exact dot segments only: a literal filename that ends in dots is a legal path.
+    [InlineData("/allowed/a..", "/allowed/a..", true)]
+    [InlineData("/allowed/...", "/allowed/...", true)]
     public void IsSafePath(string raw, string decoded, bool expected) =>
         Assert.Equal(expected, PathPatterns.IsSafePath(raw, decoded));
 

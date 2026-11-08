@@ -98,6 +98,22 @@ public sealed class CallerAuthenticationFeatureTests
 
     private static CallerAuthenticationFeature Feature(DefaultHttpContext context) => new();
 
+    [Fact]
+    public async Task Scheme_AuthenticateAsync_ValidKey_Succeeds_AsTheBoundCaller()
+    {
+        // The scheme is product-registered for host integration; the success arm —
+        // match found, caller identity carried — had no direct witness: every existing
+        // test exercises the feature path or the refusals (M31 :52 triage).
+        var context = Context(Key);
+
+        var result = await context.RequestServices
+            .GetRequiredService<IAuthenticationService>()
+            .AuthenticateAsync(context, CredProxAuth.CallerKeyScheme);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("app-a", result.Principal!.Identity!.Name);
+    }
+
     private static DefaultHttpContext Context(
         string? key, Dictionary<string, string>? routeMetadata = null)
     {

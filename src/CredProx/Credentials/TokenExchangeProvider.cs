@@ -44,8 +44,16 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
     // One configuration manager per Authority; each caches its discovery document and
     // refreshes on key rotation. Explicit-JwksUri mode fetches the set directly (the
     // IdentityModel library ships no JWKS ConfigurationManager retriever in 8.x).
-    private readonly ConcurrentDictionary<string, IConfigurationManager<OpenIdConnectConfiguration>> _oidcConfigs = new();
-    private readonly ConcurrentDictionary<string, CachedKeys> _directJwks = new();
+    // Keyed by (authority, connection): the metadata fetch runs on the same per-connection
+    // egress client as the JWKS and token calls, so two credentials sharing an authority
+    // over different connections get clients with the right proxy settings.
+    // RequireHttps is part of the cache key: a credential that opted out of https
+    // metadata must not hand its http-tolerant manager to one that did not.
+    private readonly ConcurrentDictionary<(string Authority, string? Connection, bool RequireHttps), IConfigurationManager<OpenIdConnectConfiguration>> _oidcConfigs = new();
+    // Keyed by (url, posture) for the same reason as _oidcConfigs: keys fetched under an
+    // explicit http opt-out must never satisfy a credential that still requires https on
+    // the same URI.
+    private readonly ConcurrentDictionary<(string Url, bool RequireHttps), CachedKeys> _directJwks = new();
 
     // Direct-JWKS refresh window; a key-not-found rejection also evicts the entry so the
     // next request refetches (rotation self-heals within one request).
@@ -124,10 +132,7 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         {
             var authority = await ExpandRequired(options.Authority!, context.Partition, secrets, cancellationToken)
                 .ConfigureAwait(false);
-            var manager = _oidcConfigs.GetOrAdd(authority, static a =>
-                new ConfigurationManager<OpenIdConnectConfiguration>(
-                    a.TrimEnd('/') + "/.well-known/openid-configuration",
-                    new OpenIdConnectConfigurationRetriever()));
+            var manager = CreateOidcManager(authority, options.Connection, options.RequireHttpsMetadata);
             var oidc = await GetConfigurationAsync(manager, "authority", cancellationToken).ConfigureAwait(false);
             signingKeys = oidc.SigningKeys;
             issuer ??= oidc.Issuer;
@@ -160,7 +165,7 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
             // request refetches. The reported kind is still "signature" for this request.
             if (directJwksUri is not null && result.Exception is SecurityTokenSignatureKeyNotFoundException)
             {
-                _directJwks.TryRemove(directJwksUri, out _);
+                _directJwks.TryRemove((directJwksUri, options.RequireHttpsMetadata), out _);
             }
 
             // The kind only — never the token, its header, or its claims.
@@ -200,8 +205,23 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         bool forceRefresh,
         CancellationToken cancellationToken)
     {
+        // Fail closed on the same rule as discovery (docs/adr/0003), and FIRST: the check
+        // sits above the cache read so the cache can never become a side channel that
+        // serves http-fetched keys to an https-posture credential (the cache is also
+        // keyed by posture). The startup validator sees the configured literal; this
+        // guard also covers a template-expanded http URL. Discovery is covered by
+        // Wilson's own RequireHttps; direct JWKS has no retriever to carry the rule, so
+        // it lives here.
+        var cacheKey = (jwksUri, options.RequireHttpsMetadata);
+        if (options.RequireHttpsMetadata && TokenExchangeOptions.IsPlainHttp(jwksUri))
+        {
+            throw new InvalidOperationException(
+                $"The token-exchange JWKS '{jwksUri}' uses plain http; key material for inbound validation must " +
+                $"come over https unless {nameof(TokenExchangeOptions.RequireHttpsMetadata)} is false.");
+        }
+
         if (!forceRefresh
-            && _directJwks.TryGetValue(jwksUri, out var cached)
+            && _directJwks.TryGetValue(cacheKey, out var cached)
             && _time.GetUtcNow() - cached.FetchedAt < JwksRefreshInterval)
         {
             return cached.Keys;
@@ -230,7 +250,7 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
                 $"The token-exchange JWKS '{jwksUri}' is malformed.", ex);
         }
 
-        _directJwks[jwksUri] = new CachedKeys(keys, _time.GetUtcNow());
+        _directJwks[cacheKey] = new CachedKeys(keys, _time.GetUtcNow());
         return keys;
     }
 
@@ -355,10 +375,7 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         // Authority mode: the discovered token_endpoint.
         var authority = await ExpandRequired(options.Authority!, partition, secrets, cancellationToken)
             .ConfigureAwait(false);
-        var manager = _oidcConfigs.GetOrAdd(authority, static a =>
-            new ConfigurationManager<OpenIdConnectConfiguration>(
-                a.TrimEnd('/') + "/.well-known/openid-configuration",
-                new OpenIdConnectConfigurationRetriever()));
+        var manager = CreateOidcManager(authority, options.Connection, options.RequireHttpsMetadata);
         var oidc = await GetConfigurationAsync(manager, "authority", cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrEmpty(oidc.TokenEndpoint))
         {
@@ -368,6 +385,26 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
 
         return oidc.TokenEndpoint;
     }
+
+    // Key material that validates INBOUND user tokens is a different risk class from
+    // outbound token endpoints: over plain http anyone on the network path can swap the
+    // keys and forge a token CredProx will exchange. RequireHttpsMetadata (default true,
+    // the JwtBearer contract, docs/adr/0003) governs the flag; the startup validator
+    // refuses http metadata unless it is opted out, and this retriever fails closed the
+    // same way at runtime (including for a template-expanded http authority). With the
+    // opt-out, plain http is a supported private-IdP configuration; the fetch rides the
+    // credential's per-connection egress client like JWKS and token do (egress doctrine).
+    private IConfigurationManager<OpenIdConnectConfiguration> CreateOidcManager(string authority, string? connection, bool requireHttps) =>
+        _oidcConfigs.GetOrAdd(
+            (authority, connection, requireHttps),
+            key => new ConfigurationManager<OpenIdConnectConfiguration>(
+                key.Authority.TrimEnd('/') + "/.well-known/openid-configuration",
+                new OpenIdConnectConfigurationRetriever(),
+                new HttpDocumentRetriever(
+                    _httpClientFactory.CreateClient(CredProxHttpClientNames.ForConnection(key.Connection)))
+                {
+                    RequireHttps = key.RequireHttps,
+                }));
 
     private static async ValueTask<T> GetConfigurationAsync<T>(
         IConfigurationManager<T> manager, string what, CancellationToken cancellationToken)

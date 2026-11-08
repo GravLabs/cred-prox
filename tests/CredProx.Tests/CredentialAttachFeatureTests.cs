@@ -644,4 +644,52 @@ public sealed class CredentialAttachFeatureTests
 
         Assert.Null(Assert.Single(recording.Contexts).InboundToken);
     }
+
+    [Fact]
+    public async Task QueryPlacement_StatePrefixWinsOverSelectedDestinationAddress()
+    {
+        // The documented precedence: the transform-stashed prefix first, the selected
+        // cluster destination only as fallback (a reload swapping the cluster model must
+        // not silently move an in-flight request).
+        var (_, feature, _) = Build(QueryKeyConfig);
+
+        var context = M4Contexts.Create(out var proxyRequest, AttachRoute);
+        proxyRequest.RequestUri = null;
+        var state = context.Features.Get<CredProxRequestState>()!;
+        state.DestinationPrefix = "https://state.example";
+        state.OutboundPath = "/data";
+        var destination = new Yarp.ReverseProxy.Model.DestinationState("d");
+        typeof(Yarp.ReverseProxy.Model.DestinationState)
+            .GetProperty(nameof(Yarp.ReverseProxy.Model.DestinationState.Model))!
+            .SetValue(destination, new Yarp.ReverseProxy.Model.DestinationModel(
+                new Yarp.ReverseProxy.Configuration.DestinationConfig { Address = "https://cluster.example/" }));
+        context.Features.Get<Yarp.ReverseProxy.Model.IReverseProxyFeature>()!
+            .ProxiedDestination = destination;
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(state.IsAborted);
+        Assert.StartsWith("https://state.example/data", proxyRequest.RequestUri!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task QueryPlacement_PathWithoutLeadingSlash_GetsExactlyOne()
+    {
+        // The join rule is "/" only when the path lacks it: never a doubled or missing
+        // separator between destination and path.
+        var (_, feature, _) = Build(QueryKeyConfig);
+
+        var context = M4Contexts.Create(out var proxyRequest, AttachRoute);
+        proxyRequest.RequestUri = null;
+        var state = context.Features.Get<CredProxRequestState>()!;
+        state.DestinationPrefix = "https://vendor.example";
+        state.OutboundPath = "v1/data";
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(state.IsAborted);
+        Assert.Equal(
+            "https://vendor.example/v1/data",
+            proxyRequest.RequestUri!.GetLeftPart(UriPartial.Path));
+    }
 }

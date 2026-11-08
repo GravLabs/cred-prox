@@ -26,7 +26,12 @@ public sealed class CallerAuthOptionsTests
         var ex = Assert.Throws<OptionsValidationException>(
             () => services.AddCredProxCallerAuthentication(config));
 
-        Assert.Contains(ex.Failures, f => f.Contains("'Header'", StringComparison.Ordinal));
+        // Full text: the unknown key must be named AND the guidance sentence survive —
+        // half the message reads like a different mistake and wastes the operator's time.
+        var failure = Assert.Single(ex.Failures);
+        Assert.Equal(
+            "The CallerAuth section declares the unknown configuration key 'Header'. Known keys: HeaderName.",
+            failure);
     }
 
     [Fact]

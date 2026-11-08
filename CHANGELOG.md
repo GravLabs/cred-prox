@@ -7,15 +7,51 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-08
+
+### Changed
+
+- **BREAKING — TokenExchange: https is required for inbound-validation key material by
+  default.** The authority discovery document and any directly configured `JwksUri`
+  carry the keys that validate **inbound** user tokens; over plain http anyone
+  on the network path can swap those keys and forge a token CredProx then exchanges. The
+  new `RequireHttpsMetadata` option (default `true`, the ASP.NET Core JwtBearer posture)
+  governs both fetches. **Breaking precisely:** an http `JwksUri` configuration worked
+  before and now fails at startup unless it opts out, naming the option; an http
+  `Authority` configuration already failed every request at runtime, and now fails at
+  startup with that same clear message — or works, with the opt-out. Runtime fetches
+  fail closed the same way, including for a template-expanded http URL. **Migration:**
+  set `"RequireHttpsMetadata": false` on that credential to keep a private-network http
+  IdP working — you accept that an attacker on the network
+  path can choose the keys that validate your inbound tokens, so only do it on segments
+  you control. The metadata fetch also now rides the credential's per-connection egress
+  client, like JWKS and token-endpoint calls. Option is additive; no API break. The
+  direct JWKS cache is keyed by posture, so an opted-out credential's http-fetched keys
+  can never be served to a default (https) credential on the same URI.
+- **Credential attachment fails closed.** Header credentials are attached through the
+  HTTP stack's own header store, which quietly rewrites or refuses some inputs. Three
+  shapes of that are now refused up front with a clear error naming the credential,
+  before any request leaves the proxy: an **empty value**, which the store silently
+  dropped — the request used to go out unauthenticated; a **restricted header name**
+  such as `Content-Length`, which used to surface as a raw internal exception at send
+  time; and a header name the store **parses** (like `Date` or `Range`), which used to
+  store a rewritten form of the credential — the vendor received a corrupted value on a
+  request that went out. Attachment now confirms the store kept the credential
+  byte-identical, and refuses if it did not.
+- **JWT assertion certificate errors have one clear shape.** Signing certificate
+  material that cannot be used — corrupt Base-64, unloadable certificate file, wrong
+  key type for the configured algorithm — now always fails with the same clear
+  "could not be loaded" error naming the certificate, instead of some malformed shapes
+  surfacing a raw framework decoding exception to the caller.
+
 ### Added
 
-- **Vendor config snippets (docs, M28):** [`docs/vendors/`](docs/vendors) — one
-  complete `CredProx:` block per vendor (ADP, Workday, Salesforce, ServiceNow,
-  GitHub Apps, Microsoft Graph, Spotify) with the auth model, required secret
-  names, scopes and gotchas. Each block is extracted by a test and bound +
-  validated through the real fail-closed startup path, so a snippet with a wrong
-  or misspelled key fails CI. Documentation only — no behaviour or API change;
-  built-in vendor presets remain removed (0.4 decision).
+- **Consumer compatibility guide and script** (`docs/consumer-compatibility.md`,
+  `scripts/consumer-compat.sh`): what a consuming app can expect from CredProx packages —
+  supported target frameworks, the exact refusal an unsupported framework gets,
+  dependency-drift behaviour, container publish, and the trimming/AOT posture — plus a
+  repeatable script that builds fresh consumer projects against the published packages
+  and reports each result.
 
 ## [0.8.2] - 2026-11-07
 

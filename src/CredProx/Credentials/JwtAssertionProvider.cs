@@ -338,8 +338,11 @@ internal static class JwtSigner
         {
             return X509CertificateLoader.LoadPkcs12(Convert.FromBase64String(base64Pkcs12), password: null);
         }
-        catch (CryptographicException ex)
+        catch (Exception ex) when (ex is CryptographicException or FormatException)
         {
+            // FormatException (material is not Base-64 at all) must not reach the
+            // operator raw while a loadable-shape failure is wrapped (M31 triage):
+            // both mean 'the configured certificate material cannot be used'.
             throw new InvalidOperationException("The signing certificate could not be loaded.", ex);
         }
     }
