@@ -1,0 +1,11 @@
+{
+  "priority": 5,
+  "request": { "method": "GET", "urlPath": "/sse/stream" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "text/event-stream" },
+    "body": "event: msg\ndata: {\"stream_key\":\"{{request.headers.X-Stream-Key}}\"}\n\nevent: msg\ndata: {\"note\":\"second event, key must stay scrubed per-event\"}\n\nevent: done\ndata: {\"stream_key\":\"{{request.headers.X-Stream-Key}}\"}\n\n",
+    "transformers": ["response-template"],
+    "fixedDelayMilliseconds": 200
+  }
+}

@@ -5,7 +5,28 @@ All notable changes to CredProx are documented here. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, the public API may
 change between minor versions; `[Experimental]` APIs may change at any time.
 
-## [Unreleased]
+## [0.9.1] - 2026-11-09
+
+### Added
+
+- The soak and failure-injection harness (`tools/m33-soak`) and its testing report
+  (`docs/testing-report-m33.md`) are now in the repository: a compose-based fault
+  battery (clock skew, vendor throttling and failure, secret rotation) with k6 load
+  scenarios and a documented verdict procedure.
+
+### Fixed
+
+- **A negative `expires_in` no longer parks the token cache.** The
+  `OAuthClientCredentials` provider treated a negative `expires_in` like an absent
+  one and fell back to `DefaultLifetime` (1 h), so a token already expired at mint
+  time was cached and served for up to an hour — against a real vendor, a full hour
+  of requests carrying a token it will reject. A negative `expires_in` (number or
+  numeric string) is now a protocol violation: the token response is rejected through
+  the same path as any unusable response — callers get the documented
+  `credential_unavailable` (502) problem shape and nothing is cached — and the
+  warning names the field and the credential id, never the value or the token.
+  `expires_in: 0` keeps falling back to `DefaultLifetime` (some IdPs use 0 for "no
+  stated expiry") and now logs one warning per credential.
 
 ## [0.9.0] - 2026-11-08
 

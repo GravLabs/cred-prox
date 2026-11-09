@@ -742,6 +742,81 @@ and a fixed-seed 30-min-per-target fuzz session in the container, artifacts = St
 crashes only; PR jobs run only the changed-area mutation scope. Nightly mutation score is reported,
 not a hard gate, matching the §5.3 row.
 
+### 5.5 Soak and failure-injection testing (M33 design)
+
+Every layer above §5.5 is minutes-scale: a test runs, asserts, and exits. Nothing there answers
+what the release line does over **hours** in the hot path of every vendor call, or what it does
+when the IdP, the vendor, or the network between fails mid-request. This layer runs the real
+proxy against stub upstreams behind a fault proxy (Toxiproxy), under sustained load, and holds it
+to three doctrines: no unbounded growth, no stuck states, no secret in any error surface — and
+every expectation is written **before** its run, so any result can still fail.
+
+**Topology** (one isolated Docker network; images pinned by digest; only `127.0.0.1` published):
+
+| Container | Image @ digest | Role | CPU | Mem |
+|---|---|---|---|---|
+| soakhost | built from `tools/m33-soak/SoakHost` (published on the host, copied onto the pinned `mcr.microsoft.com/dotnet/aspnet@sha256:aa89a25c13f60a1df1018742e6e7fecd8d93cba469f3d079de410ff1390634ac`; CredProx restored as the published package) | proxy under test: 3 credential types (StaticKey, OAuth client-credentials, Login exchange), 3 caller API keys, an SSE route with response scrubbing on, throttling + circuit breaker configured, config reload via file-watch rebind | 2.0 | 1.5 GiB |
+| wiremock | `wiremock/wiremock@sha256:d13997cd7b52583528a766019cfe7d4e91c4d224a67bdaa6f60efbb532f32176` | stub IdP (`/idp/token`, controllable `expires_in`) + stub vendor (echo/reflect of received secrets, SSE stream, `429`+`Retry-After` and `5xx` scenarios, request journal for counts) | 1.5 | 1.0 GiB |
+| toxiproxy | `ghcr.io/shopify/toxiproxy@sha256:6ab0847e939e66c620fd5ef837677f28b62afb7e728491a61ed0c702cc610203` | fault proxy between soakhost and wiremock: two proxies, `idp` and `vendor`; API on `127.0.0.1:8474` only | 0.5 | 256 MiB |
+| k6 | `grafana/k6@sha256:db712b9eb4c02d9157fc9b548d144c6bba55a74c4331ecad23e046f0287ecfa9` | bounded load generator: mixed workload across the three credential types, three callers, SSE streams kept open; VU count capped in the scenario scripts | 2.0 | 1.0 GiB |
+
+Σ caps 6.0 CPU / 3.75 GiB — inside the hard run budget (§ below). The soakhost's upstreams are the
+Toxiproxy listener ports only, so every byte to and from an upstream crosses the fault proxy.
+Container `--cpus`/`--memory` caps are set in `tools/m33-soak/compose/docker-compose.yml`; load
+generators are self-bounded.
+
+**Steady soak** (Phase B, after maintainer review): warm-up 15 min, soak 4 h. Per-30 s CSV from an
+in-host collector: RSS (`Environment.WorkingSet`), GC heap bytes + gen2/LOH counts, managed thread
+count, open socket count, token-cache entry count (counted by a per-key probe list the soak config
+declares), plus a wiremock-journal fetch per interval; k6 writes per-interval latency percentiles.
+Pass, evaluated after warm-up: RSS slope over the last 2 h ≤ +5 MB/h **and** heap bytes inside the
+same ±10 % band as hour 1; sockets and threads within ±10 % of the warm-up plateau; cache entries
+bounded (≤ declared keys × 1.5); error-rate drift between hour 1 and hour 4 ≤ 0.1 pp; k6 p99
+within 2× of its first-hour value. Any breach is a deviation — triaged, not waved.
+
+**Faults.** Each scenario: set the toxic or WireMock scenario → hold the stated load → remove →
+measure recovery. Expected behaviour below is fixed **before** the runs; deviations are triaged as
+library bug (fix in `src/` with a regression test, full §5.3 gates, security callout if secrets are
+involved) or harness/expectation error (named, with evidence).
+
+| # | Fault | Expected behaviour (pre-stated) |
+|---|---|---|
+| 1 | IdP slow (latency toxic ±100 ms on `idp`), then down (reset_peer) | single-flight holds: concurrent waiters share one fetch — journal shows one `/idp/token` per cache key per window despite N waiters; callers get the documented `credential_unavailable` 502 problem shape; on recovery no thundering herd: ≤ 2 token-endpoint requests per key to re-admit the first burst; cache recovers within one refresh cycle |
+| 2 | Vendor `429` bursts carrying `Retry-After` (two 30 s bursts) | cluster pauses ≈ `Retry-After` (±1 s) then lifts on its own; queued-over-limit callers get 429 with `Retry-After`; vendor journal shows no request the pipeline did not admit — nothing is silently retried |
+| 3 | Vendor `5xx` burst | circuit breaker opens at the configured threshold → 503 problem; half-open probes reach the vendor exactly at the configured count; closes after the configured successes |
+| 4 | Connection reset mid-response and mid-SSE (timeout / reset_peer on `vendor`) | every affected caller request ends in a clean failure within the attempt timeout (no hang); sockets return to the warm-up baseline within 60 s of toxic removal (no leak); the SSE consumer sees a terminated stream, not a stall |
+| 5 | Config reload under load: one atomic config edit swaps credential secret **and** destination generation together (gen-tagged vendor paths), plus an allow-list edit | vendor journal pairs each request's generation tag with the secret that matches it: zero mixed pairs; a failed rebind keeps the previous registry serving (§5.2 reload rules) |
+| 6 | Key Vault rotation under load (design decision 2026-11-08): the **real** AzureKeyVault config provider (`AddAzureKeyVault`, 1.3.x line as shipped) with `ReloadInterval` against a loopback KV stub on the WireMock — only the SecretClient transport is swapped (M29 reloadproof pattern); stub flips the value and bumps `attributes.updated`. The config-file rebind stays as the secondary rotation witness inside fault 5 | next-mint semantics (M29 design decision): minted tokens keep working until expiry; new mints pick the rotated value within two provider ticks; no 401 storm at the swap and zero extra vendor failures across it; exactly one provider reload per flip (no polling storm) |
+| 7 | Clock skew around token expiry (skewed stub IdP: returns `exp` already inside the skew window, then past) | near-expiry tokens refresh instead of being served; zero vendor `401`s attributable to expired tokens; refresh requests stay single-flight (no early-expiry storm) |
+| 8 | Slowloris-style slow callers (bounded script, ≤ 64 sockets, drip bodies) while k6 runs | normal callers' p95 moves ≤ +20 %; extra abusive sockets are refused by Kestrel limits, not by thread exhaustion (thread count stays in the warm-up band); dropping the slow clients returns everything to baseline |
+
+**Secret hygiene under fault.** At scenario start the harness injects fresh random sentinel values
+as: the caller keys, the IdP client secret and token value, the vendor key, and a value the vendor
+stub reflects back into bodies and headers. After **every** scenario and at soak end, `secret-scan`
+greps every log line, every error/problem body captured by k6, the WireMock journal dump, and the
+collector CSV for the sentinels: **zero hits required**; the scan's pattern list and results live in
+the run directory only, never in the repo.
+
+**Machine budget (hard rule).** The run stays ≤ ~8 cores / ~6 GiB across everything (the Σ caps
+above); `uptime` is checked hourly by the runner; if the 5-min load average passes 40 the runner
+kills k6 first, then tears down. `tools/m33-soak/scripts/teardown.sh` removes containers, network,
+and volumes for this run alone and is the last step of every script path — no container outlives a
+scenario, clean or failed.
+
+**Time estimate.** Phase A (this design + harness): done in-branch. Phase B: setup + 15 min smoke
+~0.5 h, warm-up + steady soak 4.25 h, 8 faults × ~15 min with recovery measurement ~2 h, report
+~0.5 h → ~7.25 h wall-clock, run in order 1→8 so a mid-way stop still leaves the longest scenarios
+covered.
+
+**Reporting.** `docs/testing-report-m33.md`: per-scenario expectation → observed → verdict, the
+slope/band numbers as CSV or ASCII graphs, triage entries for every deviation, and an explicit
+**not-covered** list (real vendor behaviours, Windows, real Key Vault, multi-instance). Re-run
+scripts land beside the harness; results are cited, raw run directories are not committed.
+
+**Nightly-CI fit (proposed, not wired):** a ~20 min nightly short soak (5 min warm-up + 15 min
+steady, faults 1 and 2 as 60 s probes) catches growth and single-flight regressions on the
+nightly runner; PR jobs unchanged. Wiring is a separate owner decision.
+
 ---
 
 ## 6. Example projects
@@ -866,7 +941,7 @@ full setup is plain config in its own isolated sample.
 | M26 | — | Live Azure/Entra validation (approved 2026-10-30; the plan is `docs/azure-live-test-plan.md`; **executed 2026-11-04**, evidence `docs/live-validation-report.md`): every Microsoft/Azure path proven against the maintainer's **production tenant** instead of fakes — secretless `DefaultAzureCredential` through CredProx against real ARM (P1), Entra client-credentials with scrub assertions against live 401→502 error bodies (P2), Key Vault as the **only** live secret source with rotation-by-overwrite and version-pipe recovery (P4), and one-command Bicep infra apply/destroy proven by a destroy→apply→re-run cycle with paired app-lifecycle scripts (P5, design 2026-10-31). Phase 3's OBO/inbound-token set was **dropped 2026-11-03** (M27, ADR-0002); live-issuer issuance attribution therefore stays fake-level. Consent-free by design (Azure RBAC, no admin consent), one tagged resource group + one `credprox-*` app registration, scripted teardown (role-grant-before-SP; vault purge with read-back), maintainer-present gate on every tenant mutation, local execution only — deliberately no real-tenant credential in public-repo CI secrets. Delivered `src/` delta: zero (the env-override fix was sample-side, disclosed as a finding). Security milestone: adversarial pass done before close — argv scratch-handling defects found and fixed, disclosures in the report | 1 day |
 | M27 | — | Entra on-behalf-of removal (decision 2026-11-03, ADR-0002): `TokenExchangeMode.EntraObo` and the jwt-bearer form branch leave the library; `TokenExchange` keeps RFC 8693 as its only wire shape and the single-member `Mode` enum so existing config binds unchanged; a config naming the removed mode fails loudly at startup binding (test-pinned); scoped APICompat suppression cites the ADR; E14 sample (Rfc8693) and all other Azure features untouched | 0.5 days |
 | M28 | — | Vendor config snippets (docs) (approved 2026-11-04, the §8.6 pick; scope: no throttling work, idempotency never wanted): `docs/vendors/` pages for ADP, Workday, Salesforce, ServiceNow, GitHub Apps (+ Microsoft Graph and Spotify, cheap from existing samples) — one complete `CredProx:` block per page using `secret:` references only, with auth model, required secret names, scopes and gotchas; every block is extracted by a test and bound + validated through the real fail-closed startup path (a misspelled key fails CI); vendor facts sample-traceable ("verified in sample EX"), cited to public vendor docs, or marked `UNVERIFIED:` — no guessed endpoints presented as fact; README Vendors index, CHANGELOG entry; no `src/` change | 0.5 days |
-| M29 | — | Live Azure validation round 2 (approved 2026-11-04; **executed 2026-11-06** with the AME-region correction, evidence `docs/live-validation-report.md` Round 2): CredProx hosted **inside** Azure Container Apps (internal-only ingress, caller keys everywhere) under a **real user-assigned managed identity** — P5–P10 PASS on direct battery logs three times, incl. a full material+infra recreate cycle; Key Vault **PEM/PFX material** (not just secrets) drives the JWT-assertion, HMAC and mutual-TLS paths with pinned independent verifiers (P6–P8); P10 rotation witness on the **2-minute stub** per ruling B+C (code default 59 unchanged; staleness bound is token lifetime × RefreshFraction, not ReloadInterval — documented library-wide); zero `src/` delta — the 17 fixes live in sample code and the live scripts; scripted teardown polled to read-backs, tenant verified empty; no throttling scope; adversarial pass scheduled | 1 day |
+| M29 | — | Live Azure validation round 2 (approved 2026-11-04; **executed 2026-11-06** with the AME-region correction, evidence `docs/live-validation-report.md` Round 2): CredProx hosted **inside** Azure Container Apps (internal-only ingress, caller keys everywhere) under a **real user-assigned managed identity** — P5–P10 PASS on direct battery logs three times, incl. a full material+infra recreate cycle; Key Vault **PEM/PFX material** (not just secrets) drives the JWT-assertion, HMAC and mutual-TLS paths with pinned independent verifiers (P6–P8); P10 rotation witness on the **2-minute stub** per design decisions B+C (code default 59 unchanged; staleness bound is token lifetime × RefreshFraction, not ReloadInterval — documented library-wide); zero `src/` delta — the 17 fixes live in sample code and the live scripts; scripted teardown polled to read-backs, tenant verified empty; no throttling scope; adversarial pass scheduled | 1 day |
 
 Total: about **23–25 focused days (roughly five weeks)**. About half of that is tests, examples
 and documentation. Each preview is usable on its own, so going straight to the 0.3 scope does not
@@ -950,6 +1025,8 @@ make this explicit:
 | Aspire integration | `AddCredProx()` resource for .NET Aspire AppHost | Low–Med | S |
 | Graph admin-consent live variants | E5 real-tenant runs scoped to `graph.microsoft.com` (app-permission variants needing admin consent). Parked out of M26 (2026-10-30): the milestone is strictly the consent-free set — Azure RBAC targets need no tenant consent policy cooperation; revisit if self-consent is possible | Low | S |
 | Baseline rotation to published `0.8.0` bytes | **Done** at 0.8.1 (2026-11-04, full-scrub decision): `PackageValidationBaselineVersion` → `0.8.0`, `build/baselines/` replaced with the four registry-served `0.8.0` nupkgs (ADR-0001; the `0.7.1` generation subsumed, reasons in ADR-0001). Dropped the legacy internal URL from the current tree (was the `0.7.0` nuspecs' `RepositoryUrl`) | Medium | S |
+| Baseline rotation to published `0.9.0` bytes | **Open** — due at the next release prep: `PackageValidationBaselineVersion` → `0.9.0`, `build/baselines/` replaced with the four registry-served `0.9.0` nupkgs (sha256 list in PUBLISHING.md release history; ADR-0001 rule; PascalCase filenames — the cache extraction is lowercase) | Medium | S |
+| `expires_in` parsing hygiene | **Open** — deferred from the M33 close review (2026-11-09), for the next touch of `OAuthClientCredentialsProvider`: (1) a numeric-string `expires_in` of `"-Infinity"` parses to a non-finite value and falls back to `DefaultLifetime` instead of being rejected like other negative values; (2) numeric-string parsing uses the current culture, so a decimal-comma host reads `"1,000"` as 1.0, not 1000 — parse with `NumberStyles.Float` and `CultureInfo.InvariantCulture`. Neither is reachable from an RFC 6749 IdP that sends digits | Low | S |
 
 ### 8.7 Inbound-direction twin (optional)
 

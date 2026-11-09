@@ -1,0 +1,16 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/secrets/CredProx--Secrets--vendor-gen2-key/?"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "value": "KV-GEN2-SENTINEL",
+      "id": "https://credprox-m33-stub.vault.local/secrets/CredProx--Secrets--vendor-gen2-key/v1",
+      "attributes": { "enabled": true, "updated": 1730000000 }
+    }
+  }
+}

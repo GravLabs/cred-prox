@@ -33,7 +33,11 @@ public sealed class OAuthClientCredentialsOptions : IHasAttachment, IHasPartitio
     public string? Audience { get; set; }
 
     /// <summary>
-    /// Lifetime assumed when the token response carries no <c>expires_in</c>.
+    /// Lifetime assumed when the token response carries no usable <c>expires_in</c>: the
+    /// field absent, non-numeric, or <c>0</c> (some IdPs use 0 for "no stated expiry"; that
+    /// case also logs one warning per credential). A <b>negative</b> <c>expires_in</c> is a
+    /// protocol violation and does not fall back: the response is rejected, the request
+    /// fails <c>credprox.credential_unavailable</c> (502), and nothing is cached.
     /// Default one hour.
     /// </summary>
     public TimeSpan DefaultLifetime { get; set; } = TimeSpan.FromHours(1);

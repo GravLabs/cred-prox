@@ -1,0 +1,19 @@
+{
+  "priority": 2,
+  "scenarioName": "kv",
+  "requiredScenarioState": "kv2",
+  "newScenarioState": "kv2",
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/secrets/CredProx--Secrets--vendor-gen2-key/?"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "value": "KV-GEN2-ROTATED",
+      "id": "https://credprox-m33-stub.vault.local/secrets/CredProx--Secrets--vendor-gen2-key/v2",
+      "attributes": { "enabled": true, "updated": 1730009999 }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+<Project>
+  <!-- Stops the upward walk to the repo-root CPM file: the soak host pins the PUBLISHED
+       package version explicitly (it must test the release bytes, not the working tree). -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>

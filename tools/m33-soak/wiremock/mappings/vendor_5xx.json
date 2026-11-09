@@ -1,0 +1,15 @@
+{
+  "priority": 1,
+  "scenarioName": "vendor",
+  "requiredScenarioState": "5xxon",
+  "newScenarioState": "5xxon",
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/(gen1|gen2|cc)/echo"
+  },
+  "response": {
+    "status": 500,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "error": "stub-internal" }
+  }
+}

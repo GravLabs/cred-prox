@@ -11,29 +11,36 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-07): `0.8.2` is **published on the registry** — library code
-**identical to `0.8.1`** (the only in-package content change is the AzureKeyVault
-README docs); it ships via the tree the M28 vendor config snippets, the M29 Azure
-live round-2 tooling, sample and validation report, and the Azure Container Apps
-sample. The public line is now **collapsed** (decided 2026-11-05): GitHub
-`main` and tag `0.8.2` sit on **one root commit**
-`4f663ac90d14dfbd048a008b9379ebd88a592dcd` (noreply author; tree identical to the
-internal release commit `ec79b35`); tags `0.7.0`/`0.7.1`/`0.8.0`/`0.8.1` were deleted
-from the public repo and `main` moved with `--force-with-lease`. CI green on the
-collapsed commit (Actions run 42320666021). `0.8.2` shipped end to end: packed once
-from the collapsed public commit, all eight package PUTs accepted with each package
-exactly once, consumer restore byte-identical, QuickStart smoke green on the
-downloaded bytes — its source links resolve to the publicly referenced root commit.
-Source links for `0.8.1` and earlier point at commits that are off every branch and
-tag; they resolve only while GitHub retains the unreferenced objects (no support
-purge was requested) — **unsupported-by-construction** (see the `0.8.1` history
-entry). `0.8.2` is the supported version. The Entra on-behalf-of removal shipped at
-`0.8.0` stays **breaking** for `Mode: EntraObo` users; the CHANGELOG entry remains
-the consumer contract. The `0.7.1` known issues stay resolved (F1: CI-path-mapped
-PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1` published
-packages keep their historical metadata (immutable). The baseline rotation **ran
-with the `0.8.2` prep**: `build/baselines/` holds the published `0.8.1` bytes
-(sha256-verified; ADR-0001); the next rotation runs at `0.8.3` per the rule below.
+Current state (2026-11-08): `0.9.0` is **published on the registry** — the first
+**breaking** release on the collapsed public line: `RequireHttpsMetadata` (default
+`true`) now requires https for the TokenExchange key material that validates inbound
+tokens (http `JwksUri` configs must opt out; http `Authority` configs already failed at
+runtime and get a clear startup refusal or the opt-out). It ships the M31
+token-lifecycle hardening (credential attachment fails closed; JWT assertion
+certificate errors unified) and the M32 consumer-compatibility guide and script.
+GitHub `main` and tag `0.9.0` sit on **one squashed commit**
+`db26705e040ddddd3cabef748ea6964196eda4be` (noreply author; tree identical to the
+internal release commit `a1c5e78`) appended on the previous public tip `1430d50` — a
+regular append: no collapse, no tag deletions. CI green on the release commit
+(Actions run 42485303537). `0.9.0` shipped end to end: packed once from the public
+commit, each of the eight artifacts exactly once (the push client exits 0 without
+printing response codes; pushes authenticate via the machine-local
+`packageSourceCredentials` — an anonymous PUT answers 401 — and serving is proven
+consumer-side), consumer restore byte-identical, QuickStart smoke green on the
+downloaded bytes — its source links resolve to the publicly referenced commit
+`db26705e`. `0.9.0` is the supported version; `0.8.2` source links still resolve
+(the collapsed root is publicly referenced). Source links for `0.8.1` and earlier
+point at commits that are off every branch and tag; they resolve only while GitHub
+retains the unreferenced objects (no support purge was requested) —
+**unsupported-by-construction** (see the `0.8.1` history entry). The Entra
+on-behalf-of removal shipped at `0.8.0` stays **breaking** for `Mode: EntraObo`
+users, and the `0.9.0` https default is breaking as described; both CHANGELOG
+entries remain the consumer contract. The `0.7.1` known issues stay resolved (F1:
+CI-path-mapped PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1`
+published packages keep their historical metadata (immutable). The baseline rotation
+**ran with the `0.9.0` prep**: `build/baselines/` holds the published `0.8.2` bytes
+(sha256-verified; ADR-0001); the next rotation runs at the next release prep per the
+rule below.
 
 ## What gets published
 
@@ -181,6 +188,46 @@ dotnet nuget locals http-cache --clear
 
 ## Release history
 
+- `0.9.0` (GitHub `db26705e040ddddd3cabef748ea6964196eda4be`, internal release commit
+  `a1c5e78`): published 2026-11-08 — **BREAKING**, the first on the collapsed line:
+  `RequireHttpsMetadata` (default `true`) now governs the authority-discovery and
+  direct-JWKS fetches that carry the keys validating inbound tokens; http `JwksUri`
+  configurations (which worked before) must set `RequireHttpsMetadata: false` or fail
+  at startup, and http `Authority` configurations (which already failed every request
+  at runtime) get the same clear startup message or the opt-out. The metadata fetch
+  rides the per-connection egress client; the direct JWKS cache is keyed by posture.
+  Ships the accepted M31 token-lifecycle hardening (credential attachment refuses
+  empty values, restricted names, and BCL-parsed names before the request leaves the
+  proxy; JWT assertion certificate failures unified into one clear load error) and
+  the M32 consumer-compatibility guide and script. Public history: ONE squashed
+  commit on the previous public tip, noreply identity — a regular append, no
+  collapse, no tag deletions; CI green (Actions run 42485303537). Ceremony: packed
+  **once** from a clean detached worktree at the PUBLIC commit after tree equality
+  with the reviewed `a1c5e78`, `-p:ContinuousIntegrationBuild=true` from fresh obj
+  into an isolated package cache; sanity loop ×4 passed (SourceLink carries the full
+  public SHA and the `/_/*`-to-raw mapping; no builder-home paths in any pdb or dll);
+  APICompat against the rotated `0.8.2` baselines exit 0, additive surface only;
+  extended disclosure scan over every member of all eight packages (49 members incl
+  all eight `*Content_Types*` members) zero hits, exit code captured without a pipe
+  tail. The push round: four nupkgs (the client auto-routes the adjacent snupkgs),
+  each version exactly once — pushes authenticate via the machine-local
+  `packageSourceCredentials` (anonymous PUT answers 401), so the client's
+  missing-API-key notice is benign and serving is proven consumer-side. Nupkg sha256:
+  `CredProx` `a3a599ffc4dd00b944a210d43c34aae20adb066111696c5fcece5bec9f4d62e2`,
+  `CredProx.Abstractions`
+  `c8e07c260a9bb0351bbd8ed3c946f5d4341f2f371447136ce4dcb6adac929c7e`,
+  `CredProx.AzureKeyVault`
+  `4edd4e5e178157e2adfac89755829ad5c8dad861dbdb158271c3b0b356c371c2`,
+  `CredProx.Testing`
+  `ce18a0591e0c804a4cd1adfe1fe9625d91737d8604e385df5be8a7defb424c6a`. Consumer verify:
+  http-cache cleared, out-of-repo scratch project (the repo-level source mapping pins
+  `CredProx*` to the local feed, so an in-tree restore cannot prove the registry),
+  isolated package cache, all four downloads byte-identical to the pushed artifacts,
+  `samples/QuickStart` smoke green on those exact bytes (WireMock journal shows the
+  credential attached; the caller's echo shows it redacted). Independent registry
+  re-check: 4/4 sha256 match, zero disclosure hits, nuspec commit `db26705`, raw
+  source URL answers 200. Review: fresh-context spot-check PASS at the internal tip
+  `a1c5e78` (no findings).
 - `0.8.2` (GitHub `4f663ac90d14dfbd048a008b9379ebd88a592dcd`, internal release commit
   `ec79b35`): published 2026-11-07 — **library code unchanged from `0.8.1`** (the only
   in-package content change is the AzureKeyVault README docs); ships via the tree the

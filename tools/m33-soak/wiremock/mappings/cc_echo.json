@@ -1,0 +1,10 @@
+{
+  "priority": 5,
+  "request": { "method": "GET", "urlPath": "/cc/echo" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "body": "{\"marker\":\"cc\",\"auth\":\"{{request.headers.Authorization}}\",\"probe\":\"{{request.query.probe}}\"}",
+    "transformers": ["response-template"]
+  }
+}

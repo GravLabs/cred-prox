@@ -1,0 +1,16 @@
+{
+  "priority": 1,
+  "scenarioName": "idp",
+  "requiredScenarioState": "skew",
+  "newScenarioState": "skew",
+  "request": { "method": "POST", "urlPath": "/idp/token" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "access_token": "IDP-TOKEN-SENTINEL",
+      "token_type": "Bearer",
+      "expires_in": -30
+    }
+  }
+}

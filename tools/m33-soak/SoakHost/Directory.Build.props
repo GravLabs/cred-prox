@@ -1,0 +1,7 @@
+<Project>
+  <!-- Hermetic host: do not inherit the library's build (versioning, analyzers, packaging). -->
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using CredProx;
 using CredProx.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -337,16 +338,17 @@ public sealed class OAuthClientCredentialsProviderTests
     }
 
     [Theory]
-    [InlineData("0")]        // number zero: expired at mint is never a lifetime
+    [InlineData("0")]        // number zero: "no stated expiry" -> default lifetime (M33 design decision keeps this)
     [InlineData("\"0\"")]    // string zero, same rule through the string arm
-    [InlineData("-5")]       // negative
     [InlineData("\"soon\"")] // unparseable
     [InlineData("null")]     // JSON null reaches neither arm
     public async Task UnusableExpiresIn_FallsBackToDefaultLifetime_AndIsCached(string json)
     {
-        // The boundary mutants (seconds >= 0, IsFinite || seconds > 0, always-true)
-        // all store a zero/negative/throwing lifetime here: the second call would
-        // re-fetch (or the first would crash) instead of hitting the cache.
+        // The boundary mutants (seconds >= 0, IsFinite || seconds > 0, always-true) all
+        // store a zero/throwing lifetime here: the second call would re-fetch (or the first
+        // would crash) instead of hitting the cache. Negative expires_in is NOT in this row
+        // since 0.9.x: a negative lifetime is a protocol violation and REJECTS the response
+        // (M33 fault 7) - pinned by NegativeExpiresIn_RejectsResponse_CachesNothing below.
         var (provider, handler) = CreateProvider(new StubHttpHandler(
             HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}"""));
 
@@ -357,6 +359,130 @@ public sealed class OAuthClientCredentialsProviderTests
         Assert.Equal("tok-1", token);
         Assert.Equal("tok-1", again);
         Assert.Single(handler.Requests);
+    }
+
+    // --- M33 fault 7 (design decision 2026-11-09): negative expires_in must REJECT, never cache ---
+
+    [Theory]
+    [InlineData("-5")]      // negative number
+    [InlineData("\"-30\"")] // negative numeric string goes through the string arm
+    public async Task NegativeExpiresIn_RejectsResponse_CachesNothing(string json)
+    {
+        // 0.9.0 mapped ANY non-positive expires_in to DefaultLifetime (1 h): the past-expiry
+        // token was cached and served for an hour against a real vendor. Negative is now a
+        // protocol violation: the mint fails through the documented IdP-failure path and no
+        // TOKEN is cached - the rejected body is never re-served. The shared backoff
+        // (NegativeCacheTtl, 5 s default) then re-throws without a vendor hit inside the
+        // window (the "no new mint-storm class" property from fault 1b) and mints fresh
+        // once it lapses.
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(new StubHttpHandler(
+            HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}"""), time);
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+        var ex = await Assert.ThrowsAsync<OAuthClientCredentialsProvider.NegativeExpiresInRejectedException>(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask());
+        Assert.IsAssignableFrom<InvalidOperationException>(ex); // the documented IdP-failure type
+        Assert.Contains("expires_in", ex.Message);
+        Assert.Contains("test", ex.Message);          // names the credential id...
+        Assert.DoesNotContain("tok-1", ex.Message);   // ...never the token or the value.
+        Assert.DoesNotContain("-5", ex.Message);
+        Assert.DoesNotContain("-30", ex.Message);
+        Assert.Single(handler.Requests);
+
+        await Assert.ThrowsAsync<OAuthClientCredentialsProvider.NegativeExpiresInRejectedException>(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask());
+        Assert.Single(handler.Requests);              // backoff re-throw: no vendor hammering
+
+        time.SetUtcNow(time.GetUtcNow() + TimeSpan.FromSeconds(6)); // past NegativeCacheTtl
+        await Assert.ThrowsAsync<OAuthClientCredentialsProvider.NegativeExpiresInRejectedException>(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask());
+        Assert.Equal(2, handler.Requests.Count);      // re-mints once the backoff lapses
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("\"0\"")]
+    public async Task ZeroExpiresIn_FallsBack_LogsOncePerCredential(string json)
+    {
+        // Zero keeps the 1 h fallback (some IdPs mean "no stated expiry"), but earns one
+        // warning per credential - three mints of the same credential log exactly once.
+        var time = new FakeTimeProvider();
+        var handler = new StubHttpHandler(
+            HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}""");
+        var logger = new CollectingLogger();
+        var cache = new InMemoryTokenCache(Options.Create(new TokenCacheOptions()), time);
+        var provider = new OAuthClientCredentialsProvider(
+            cache, new StubHttpClientFactory(handler), time, logger);
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        }
+
+        Assert.Single(handler.Requests); // cached on the default lifetime
+        var warning = Assert.Single(logger.Messages);
+        Assert.Contains("expires_in", warning);
+        Assert.Contains("test", warning);
+        Assert.DoesNotContain("tok-1", warning);
+    }
+
+    [Fact]
+    public async Task OneSecondExpiresIn_RefreshesOnSchedule()
+    {
+        // Small positives must NOT be swallowed into the 1 h fallback: expiry is honoured
+        // (fault 7's mint-collapse witness is the inverse of this).
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(new StubHttpHandler(
+            HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":1}"""), time);
+
+        // (The cache's expiry-skew is far larger than 1 s, so a hit inside the window is
+        // already a refresh-attempt path; what MUST hold is that the 1 s token is not
+        // stretched: past expiry the very next call re-mints.)
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+        Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        Assert.Single(handler.Requests);
+
+        time.SetUtcNow(time.GetUtcNow() + TimeSpan.FromSeconds(2));
+        Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task AbsentAndGarbageExpiresIn_KeepDefaultLifetimeFallback()
+    {
+        // Explicitly pinned beside the negative rows: only NEGATIVE changes behaviour.
+        foreach (var body in new[]
+        {
+            """{"access_token":"tok-1"}""",
+            """{"access_token":"tok-1","expires_in":"garbage"}""",
+        })
+        {
+            var (provider, handler) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, body));
+            var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+            Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+            Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+            Assert.Single(handler.Requests); // cached for DefaultLifetime, not re-minted
+        }
+    }
+
+    private sealed class CollectingLogger : ILogger<OAuthClientCredentialsProvider>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
     }
 
     private static Dictionary<string, string> ParseForm(string body) =>

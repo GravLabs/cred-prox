@@ -1,0 +1,13 @@
+{
+  "priority": 5,
+  "request": { "method": "POST", "urlPath": "/idp/token" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "access_token": "IDP-TOKEN-SENTINEL",
+      "token_type": "Bearer",
+      "expires_in": 60
+    }
+  }
+}

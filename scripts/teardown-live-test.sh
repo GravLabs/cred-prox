@@ -70,12 +70,12 @@ fi
 # The battery's own scratch never lands here: its EXIT trap removes it.
 # Boundary (review F3): the .md keep matches TOP-LEVEL /tmp/credprox-*.md
 # only - a note nested inside a scratch directory is swept with the directory,
-# so keep seat notes as top-level files.
+# so keep local notes as top-level files.
 echo "== Local scratch (/tmp/credprox-* test scratch) =="
 shopt -s nullglob
 for f in /tmp/credprox-*; do
   if [[ "$f" == *.md ]]; then
-    echo "  $f: kept (seat note/recap - not deleted here)"
+    echo "  $f: kept (local note - not deleted here)"
     continue
   fi
   if [[ "$dry" == 1 ]]; then

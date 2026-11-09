@@ -1,0 +1,83 @@
+# M33 soak topology (plan §5.5). Σ caps 6.0 CPU / 3.75 GiB — inside the hard run budget.
+# Only the Toxiproxy API and the soak host bind to 127.0.0.1. Images pinned by digest.
+name: m33-soak
+
+services:
+  soakhost:
+    image: credprox-soakhost:local
+    build:
+      # repo root (compose file lives at tools/m33-soak/compose/) - matches the README build
+      context: ../../..
+      dockerfile: tools/m33-soak/SoakHost/Dockerfile
+    cpus: "2.0"
+    mem_limit: 1536m
+    environment:
+      SOAK_STATS_PATH: /soak/stats.csv
+      SOAK_STATS_INTERVAL_S: "30"
+      # fault 6: real KV provider polling against the stub (WireMock), 10s ReloadInterval
+      SOAK_KV_STUB_BASE: http://wiremock:8080
+      SOAK_KV_RELOAD_S: "10"
+    volumes:
+      - ${SOAK_RUN_DIR}:/soak
+      # File bind, edited IN PLACE on the host (`cat > file`, never sed -i): the config watcher
+      # sees the modify, and fault 5/6 get a live rebind without a container restart.
+      - ${SOAK_RUN_DIR}/host-config/appsettings.json:/app/appsettings.json
+    ports:
+      - "127.0.0.1:18080:8080"
+    depends_on: [toxiproxy, wiremock]
+    restart: unless-stopped
+
+  wiremock:
+    image: wiremock/wiremock@sha256:d13997cd7b52583528a766019cfe7d4e91c4d224a67bdaa6f60efbb532f32176
+    cpus: "1.5"
+    mem_limit: 1024m
+    # Journal OOM incident (run 20261108-215247): unbounded journal under 1 GiB got the
+    # container OOMKilled at ~1h50m (exit 137). 30k entries x ~2.6 KB (measured) ~ 80 MB
+    # heap; covers one full 5-min fault window (~21k reqs) after each per-window reset.
+    # (No response-body-not-journaled flag in 3.9.2 - unrecognized options crash WireMock.)
+    command: ["--verbose", "--disable-banner",
+              "--max-request-journal-entries", "30000"]
+    environment:
+      JAVA_OPTS: "-Xmx512m"
+    ports:
+      # localhost-only: scenario flips (__admin) + journal collection.
+      - "127.0.0.1:18081:8080"
+    volumes:
+      # Templated copy produced by init-secrets.sh: per-run sentinel values land here,
+      # so the repo stubs keep only placeholders.
+      - ${SOAK_RUN_DIR}/wiremock:/home/wiremock/mappings:ro
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy@sha256:6ab0847e939e66c620fd5ef837677f28b62afb7e728491a61ed0c702cc610203
+    cpus: "0.5"
+    mem_limit: 256m
+    # -host 0.0.0.0: the API defaults to localhost, which inside the container is
+    # unreachable through the published port (observed: connection reset on 8474).
+    # -config takes a bare JSON array of proxies (NOT the /save export object).
+    command: ["-host", "0.0.0.0", "-config", "/toxiproxy.json"]
+    volumes:
+      - ./toxiproxy.json:/toxiproxy.json:ro
+    ports:
+      - "127.0.0.1:8474:8474"
+
+  k6:
+    image: grafana/k6@sha256:db712b9eb4c02d9157fc9b548d144c6bba55a74c4331ecad23e046f0287ecfa9
+    cpus: "2.0"
+    mem_limit: 1024m
+    profiles: ["load"]
+    environment:
+      # Duration inside the script: k6 CLI --duration/--vus would replace the scenario
+      # executors entirely (warning observed in smoke #3).
+      SOAK_MINUTES: ${SOAK_MINUTES:-240}
+      # "1" arms the mid-run error-rate abort for steady windows (set by phase-b.sh only).
+      SOAK_STRICT: ${SOAK_STRICT:-0}
+    volumes:
+      - ../k6:/k6:ro
+      - ${SOAK_RUN_DIR}:/soak
+    # No per-request CSV export: a 4h soak would write hundreds of MB. The script's
+    # handleSummary writes per-threshold percentiles to the run dir; faults run short windows.
+    command: run /k6/soak.js
+
+networks:
+  default:
+    name: m33-soak
