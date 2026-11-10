@@ -11,34 +11,33 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-08): `0.9.0` is **published on the registry** — the first
-**breaking** release on the collapsed public line: `RequireHttpsMetadata` (default
-`true`) now requires https for the TokenExchange key material that validates inbound
-tokens (http `JwksUri` configs must opt out; http `Authority` configs already failed at
-runtime and get a clear startup refusal or the opt-out). It ships the M31
-token-lifecycle hardening (credential attachment fails closed; JWT assertion
-certificate errors unified) and the M32 consumer-compatibility guide and script.
-GitHub `main` and tag `0.9.0` sit on **one squashed commit**
-`db26705e040ddddd3cabef748ea6964196eda4be` (noreply author; tree identical to the
-internal release commit `a1c5e78`) appended on the previous public tip `1430d50` — a
+Current state (2026-11-09): `0.9.1` is **published on the registry** — the patch on the
+collapsed public line: a negative `expires_in` no longer parks the token cache (it is a
+protocol violation: the token response is rejected through the unusable-response path,
+nothing is cached, and the warning names the field and credential id but never the
+value; `expires_in: 0` still falls back to `DefaultLifetime` with one warning per
+credential), and the M33 soak/failure-injection harness plus its testing report are now
+in the repository. GitHub `main` and tag `0.9.1` sit on **one squashed commit**
+`c243c5fc97a73fda943e2bdab33778fe1c5f7d62` (noreply author; tree identical to the
+internal release commit `92ee3a8`) appended on the previous public tip `db26705e` — a
 regular append: no collapse, no tag deletions. CI green on the release commit
-(Actions run 42485303537). `0.9.0` shipped end to end: packed once from the public
+(Actions run 42646476058). `0.9.1` shipped end to end: packed once from the public
 commit, each of the eight artifacts exactly once (the push client exits 0 without
 printing response codes; pushes authenticate via the machine-local
 `packageSourceCredentials` — an anonymous PUT answers 401 — and serving is proven
 consumer-side), consumer restore byte-identical, QuickStart smoke green on the
 downloaded bytes — its source links resolve to the publicly referenced commit
-`db26705e`. `0.9.0` is the supported version; `0.8.2` source links still resolve
-(the collapsed root is publicly referenced). Source links for `0.8.1` and earlier
+`c243c5fc`. `0.9.1` is the supported version; `0.9.0` and `0.8.2` source links still
+resolve (both commits are publicly referenced). Source links for `0.8.1` and earlier
 point at commits that are off every branch and tag; they resolve only while GitHub
 retains the unreferenced objects (no support purge was requested) —
 **unsupported-by-construction** (see the `0.8.1` history entry). The Entra
 on-behalf-of removal shipped at `0.8.0` stays **breaking** for `Mode: EntraObo`
-users, and the `0.9.0` https default is breaking as described; both CHANGELOG
+users, and the `0.9.0` https default stays breaking as described; both CHANGELOG
 entries remain the consumer contract. The `0.7.1` known issues stay resolved (F1:
 CI-path-mapped PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1`
 published packages keep their historical metadata (immutable). The baseline rotation
-**ran with the `0.9.0` prep**: `build/baselines/` holds the published `0.8.2` bytes
+**ran with the `0.9.2` prep**: `build/baselines/` holds the published `0.9.1` bytes
 (sha256-verified; ADR-0001); the next rotation runs at the next release prep per the
 rule below.
 
@@ -65,6 +64,17 @@ Feed: the `credprox` source from machine-local NuGet config (anonymous download 
    needs the maintainer's explicit OK, like any push.
 5. **The baseline folder is current**: `build/baselines/` holds the *previously
    published* version's four nupkgs (see Rules and ADR-0001).
+
+6. **Benchmark regression pass (required since 2026-11-10):** on a quiet machine, run a
+   full `tests/CredProx.Benchmarks` pass at the release commit and gate it with
+   `scripts/bench-compare.sh` against the previous release's committed baseline
+   (`tests/CredProx.Benchmarks/baselines/`); a FAIL blocks the release the same way
+   a failed suite would, and after publishing, refresh the baseline folder per
+   `docs/benchmarks.md`. On a shared machine this gate is in practice an allocation
+   gate on the overhead suite — latency regressions are caught by the micro suites,
+   and a same-run ratio below 1.0 is noise, not a win. Record the gate's summary line
+   in the release history entry. There is no nightly benchmark run: timing on shared
+   hardware is too noisy to gate on between releases.
 
 ## Publish steps
 
@@ -188,6 +198,41 @@ dotnet nuget locals http-cache --clear
 
 ## Release history
 
+- `0.9.1` (GitHub `c243c5fc97a73fda943e2bdab33778fe1c5f7d62`, internal release commit
+  `92ee3a8`): published 2026-11-09 — patch release. A negative `expires_in` (number or
+  numeric string) is now rejected as a protocol violation through the unusable-response
+  path — nothing is cached and the warning names the field and credential id, never the
+  value or token — so a token already expired at mint time no longer parks in the cache
+  for up to an hour of guaranteed-rejected upstream calls; `expires_in: 0` still falls
+  back to `DefaultLifetime` with one warning per credential. Adds the soak and
+  failure-injection harness with its testing report to the repository (docs and
+  tooling beyond the library fix). Public history: ONE squashed commit on the previous
+  public tip, noreply identity — a regular append, no collapse, no tag deletions; CI
+  green (Actions run 42646476058). Ceremony: packed **once** from a clean detached
+  worktree at the PUBLIC commit after tree equality with the reviewed `92ee3a8`,
+  `-p:ContinuousIntegrationBuild=true` from fresh obj into an isolated package cache;
+  sanity loop ×4 passed (SourceLink carries the full public SHA and the `/_/*`-to-raw
+  mapping in every symbol package; no builder-home paths in any pdb or dll); APICompat
+  against the rotated `0.9.0` baselines exit 0, additive surface only; extended
+  disclosure scan over every member of all eight packages (49 members incl all eight
+  `*Content_Types*` members) zero hits, exit code captured without a pipe tail. The
+  push round: four nupkgs (the client auto-routes the adjacent snupkgs), each version
+  exactly once — pushes authenticate via the machine-local `packageSourceCredentials`,
+  serving proven consumer-side. Nupkg sha256: `CredProx`
+  `1fddac05fe93db2df8fd5aba1d4b925dce1596c907e989117e96f60aad84459c`,
+  `CredProx.Abstractions`
+  `3a2c27b3508ea998f885d197eff1b0cf9622e77bbb7989bdd4bbe56acb050012`,
+  `CredProx.AzureKeyVault`
+  `deefdc0e349074b8deba234cff5ffa89e23b9fdd2ac08a2af20c834ac4d67a55`,
+  `CredProx.Testing`
+  `56a018db98fec850a60d031bc1f373f33dcc4a71915ac55e09e97317bdfd3c71`. Consumer verify:
+  http-cache cleared, out-of-repo scratch project (the repo-level source mapping pins
+  `CredProx*` to the local feed, so an in-tree restore cannot prove the registry),
+  isolated package cache, all four downloads byte-identical to the pushed artifacts,
+  `samples/QuickStart` smoke green on those exact bytes (WireMock journal shows the
+  credential attached; the caller's echo shows it redacted). Review: fresh-context
+  review PASS at the prep commit `76b2ba8`; two text-only NANO findings folded into the
+  release commit before publish.
 - `0.9.0` (GitHub `db26705e040ddddd3cabef748ea6964196eda4be`, internal release commit
   `a1c5e78`): published 2026-11-08 — **BREAKING**, the first on the collapsed line:
   `RequireHttpsMetadata` (default `true`) now governs the authority-discovery and

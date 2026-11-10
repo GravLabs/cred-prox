@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 
 namespace CredProx;
@@ -36,62 +37,91 @@ internal static class SecretScrubber
     /// <c>ConsumedThrough</c> offset of every byte represented in the batch: the caller
     /// keeps everything from there onward as the not-yet-emitted remainder.
     /// </summary>
+    /// <remarks>
+    /// The returned batch comes from <paramref name="pool"/> and is the caller's to
+    /// return: consume at most <c>BatchLength</c> bytes (the rented array is at least
+    /// that long and may carry other callers' bytes beyond it), then
+    /// <c>Return(batch, clearArray: true)</c> once the bytes are copied or written out.
+    /// </remarks>
     internal static (byte[] Batch, int BatchLength, int ConsumedThrough) ScrubBatch(
-        ReadOnlySpan<byte> pending, int emitLength, byte[][] patterns, byte[] replacement)
+        ReadOnlySpan<byte> pending, int emitLength, byte[][] patterns, byte[] replacement, ArrayPool<byte> pool)
     {
         // The batch can only grow where a secret is replaced by the marker; start
         // generous and grow on demand.
-        var batch = new byte[emitLength + replacement.Length];
+        var batch = pool.Rent(emitLength + replacement.Length);
         var batchLength = 0;
         var lastEmitted = 0;
 
         // Bytes fully represented in the batch: every replacement ends at or after its
         // match end, so a match running past the emit boundary consumes its tail too.
         var consumedThrough = emitLength;
-
-        for (var pos = 0; pos < emitLength;)
+        try
         {
-            var pattern = FindMatchAt(pending, pos, patterns);
-            if (pattern is null)
+            for (var pos = 0; pos < emitLength;)
             {
-                pos++;
-                continue;
+                var pattern = FindMatchAt(pending, pos, patterns);
+                if (pattern is null)
+                {
+                    pos++;
+                    continue;
+                }
+
+                var literalLength = pos - lastEmitted;
+                var needed = batchLength + literalLength + replacement.Length;
+                if (needed > batch.Length)
+                {
+                    var grown = pool.Rent(Math.Max(needed, batch.Length * 2));
+                    batch.AsSpan(0, batchLength).CopyTo(grown);
+                    pool.Return(batch, clearArray: true);
+                    batch = grown;
+                }
+
+                pending.Slice(lastEmitted, literalLength).CopyTo(batch.AsSpan(batchLength));
+                replacement.CopyTo(batch.AsSpan(batchLength + literalLength));
+                batchLength = needed;
+
+                lastEmitted = pos + pattern.Length;
+                pos = lastEmitted;
+                if (lastEmitted > consumedThrough)
+                {
+                    consumedThrough = lastEmitted;
+                }
             }
 
-            var literalLength = pos - lastEmitted;
-            var needed = batchLength + literalLength + replacement.Length;
-            if (needed > batch.Length)
+            // Tail literal up to the emit boundary (negative when the last replacement
+            // ran past it — those bytes are already in the batch as part of the
+            // removal).
+            var tailLength = Math.Max(0, emitLength - lastEmitted);
+            if (tailLength > 0)
             {
-                Array.Resize(ref batch, Math.Max(needed, batch.Length * 2));
+                if (batchLength + tailLength > batch.Length)
+                {
+                    var grown = pool.Rent(batchLength + tailLength);
+                    batch.AsSpan(0, batchLength).CopyTo(grown);
+                    pool.Return(batch, clearArray: true);
+                    batch = grown;
+                }
+
+                pending.Slice(lastEmitted, tailLength).CopyTo(batch.AsSpan(batchLength));
+                batchLength += tailLength;
             }
 
-            pending.Slice(lastEmitted, literalLength).CopyTo(batch.AsSpan(batchLength));
-            replacement.CopyTo(batch.AsSpan(batchLength + literalLength));
-            batchLength = needed;
-
-            lastEmitted = pos + pattern.Length;
-            pos = lastEmitted;
-            if (lastEmitted > consumedThrough)
+            var result = (batch, batchLength, consumedThrough);
+            batch = null!; // ownership transfers to the caller; the guard below stands down
+            return result;
+        }
+        finally
+        {
+            // F4: nothing in here is expected to throw, but a throw that abandoned a
+            // rented buffer would hand secret-bearing bytes to the GC instead of the
+            // pool. Every growth already returned the old array and repointed the
+            // local, so the finally returns only the still-owned buffer — never a
+            // returned one.
+            if (batch != null)
             {
-                consumedThrough = lastEmitted;
+                pool.Return(batch, clearArray: true);
             }
         }
-
-        // Tail literal up to the emit boundary (negative when the last replacement ran
-        // past it — those bytes are already in the batch as part of the removal).
-        var tailLength = Math.Max(0, emitLength - lastEmitted);
-        if (tailLength > 0)
-        {
-            if (batchLength + tailLength > batch.Length)
-            {
-                Array.Resize(ref batch, batchLength + tailLength);
-            }
-
-            pending.Slice(lastEmitted, tailLength).CopyTo(batch.AsSpan(batchLength));
-            batchLength += tailLength;
-        }
-
-        return (batch, batchLength, consumedThrough);
     }
 
     private static byte[]? FindMatchAt(ReadOnlySpan<byte> pending, int pos, byte[][] patterns)

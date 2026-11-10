@@ -57,14 +57,14 @@
 
   <!-- NuGet package metadata. -->
   <PropertyGroup>
-    <!-- Single version for the whole repo; milestones bump it (plan §7). 0.9.1 ships
-         the patch fix from the M33 soak battery: a negative expires_in is rejected as
-         an IdP failure (502 credential_unavailable, nothing cached) instead of parking
-         the token cache on a dead token for an hour; expires_in 0 keeps the documented
-         DefaultLifetime fallback with one warning per credential. Also lands the
-         soak/failure-injection harness and its report in the repo. Patch-level: no
-         public-surface removal, additive ctor overload only. -->
-    <Version>0.9.1</Version>
+    <!-- Single version for the whole repo; milestones bump it (plan §7). 0.9.2 ships
+         the M35 scrubbing hot-path work: the scrub batch and pending response buffers
+         are pooled and returned cleared (about 77% less allocation on a scrubbed
+         request), with ownership transfer so a buffer is never returned while a read
+         is in flight, and the scrubbing streams stop reading the upstream after
+         dispose. Also lands the M34 benchmark regression suite and gate in the repo.
+         Patch-level: internals only, no public-surface change. -->
+    <Version>0.9.2</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Authors>Hector Ramos</Authors>
     <Company>Hector Ramos</Company>
@@ -75,11 +75,11 @@
   </PropertyGroup>
 
   <!-- Package quality (plan §7): SourceLink for GitHub, package README, and API
-       compatibility validation. The PackageValidation baseline is the published 0.9.0
-       bytes (rotated at 0.9.1, 2026-11-09 - ADR-0001; the 0.8.2 generation from the
-       0.9.0 rotation is in git history, and the internal-URL nuspec residue the 0.7.0
+       compatibility validation. The PackageValidation baseline is the published 0.9.1
+       bytes (rotated at 0.9.2, 2026-11-10 - ADR-0001; the 0.9.0 generation from the
+       0.9.1 rotation is in git history, and the internal-URL nuspec residue the 0.7.0
        baselines carried has been out of every generation since). Every pack compares
-       the public surface against the published 0.9.0. The baseline
+       the public surface against the published 0.9.1. The baseline
        packages are the published bytes, committed under
        build/baselines (docs/adr/0001), so validation needs no network or LAN feed —
        this machine and a GitHub-hosted runner compare against identical bytes.
@@ -106,7 +106,7 @@
     <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
     <EnableSourceLink>true</EnableSourceLink>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.9.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.9.1</PackageValidationBaselineVersion>
     <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
          entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
          $(MSBuildProjectName) equals $(PackageId) for all four packable projects. -->

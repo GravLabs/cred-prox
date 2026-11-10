@@ -611,7 +611,7 @@ the wrong credential, or forwards to the wrong host, is worse than no library.
 | Conformance | `tests/CredProx.ConformanceTests` | Every built-in credential type, secret source and token cache run through the `CredProx.Testing` conformance suites (the same suites plugin authors use) | `CredProx.Testing` | Every PR |
 | Load | `tests/CredProx.LoadTests` | Throttling holds the configured rate under burst; circuit breaker opens/closes; token cache stays single-flight under sustained load | NBomber or k6 against the in-process host | Nightly |
 | Live vendor smoke | `samples/*` with `--smoke` | The public-vendor examples in §6 against the real services | Manual or nightly workflow with repo secrets | Nightly / pre-release |
-| Benchmarks | `tests/CredProx.Benchmarks` | Added latency per request vs plain YARP; token-cache hit path allocations | BenchmarkDotNet | Pre-release, results committed |
+| Benchmarks | `tests/CredProx.Benchmarks` | Added latency and allocations per request vs plain YARP (loopback Kestrel), plus token-cache, destination, redaction and composition hot paths | BenchmarkDotNet | Pre-release pass gated by `scripts/bench-compare.sh` against committed baselines (`baselines/<version>/`) |
 
 ### 5.2 Required test cases
 
@@ -651,6 +651,7 @@ feature is previewed. All rows must exist before the public release.
 | JWT assertion | RS256 / ES256 / PS256 signatures verify against the public key; `iss`/`sub`/`aud`/`exp`/`iat`/`jti` set correctly; unique `jti` per assertion; clock skew applied; GitHub App flow obtains installation token against a stub |
 | HMAC signing | three canonical-string layouts verified by an independent reference verifier; body hash correct for empty, small and max-size bodies; body over the cap → 413; signing runs after header shaping; timestamp uses `TimeProvider` |
 | Presets | user-defined preset (config or custom `IPresetSource`) validates and binds; field-level override works; unknown preset → startup error; a removed built-in name → startup error naming it and pointing at its sample; preset cannot introduce a secret reference the host did not configure |
+| Scrubbing buffer pooling (M35) | dirty sentinel rents never leak into emitted bytes on either stream (logical-length reads only) while a secret split at the 16 KiB fill boundary is still redacted byte-identically; every rent returns exactly once, cleared, across abort mid-stream and abort mid oversized event with both dispose paths; a zero-length probe read between reads returns 0 and changes no state; SSE events still flush per event through pooling; reads after dispose (all four shapes, both streams) throw `ObjectDisposedException` without touching the pool; **a read in flight at dispose** transfers ownership of **both the pending and the output buffers**: dispose completes without returning a buffer a reader may touch, the resuming read discards what the transport wrote and fails closed, its completion performs the single cleared return, the SSE produce loop never re-enters the fill after dispose, and a batch handed to a re-rent mid-copy is caught as foreign bytes in the reader's destination (stress witness: dispose is aimed at the batch's live copy window measured through a recycling pool, and a page-fault-paced read turns any mid-copy return into cleared bytes) |
 | Compatibility | full integration suite runs on `net10.0` (the only target since the M5 gate, 2026-10-14) |
 
 ### 5.3 Coverage gates
@@ -816,6 +817,49 @@ scripts land beside the harness; results are cited, raw run directories are not 
 **Nightly-CI fit (proposed, not wired):** a ~20 min nightly short soak (5 min warm-up + 15 min
 steady, faults 1 and 2 as 60 s probes) catches growth and single-flight regressions on the
 nightly runner; PR jobs unchanged. Wiring is a separate owner decision.
+
+### 5.6 Benchmark regression tracking
+
+Per-request cost is part of the product, so regressions are gated, not just reported.
+Full procedure, baseline refresh policy and measured noise tables live in
+`docs/benchmarks.md`; this section fixes the design.
+
+**Topology.** `OverheadBenchmarks` boots real Kestrel hosts on loopback sockets in one
+process: a stub upstream (header echo, OAuth token endpoint, flushed SSE stream) behind
+plain YARP and behind CredProx with identical routes. No TestServer — the HTTP path is
+the one consumers run. The plain-YARP arm is the BenchmarkDotNet baseline, so report
+ratios are the per-request overhead within one run.
+
+**Scenarios.** (a) plain YARP baseline; (b) static-key header attach; (c) OAuth
+client-credentials on a warm token cache; (d) (c) plus response scrubbing (the
+production default); (e) SSE time-to-first-event, plain versus CredProx with attach and
+scrubbing. Micro suites cover the token cache, destination registry, audit redactor and
+composition presets. All five suites are measured and committed (`baselines/0.9.1/` is
+the first reference). M35 (2026-11-10) pooled the scrubber's batch and pending buffers
+against this gate: the OAuth cache-hit scrub arm's per-request allocation fell from
+42,650 B to 9,729 B — 1.7× the same run's plain-YARP control, down from 7.5× — with the
+scrub arm's Gen0 collections roughly quartered; SSE connections 81,129–88,747 B (was 116,243 B).
+Current figures and the honest run-to-run ranges live in `docs/benchmarks.md`.
+
+**Thresholds and rationale** (from unchanged-rerun noise on a shared machine):
+allocated bytes per operation fail above +32 B — deterministic arms drift ≤0.1% (SSE
+arms are proportional at +8% because their allocations depend on stream-abandon
+timing); same-run ratio rises warn above 15% everywhere (set above the measured 13%
+micro drift, so an unchanged rerun passes without warnings) and additionally fail
+above 25% for the micro suites, while the loopback-HTTP overhead suite is warn-only
+for timing (noise reaches 2.8×); absolute mean shifts always warn only (15%). A
+method or suite missing from a run FAILs (`ALLOW_PARTIAL=1` escapes deliberately);
+a missing or zero baseline arm always FAILs. A deliberate allocation and a
+deliberate delay were each caught by `scripts/bench-compare.sh` during development,
+and an unchanged rerun passes the gate without warnings.
+
+**Not covered.** Absolute throughput or p99 under concurrent load (the load harness
+covers pressure behaviour); CPU-time regressions that leave allocations and wall time
+within noise; a slowdown confined to the plain-YARP baseline arm (the ratio is blind to
+it by construction — the absolute-mean warning is the backstop); single-arm suites
+(`AuditRedactorBenchmarks` has no ratio gate — its only method is its own baseline, so
+only allocations and the mean warning guard it). Timing gates are tuned
+for a shared machine; the doc describes what tightens on a dedicated quiet one.
 
 ---
 
@@ -1025,8 +1069,12 @@ make this explicit:
 | Aspire integration | `AddCredProx()` resource for .NET Aspire AppHost | Low–Med | S |
 | Graph admin-consent live variants | E5 real-tenant runs scoped to `graph.microsoft.com` (app-permission variants needing admin consent). Parked out of M26 (2026-10-30): the milestone is strictly the consent-free set — Azure RBAC targets need no tenant consent policy cooperation; revisit if self-consent is possible | Low | S |
 | Baseline rotation to published `0.8.0` bytes | **Done** at 0.8.1 (2026-11-04, full-scrub decision): `PackageValidationBaselineVersion` → `0.8.0`, `build/baselines/` replaced with the four registry-served `0.8.0` nupkgs (ADR-0001; the `0.7.1` generation subsumed, reasons in ADR-0001). Dropped the legacy internal URL from the current tree (was the `0.7.0` nuspecs' `RepositoryUrl`) | Medium | S |
-| Baseline rotation to published `0.9.0` bytes | **Open** — due at the next release prep: `PackageValidationBaselineVersion` → `0.9.0`, `build/baselines/` replaced with the four registry-served `0.9.0` nupkgs (sha256 list in PUBLISHING.md release history; ADR-0001 rule; PascalCase filenames — the cache extraction is lowercase) | Medium | S |
+| Baseline rotation to published `0.9.0` bytes | **Done** at 0.9.1 prep (2026-11-09): `PackageValidationBaselineVersion` → `0.9.0`, `build/baselines/` replaced with the four registry-served `0.9.0` nupkgs (sha256-verified; ADR-0001) | Medium | S |
+| Baseline rotation to published `0.9.1` bytes | **Done** at 0.9.2 prep (2026-11-10): `PackageValidationBaselineVersion` → `0.9.1`, `build/baselines/` replaced with the four registry-served `0.9.1` nupkgs (sha256-verified against the PUBLISHING.md release-history list; ADR-0001 note added) | Medium | S |
+| Baseline rotation to published `0.9.2` bytes | **Open** — due at the next release prep: `PackageValidationBaselineVersion` → `0.9.2`, `build/baselines/` replaced with the four registry-served `0.9.2` nupkgs (sha256 list lands in PUBLISHING.md release history at the 0.9.2 publish; ADR-0001 rule; PascalCase filenames — the cache extraction is lowercase) | Medium | S |
 | `expires_in` parsing hygiene | **Open** — deferred from the M33 close review (2026-11-09), for the next touch of `OAuthClientCredentialsProvider`: (1) a numeric-string `expires_in` of `"-Infinity"` parses to a non-finite value and falls back to `DefaultLifetime` instead of being rejected like other negative values; (2) numeric-string parsing uses the current culture, so a decimal-comma host reads `"1,000"` as 1.0, not 1000 — parse with `NumberStyles.Float` and `CultureInfo.InvariantCulture`. Neither is reachable from an RFC 6749 IdP that sends digits | Low | S |
+| `bench-compare` hardening | **Open** — deferred from the M34 review (2026-11-10): (1) echo a credential into the SSE stub arm so the SSE suite measures real redaction work (needs an overhead re-baseline); (2) SSE `TimeToFirstEvent` asserts the buffer starts with `data:`, and the stub stops after 2–3 events instead of streaming ≈5 s after every abandoned read; (3) warn on `Statistics.N` below a floor (~10) and print N on the `ok` line (the 0.9.1 reference itself has three arms at N=14); (4) consume or drop the parsed `p95` (docs point at percentiles, the gate ignores them); (5) include `Parameters` in the comparison key or assert key uniqueness before any `[Params]`/`[Arguments]` benchmark is added (two rows would silently collapse to one — same failure family as a dropped arm); (6) count a `RATIO-SKIPPED` line as a WARN, or as a FAIL in fail-mode suites, so the summary line never reads clean while a timing gate did not run; (7) with `ALLOW_PARTIAL=1`, FAIL when zero methods were compared (partial still means some coverage); (8) refuse to start (exit 2) when `RATIO_WARN` ≥ `RATIO_FAIL`, which would otherwise make the timing FAIL unreachable | Low–Med | S |
+| Scrubbing pool stress-test liveness | **Open** — deferred from the M35 review (2026-11-10): the dispose-during-batch-copy stress test asserts only negatives (no foreign byte, no double return), so a machine where its dispose never lands inside the copy window would pass it without exercising anything. Count the disposes fired with a read in flight and assert at least one per test. The three fail-closed checks inside `CopyOutput` are unreachable by a deterministic test by design and are accepted as guards | Low | S |
 
 ### 8.7 Inbound-direction twin (optional)
 

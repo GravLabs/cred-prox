@@ -110,8 +110,17 @@ public sealed class InMemoryTokenCacheTelemetryTests
             _ => ValueTask.FromResult(("tok", T0.AddMinutes(5))),
             default);
 
+        // Snapshot under the lock before asserting: the process-wide ActivitySource
+        // also fires for parallel test classes, whose listener callbacks would
+        // otherwise mutate the list mid-enumeration (Collection was modified).
+        Activity[] snapshot;
+        lock (stopped)
+        {
+            snapshot = stopped.ToArray();
+        }
+
         var fetch = Assert.Single(
-            stopped,
+            snapshot,
             a => (string?)a.GetTagItem("credprox.credential") == "tel-activity");
         Assert.Equal("token.fetch", fetch.OperationName);
         Assert.Equal("tenant-9", (string?)fetch.GetTagItem("credprox.partition"));

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net.Http;
 using System.Text;
 using CredProx;
@@ -173,7 +174,8 @@ static void Scrub(string input)
 {
     var bytes = Encoding.UTF8.GetBytes(input);
     var patterns = Probe.Patterns;
-    var (batch, length, consumed) = SecretScrubber.ScrubBatch(bytes, bytes.Length, patterns, SecretScrubber.Replacement);
+    var pool = ArrayPool<byte>.Shared;
+    var (batch, length, consumed) = SecretScrubber.ScrubBatch(bytes, bytes.Length, patterns, SecretScrubber.Replacement, pool);
     var emitted = batch.AsSpan(0, length);
 
     if (consumed != bytes.Length)
@@ -194,8 +196,11 @@ static void Scrub(string input)
     var hadMatch = Probe.Secrets.Any(secret => Probe.ContainsSequence(bytes, Encoding.UTF8.GetBytes(secret)));
     if (!hadMatch && !emitted.SequenceEqual(bytes))
     {
+        pool.Return(batch, clearArray: true);
         throw new InvariantViolation("no-match body not byte-identical");
     }
+
+    pool.Return(batch, clearArray: true);
 }
 
 // SSE scrubbing: per-event scrubbing may let a secret split across an event boundary

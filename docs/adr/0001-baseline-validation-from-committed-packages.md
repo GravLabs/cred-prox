@@ -6,7 +6,7 @@ Status: accepted (M25, GitHub public pivot)
 ## Context
 
 Every `dotnet pack` runs APICompat against the last published release
-(`<PackageValidationBaselineVersion>`, currently `0.9.0`) so a public-surface removal
+(`<PackageValidationBaselineVersion>`, currently `0.9.1`) so a public-surface removal
 fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
 Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
 declared the internal LAN NuGet registry (anonymous download), and the SDK's
@@ -22,10 +22,10 @@ Commit the **published baseline packages** under `build/baselines/` and point
 `<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
 
 ```
-build/baselines/CredProx.0.9.0.nupkg               a3a599ffc4dd00b944a210d43c34aae20adb066111696c5fcece5bec9f4d62e2
-build/baselines/CredProx.Abstractions.0.9.0.nupkg  c8e07c260a9bb0351bbd8ed3c946f5d4341f2f371447136ce4dcb6adac929c7e
-build/baselines/CredProx.AzureKeyVault.0.9.0.nupkg 4edd4e5e178157e2adfac89755829ad5c8dad861dbdb158271c3b0b356c371c2
-build/baselines/CredProx.Testing.0.9.0.nupkg       ce18a0591e0c804a4cd1adfe1fe9625d91737d8604e385df5be8a7defb424c6a
+build/baselines/CredProx.0.9.1.nupkg               1fddac05fe93db2df8fd5aba1d4b925dce1596c907e989117e96f60aad84459c
+build/baselines/CredProx.Abstractions.0.9.1.nupkg  3a2c27b3508ea998f885d197eff1b0cf9622e77bbb7989bdd4bbe56acb050012
+build/baselines/CredProx.AzureKeyVault.0.9.1.nupkg deefdc0e349074b8deba234cff5ffa89e23b9fdd2ac08a2af20c834ac4d67a55
+build/baselines/CredProx.Testing.0.9.1.nupkg       56a018db98fec850a60d031bc1f373f33dcc4a71915ac55e09e97317bdfd3c71
 ```
 
 The files are the bytes downloaded from the registry that published them (sha256 above;
@@ -56,7 +56,11 @@ prose since scrubbed) — the `0.8.0` nuspecs carry the GitHub URL, so the curre
 clean. `0.9.0` rotated at the `0.9.1` prep (2026-11-09, maintainer release go-ahead):
 those registry-served `0.9.0` bytes — sha256 verified equal to the published artifacts
 recorded in PUBLISHING.md's release history — replace the `0.8.2` set, whose entries are
-in git history at that commit. Pack the **fresh** `obj/` after rotating (see
+in git history at that commit. `0.9.1` rotated at the `0.9.2` prep (2026-11-10,
+maintainer release go-ahead): those registry-served `0.9.1` bytes — sha256 verified
+equal to the published artifacts recorded in PUBLISHING.md's release history — replace
+the `0.9.0` set, whose entries are in git history at that commit. Pack the **fresh**
+`obj/` after rotating (see
 Consequences): a repack on an untouched obj skips validation silently.
 
 ## Consequences

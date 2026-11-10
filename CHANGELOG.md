@@ -5,6 +5,45 @@ All notable changes to CredProx are documented here. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, the public API may
 change between minor versions; `[Experimental]` APIs may change at any time.
 
+## [0.9.2] - 2026-11-10
+
+### Added
+
+- Benchmark regression tracking (M34): the repository now carries a BenchmarkDotNet
+  suite (`tests/CredProx.Benchmarks`) with a committed reference run per release, a
+  comparison gate (`scripts/bench-compare.sh`) that fails on allocation regressions
+  and warns on latency drift, and a documented procedure (`docs/benchmarks.md`).
+  Every release is measured against the published previous release before it ships.
+
+### Fixed
+
+- Scrubbing buffer dispose window (M35): a read in flight
+  when the response stream was disposed could write into, or copy from, a pooled
+  buffer the pool had already handed to a new owner — cross-request exposure on
+  both the pending response buffer and the output batch. Ownership now transfers:
+  dispose defers each buffer's return to the last in-flight reader, which discards
+  what landed late and throws `ObjectDisposedException`; post-dispose reads refuse
+  on every path. Internals only. The pooling itself is new in this release, so the
+  cross-request window never shipped.
+- Scrubbing streams no longer keep reading the upstream after dispose. In 0.9.1 a
+  scrubbing stream disposed while a read was in flight could keep issuing reads to
+  the upstream response; it now stops, and a read after dispose throws
+  `ObjectDisposedException`. Not reachable through the default YARP response copy,
+  which disposes the stream only after its last read completes; this closes it for
+  consumers that dispose a stream with a read outstanding.
+
+### Performance
+
+- Scrubbing hot-path allocation reduction (M35): the scrub batch and the pending
+  response buffers are now pooled (`ArrayPool<byte>` seam, internals only — no
+  public API change), returned cleared, and grown by rent-copy. Measured per
+  request against the committed 0.9.1 baseline: response scrubbing on an OAuth
+  cache hit 42,650 B → 9,729 B (about 77% less); ratio to the plain-YARP control
+  arm 7.5× → 1.7×; scrubbed SSE connections 116,243 B → 81,129–88,747 B, a 24–30%
+  reduction (SSE allocations vary run to run, so the figure is a range across three
+  independent runs, not a point). Streaming
+  semantics, redaction scope and the public API are unchanged.
+
 ## [0.9.1] - 2026-11-09
 
 ### Added

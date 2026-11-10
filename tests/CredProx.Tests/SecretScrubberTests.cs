@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using Xunit;
 
@@ -17,13 +18,17 @@ public sealed class SecretScrubberTests
     private static (string Batch, int BatchLength, int ConsumedThrough) Scrub(
         string pending, int emitLength, params string[] secrets)
     {
+        var pool = ArrayPool<byte>.Shared;
         var (batch, batchLength, consumedThrough) = SecretScrubber.ScrubBatch(
             Encoding.UTF8.GetBytes(pending),
             emitLength,
             SecretScrubber.CompilePatterns(secrets),
-            Repl);
+            Repl,
+            pool);
 
-        return (Encoding.UTF8.GetString(batch, 0, batchLength), batchLength, consumedThrough);
+        var result = (Encoding.UTF8.GetString(batch, 0, batchLength), batchLength, consumedThrough);
+        pool.Return(batch, clearArray: true);
+        return result;
     }
 
     // --- pattern compilation -------------------------------------------------------------

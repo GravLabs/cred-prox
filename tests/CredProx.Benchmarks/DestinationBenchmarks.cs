@@ -27,7 +27,6 @@ public class DestinationBenchmarks
                 ["CredProx:Destinations:acme:Partition"] = "header:X-Env",
                 ["CredProx:Destinations:acme:Allowed:0"] = "prod",
                 ["CredProx:Destinations:acme:Allowed:1"] = "staging",
-                ["CredProx:Destinations:echo:Address"] = "https://postman-echo.com",
             })
             .Build();
 

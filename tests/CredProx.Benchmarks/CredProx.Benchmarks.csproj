@@ -16,6 +16,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The per-request overhead suites boot real Kestrel hosts in-process (see
+         OverheadBenchmarks.cs); the micro suites need no web stack. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
   </ItemGroup>
 
