@@ -5,6 +5,69 @@ All notable changes to CredProx are documented here. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, the public API may
 change between minor versions; `[Experimental]` APIs may change at any time.
 
+## [0.9.3] - 2026-11-11
+
+Samples, documentation, CI and benchmark reference data only — no library or public API change.
+
+### Added
+
+- New example E18 `samples/CallerApiKey`: caller API keys as pure configuration.
+  A route requires `X-API-Key`, the key is validated against a secret-backed
+  SHA-256 store (the hash is itself a `secret:` reference), a missing key and a
+  wrong key get the same 401 with nothing echoed back, and the key is stripped
+  before forwarding — the upstream stub's journal proves it never arrives.
+
+### Changed
+
+- The benchmark regression gate (`scripts/bench-compare.sh`) applies a per-arm
+  allocation allowance keyed by exact `(suite, method)` pair:
+  `TokenCacheBenchmarks.SingleFlight` — 64 concurrent waiters whose allocation
+  follows scheduling, measured band 23,444–23,520 B at unchanged library code —
+  gets max(32 B, 1% of the baseline); the SSE arms keep 8%; every other arm keeps
+  the flat 32 B default. The applied allowance prints on every gated arm
+  (`docs/benchmarks.md`).
+- Example E6 `samples/ADP` now mirrors the known-working certificate
+  arrangement: OAuth client credentials (Basic client auth, query-string grant
+  kept verbatim) plus **one named mTLS connection presented on both the token
+  call and the API calls**, with the certificate supplied as a base64
+  passwordless PKCS#12 (PFX) — the Key Vault certificate backing-secret format
+  (PEM bundles are auto-detected too). The offline stack enforces the
+  certificate for real (nginx `ssl_verify_client on`, verified subject logged
+  per path), records the measured token-request wire shape, and adds a Key
+  Vault variant whose live certificate rotation reaching new connections is
+  witnessed offline against a loopback stub.
+- `docs/vendors/adp.md` matches the sample: corrected token URL, PFX/certificate
+  guidance, the two-hop `Connection` wiring, and what is verified offline versus
+  what needs a real ADP account.
+
+Samples, documentation, CI and benchmark reference data only — no library or public API change.
+
+### Fixed
+
+- **The ADP sample's (E6) documented real-vendor switch could not work as written in
+  0.9.0–0.9.2.** Two defects combined to drop the credentials silently: (a) the README
+  exported the secrets under hyphenated names, which bash `export` rejects
+  ("not a valid identifier"), so the values never reached the environment; and (b)
+  `appsettings.RealAdp.json` declared `ClientId` and `Secrets` as empty placeholders,
+  and a JSON source added after the environment overrides exported values — so even a
+  correctly exported name was shadowed. Both are fixed: the variant file now commits
+  only endpoint facts, and the README's export command works as written in bash, zsh
+  and other POSIX shells. If you followed the old instructions, re-export as the current
+  README shows: `CredProx__Credentials__adp__ClientId`,
+  `CredProx__Secrets__adpClientSecret`, `CredProx__Secrets__adpClientCert`. The
+  sample's smoke now runs regression guards over both documented switches.
+- The **Spotify and MicrosoftGraph sample READMEs** carried the same unusable
+  instruction (`export CredProx__Secrets__<hyphenated>=...`, which bash rejects), as did
+  the QuickStart's env-var hint. Their published secret names are unchanged — hyphens
+  are valid Key Vault names — but the delivery instruction now uses a bash-valid form
+  (`env 'CredProx__Secrets__<name>=...' dotnet run`, or `dotnet user-secrets set`),
+  and every corrected command was proven by running it exactly as written.
+- **Migration note:** the ADP sample's secret names changed — `adp-secret` →
+  `adpClientSecret`, `adp-cert` → `adpClientCert` (camelCase so the environment
+  variables export cleanly). Key Vault object names follow: a vault secret named
+  `CredProx--Secrets--adpClientSecret` (or `...adpClientCert`) lands as the config key
+  the sample now reads.
+
 ## [0.9.2] - 2026-11-10
 
 ### Added

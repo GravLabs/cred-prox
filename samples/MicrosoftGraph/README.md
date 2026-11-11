@@ -27,9 +27,14 @@ configuration provider, which is all CredProx's `secret:` references need.
 # Entra ID → App registrations → New registration → Certificates & secrets → New client secret
 export CredProx__Credentials__graph__TokenEndpoint="https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token"
 export CredProx__Credentials__graph__ClientId=<application id>
-export CredProx__Secrets__graph-client-secret=<client secret value>
-dotnet run --project samples/MicrosoftGraph
+env 'CredProx__Secrets__graph-client-secret=<client secret value>' \
+  dotnet run --project samples/MicrosoftGraph
 ```
+
+The secret is delivered with `env '...'`, not `export`: bash's `export` refuses names
+containing hyphens ("not a valid identifier"), while .NET reads such variables fine.
+(In development: `dotnet user-secrets --project samples/MicrosoftGraph set
+'CredProx:Secrets:graph-client-secret' '<client secret value>'`.)
 
 Grant the app the **`User.Read.All`** *application* permission (API permissions →
 Application → User.Read.All → Grant admin consent). Then, **no credential in the request**:
@@ -79,7 +84,7 @@ az keyvault secret set --vault-name <vault> --name "CredProx--Secrets--graph-cli
 export KeyVault__Uri=https://<vault>.vault.azure.net/   # or --KeyVault:Uri ...
 ```
 
-Drop the `CredProx__Secrets__graph-client-secret` environment variable and the same
+Drop the `env 'CredProx__Secrets__graph-client-secret=...'` wrapper and the same
 `secret:graph-client-secret` reference the credential declares now resolves from the vault —
 secret material enters the process only from the vault, and the caller's identity (here the
 az CLI sign-in) needs *Key Vault Secrets User* on it. Rotation: overwrite the vault secret

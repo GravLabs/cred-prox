@@ -7,11 +7,15 @@
 #   (BenchmarkDotNet.Artifacts/results after a run; baselines/0.9.1/ in the repo).
 #
 # Checks, per benchmark method that exists in both trees:
-#   - Allocated bytes per operation: any increase beyond a small fixed epsilon FAILS.
+#   - Allocated bytes per operation: any increase beyond the arm's allowance FAILS.
 #     Allocations on the deterministic arms proved stable to <0.1% across unchanged
-#     reruns (docs/benchmarks.md), so a 32-byte absolute epsilon is generous. The SSE
-#     arms abandon a live stream mid-read, so their socket-buffer allocations vary a few
-#     percent run to run; those methods carry a proportional epsilon instead.
+#     reruns (docs/benchmarks.md), so a 32-byte absolute epsilon is generous for them.
+#     Arms with MEASURED scheduling noise carry a proportional allowance instead —
+#     a fraction of the BASELINE allocation, keyed by exact (suite, method) pair in
+#     NOISY_ALLOC_FRACTION: the SSE arms at 8%, TokenCacheBenchmarks.SingleFlight at
+#     max(32 B, 1%). The applied allowance is named on every gated arm's output line.
+#     An arm joins the map only on measured noise with evidence in docs/benchmarks.md
+#     — never to make a release pass.
 #   - Same-run relative overhead: each suite's methods are divided by that suite's
 #     baseline method WITHIN each run, and the ratio is compared across runs. A rise
 #     above RATIO_WARN always warns; it FAILS only in fail-mode suites and only above
@@ -27,8 +31,10 @@
 #     with a 0/null Mean) on either side FAILS unconditionally: without its
 #     denominator the suite cannot gate timing at all.
 #
-# Environment overrides: EPS_ALLOC (bytes/op), EPS_ALLOC_PCT (for the SSE arms),
-# RATIO_WARN, RATIO_FAIL, MEAN_WARN (multipliers), TIMING_MODE (fail|warn) to
+# Environment overrides: EPS_ALLOC (bytes/op, flat arms), EPS_ALLOC_PCT (explicit ->
+# re-fractions every NOISY_ALLOC_FRACTION arm; unset -> the per-arm fractions above;
+# never touches flat arms), RATIO_WARN, RATIO_FAIL, MEAN_WARN (multipliers),
+# TIMING_MODE (fail|warn) to
 # force every suite into one mode — for example on a dedicated quiet machine — and
 # ALLOW_PARTIAL=1 to accept a partial run (gates only what is present, loudly).
 set -u
@@ -44,7 +50,7 @@ compgen -G "$BASE_DIR/*-report-full.json" > /dev/null || {
     exit 2
 }
 
-EPS_ALLOC="${EPS_ALLOC:-32}" EPS_ALLOC_PCT="${EPS_ALLOC_PCT:-0.08}" \
+EPS_ALLOC="${EPS_ALLOC:-32}" EPS_ALLOC_PCT_RAW="${EPS_ALLOC_PCT:-}" \
 RATIO_WARN="${RATIO_WARN:-1.15}" RATIO_FAIL="${RATIO_FAIL:-1.25}" \
 TIMING_MODE="${TIMING_MODE:-auto}" MEAN_WARN="${MEAN_WARN:-1.15}" \
 ALLOW_PARTIAL="${ALLOW_PARTIAL:-0}" \
@@ -53,7 +59,10 @@ import glob, json, os, sys
 
 base_dir, new_dir = sys.argv[1], sys.argv[2]
 eps = float(os.environ["EPS_ALLOC"])
-eps_pct = float(os.environ["EPS_ALLOC_PCT"])
+_raw_pct = os.environ.get("EPS_ALLOC_PCT_RAW", "")
+# An EXPLICIT EPS_ALLOC_PCT re-fractions the dict arms (the old SSE override, widened
+# to cover every dict arm); it never touches flat arms. Unset -> per-arm fractions.
+eps_pct_override = float(_raw_pct) if _raw_pct else None
 ratio_warn = float(os.environ["RATIO_WARN"])
 ratio_fail = float(os.environ["RATIO_FAIL"])
 timing_mode = os.environ["TIMING_MODE"]
@@ -66,9 +75,26 @@ allow_partial = os.environ.get("ALLOW_PARTIAL") == "1"
 # enough to fail on. TIMING_MODE=fail|warn overrides for all suites.
 TIMING_BY_SUITE = {"OverheadBenchmarks": "warn"}
 
-# Methods whose per-op allocation is timing-dependent (a stream abandoned mid-read
-# leaves a run-dependent number of buffered socket events): proportional epsilon.
-NOISY_ALLOC = {("OverheadBenchmarks", "SsePlain"), ("OverheadBenchmarks", "SseCredProx")}
+# Methods whose per-op allocation is timing-dependent, with the allowance FRACTION
+# applied to the BASELINE value (never the new run's). Keys are exact (suite, method)
+# pairs — never substring or suite-level matches. An arm qualifies only on measured
+# scheduling noise with evidence in docs/benchmarks.md ("Measured noise"), never to
+# make a release pass. Every other arm keeps the flat EPS_ALLOC — the dict default
+# is the flat epsilon, never the proportional one.
+NOISY_ALLOC_FRACTION = {
+    # A stream abandoned mid-read leaves a run-dependent number of buffered
+    # socket events (measured +3.3%/+5.6% run to run).
+    ("OverheadBenchmarks", "SsePlain"): 0.08,
+    ("OverheadBenchmarks", "SseCredProx"): 0.08,
+    # 64 concurrent waiters on a cold key: per-op allocation includes BCL
+    # continuation objects that vary with inline-vs-scheduled completion.
+    # Measured band 23,444-23,520 B at unchanged src (2026-11-11).
+    ("TokenCacheBenchmarks", "SingleFlight"): 0.01,
+}
+# The single-flight allowance never dips below the flat epsilon:
+# max(SINGLEFLIGHT_MIN_EPS, 1% of baseline).
+SINGLEFLIGHT_MIN_EPS = 32.0
+SINGLEFLIGHT_KEY = ("TokenCacheBenchmarks", "SingleFlight")
 
 def suite_timing(suite):
     return timing_mode if timing_mode in ("fail", "warn") else TIMING_BY_SUITE.get(suite, "fail")
@@ -157,10 +183,27 @@ for base_file in sorted(glob.glob(os.path.join(base_dir, "*-report-full.json")))
             continue
         problems = []  # (hard, text)
 
-        method_eps = b["alloc"] * eps_pct if key in NOISY_ALLOC else eps
+        # Applied allowance, shown on every gated arm. Default is the FLAT eps;
+        # only an exact (suite, method) dict key (or an explicit EPS_ALLOC_PCT,
+        # which re-fractions the dict arms — like the old SSE override) makes it
+        # proportional, and the fraction always multiplies the BASELINE value.
+        frac = NOISY_ALLOC_FRACTION.get(key)  # None for every flat arm
+        if frac is not None and eps_pct_override is not None:
+            frac = eps_pct_override  # the override re-fractions dict arms only
+        if frac is None:
+            method_eps = eps
+            eps_note = f"allow +{method_eps:.0f} B flat"
+        else:
+            method_eps = b["alloc"] * frac
+            eps_note = f"allow +{method_eps:.0f} B ({frac:.0%} of baseline)"
+            if key == SINGLEFLIGHT_KEY:
+                method_eps = max(SINGLEFLIGHT_MIN_EPS, method_eps)
+                eps_note = (f"allow +{method_eps:.0f} B "
+                            f"(max({SINGLEFLIGHT_MIN_EPS:.0f} B, {frac:.0%} of baseline))")
         if n["alloc"] > b["alloc"] + method_eps:
             problems.append((True,
-                f"ALLOC {b['alloc']:.0f} B -> {n['alloc']:.0f} B (+{n['alloc'] - b['alloc']:.0f} B)"))
+                f"ALLOC {b['alloc']:.0f} B -> {n['alloc']:.0f} B "
+                f"(+{n['alloc'] - b['alloc']:.0f} B exceeds {eps_note})"))
 
         rb, rn = ratio(base, key), ratio(new, key)
         mode = suite_timing(cls)
@@ -176,18 +219,20 @@ for base_file in sorted(glob.glob(os.path.join(base_dir, "*-report-full.json")))
             problems.append((False,
                 f"MEAN {b['mean'] / 1e3:.2f} us -> {n['mean'] / 1e3:.2f} us (x{n['mean'] / b['mean']:.2f})"))
 
+        # Every gated arm's line names the allowance that was applied to it.
+        seg = f"alloc {b['alloc']:.0f}->{n['alloc']:.0f} B [{eps_note}]"
         if any(h for h, _ in problems):
-            print(f"FAIL  {m}: " + "; ".join(t for _, t in problems))
+            print(f"FAIL  {m}: {seg}; " + "; ".join(t for _, t in problems))
             fails += 1
         elif problems:
-            print(f"WARN  {m}: " + "; ".join(t for _, t in problems))
+            print(f"WARN  {m}: {seg}; " + "; ".join(t for _, t in problems))
             warns += 1
         elif rb is None or rn is None:
-            print(f"RATIO-SKIPPED {m}: alloc {b['alloc']:.0f}->{n['alloc']:.0f} B, "
+            print(f"RATIO-SKIPPED {m}: {seg}, "
                   f"mean {b['mean'] / 1e3:.2f}->{n['mean'] / 1e3:.2f} us "
                   f"(no usable baseline-arm ratio)")
         else:
-            print(f"ok    {m}: alloc {b['alloc']:.0f}->{n['alloc']:.0f} B, "
+            print(f"ok    {m}: {seg}, "
                   f"mean {b['mean'] / 1e3:.2f}->{n['mean'] / 1e3:.2f} us "
                   f"ratio {rb:.3f}->{rn:.3f}")
 

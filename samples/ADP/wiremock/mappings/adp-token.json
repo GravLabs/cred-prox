@@ -2,7 +2,13 @@
   "priority": 1,
   "request": {
     "method": "POST",
-    "urlPath": "/adp/oauth2/token"
+    "urlPath": "/auth/oauth/v2/token",
+    "queryParameters": {
+      "grant_type": { "equalTo": "client_credentials" }
+    },
+    "headers": {
+      "Authorization": { "contains": "Basic " }
+    }
   },
   "response": {
     "status": 200,

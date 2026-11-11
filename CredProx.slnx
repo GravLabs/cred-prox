@@ -10,6 +10,7 @@
     <Project Path="samples/AgentEgress/AgentEgress.csproj" />
     <Project Path="samples/AiGateway/AiGateway.csproj" />
     <Project Path="samples/AzureContainerApps/AzureContainerApps.csproj" />
+    <Project Path="samples/CallerApiKey/CallerApiKey.csproj" />
     <Project Path="samples/CustomPlugin/CustomPlugin.csproj" />
     <Project Path="samples/GitHubApp/GitHubApp.csproj" />
     <Project Path="samples/HmacSigning/HmacSigning.csproj" />

@@ -151,7 +151,7 @@ jobs:
 
       - name: Build all examples (Release, against the packages)
         run: |
-          for p in QuickStart OAuthKeycloak MutualTls Spotify MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie; do
+          for p in QuickStart OAuthKeycloak MutualTls Spotify MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie CallerApiKey; do
             dotnet build "samples/$p" --configuration Release
           done
 
@@ -164,7 +164,7 @@ jobs:
       - name: Smoke E3 MutualTls (nginx mTLS)
         run: samples/MutualTls/smoke.sh
 
-      - name: Smoke E6 ADP (WireMock)
+      - name: Smoke E6 ADP (nginx mTLS + WireMock + offline Key Vault witness)
         run: samples/ADP/smoke.sh
 
       - name: Smoke E7 PerCallerCredentials (Keycloak)
@@ -207,3 +207,7 @@ jobs:
       # partitions, caller cookies replaced, transparent refresh, scrubbed echo (in-process).
       - name: Smoke E16 SessionCookie (in-process CRM stub)
         run: samples/SessionCookie/smoke.sh
+
+      # Caller API keys: 401 missing == 401 wrong with no echo, key stripped upstream (WireMock).
+      - name: Smoke E18 CallerApiKey (WireMock)
+        run: samples/CallerApiKey/smoke.sh

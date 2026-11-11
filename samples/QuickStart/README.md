@@ -78,7 +78,9 @@ every example.
 `CredProx:Secrets` in `appsettings.json` is fine for a demo. In production put the same keys
 in environment variables (`CredProx__Secrets__echo-key`), user-secrets in development, or a
 key-per-file directory (`AddKeyPerFile`) — the `secret:` reference resolves through the
-ordinary `IConfiguration`, so any configuration provider works.
+ordinary `IConfiguration`, so any configuration provider works. One catch with hyphenated
+names: bash `export` rejects them ("not a valid identifier"), so deliver them as
+`env 'CredProx__Secrets__echo-key=<value>' dotnet run` — .NET reads such variables fine.
 
 ## Verify it without internet
 

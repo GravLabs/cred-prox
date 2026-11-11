@@ -58,11 +58,14 @@ Unchanged-code reruns on the shared development machine, 2026-11:
 | Overhead suite, allocations (SSE arms) | +3.3% / +5.6% |
 | Micro suites, same-run ratio | ≤ ×1.13 (worst: the sub-microsecond destination arms — nanosecond-scale measurements against nanosecond-scale denominators) |
 | Micro suites, absolute mean | ≤ +2.1% (except arms below ~100 ns, which track the ratio) |
-| Micro suites, allocations | ≤ 16 B |
+| Micro suites, allocations | ≤ 16 B — **except** `TokenCacheBenchmarks.SingleFlight`: band 23,444 – 23,520 B (≈76 B) at unchanged `src/` |
 
 The SSE arms abandon a live stream mid-read, so the number of buffered socket
 events per operation varies slightly with timing — their allocations are not fully
-deterministic. Everything else on the list is.
+deterministic. `SingleFlight` runs 64 concurrent waiters on a cold key, so each
+operation also pays for BCL continuation objects whose count depends on
+inline-vs-scheduled completion: unchanged-src reruns measured 23,444 / 23,481 /
+23,500 / 23,520 B (2026-11-11). Everything else on the list is deterministic.
 
 ## The gate: `scripts/bench-compare.sh`
 
@@ -75,11 +78,20 @@ Exits non-zero on a regression. Per method:
 
 | Check | Overhead suite | Micro suites |
 |---|---|---|
-| Allocated bytes/op | FAIL above +32 B (SSE arms: +8%) | FAIL above +32 B |
+| Allocated bytes/op | FAIL above +32 B (SSE arms: +8%) | FAIL above +32 B (`SingleFlight`: max(32 B, 1% of baseline)) |
 | Same-run ratio rise | WARN above ×1.15 (noise reaches ×2.8 — a fail-gate there would be theatre) | WARN above ×1.15, **FAIL** above ×1.25 (worst observed unchanged drift ×1.13 — the warn threshold sits above it) |
 | Absolute mean rise | WARN above ×1.15 | WARN above ×1.15 |
 
-Overrides: `EPS_ALLOC`, `EPS_ALLOC_PCT`, `RATIO_WARN`, `RATIO_FAIL`, `MEAN_WARN`,
+The allocation allowance is per-arm. An arm gets a proportional allowance only on
+MEASURED scheduling noise with evidence in "Measured noise" above — never to make a
+release pass. The key is the exact `(suite, method)` pair in `NOISY_ALLOC_FRACTION`
+(never a substring or whole-suite match) and the fraction multiplies the BASELINE
+allocation. Every other arm keeps the flat 32 B: the flat epsilon is the default,
+never the proportional one. The applied allowance is printed on every gated arm as
+`[allow ...]`.
+
+Overrides: `EPS_ALLOC`, `EPS_ALLOC_PCT` (explicit: re-fractions every proportional
+arm; unset: the per-arm fractions above; never touches flat arms), `RATIO_WARN`, `RATIO_FAIL`, `MEAN_WARN`,
 `ALLOW_PARTIAL=1` (accept a partial run, loudly), and `TIMING_MODE=fail|warn` to
 force one mode for all suites — for example on a dedicated benchmarking machine,
 where tightening the overhead timing gate becomes reasonable (see "A quieter
@@ -114,7 +126,7 @@ micro method were each caught by the gate during development of the script
 4. Compare the previous release's baseline against the new run before overwriting
    history, so a regression is never baked into the new reference.
 
-The 0.9.1 baseline lives in `baselines/0.9.1/`.
+The 0.9.2 baseline lives in `baselines/0.9.2/`.
 
 ## A quieter machine (recommendation)
 

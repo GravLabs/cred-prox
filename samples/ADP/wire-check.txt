@@ -1,0 +1,6 @@
+token request url : /auth/oauth/v2/token?grant_type=client_credentials
+token request body: grant_type=client_credentials
+Basic client auth : True
+original sent     : same url (query grant_type=client_credentials), EMPTY body, Basic header
+difference        : CredProx also sends grant_type=client_credentials in the form body
+                  (RFC 6749 standard shape); the query parameter is kept verbatim.

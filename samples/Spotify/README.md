@@ -17,12 +17,16 @@ copy the Client ID and Client Secret. No Docker.
 
 ```bash
 export CredProx__Credentials__spotify__ClientId=<your client id>
-export CredProx__Secrets__spotify-client-secret=<your client secret>
-dotnet run --project samples/Spotify
+env 'CredProx__Secrets__spotify-client-secret=<your client secret>' \
+  dotnet run --project samples/Spotify
 ```
 
+The secret name is delivered with `env '...'` rather than `export`: bash's `export`
+refuses names containing hyphens ("not a valid identifier"), while .NET reads such
+variables fine — `env` hands them to the process directly.
+
 (Development alternative: `dotnet user-secrets --project samples/Spotify set
-CredProx:Secrets:spotify-client-secret <secret>` and the same for the ClientId.)
+'CredProx:Secrets:spotify-client-secret' '<secret>'` and the same for the ClientId.)
 
 If either value is missing, the host exits and names exactly which one.
 

@@ -1,0 +1,17 @@
+{
+  "priority": 1,
+  "request": { "method": "GET", "urlPathPattern": "/secrets/?" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "value": [
+        {
+          "id": "https://credprox-adp-sample.vault.azure.net/secrets/CredProx--Secrets--adpClientCert",
+          "attributes": { "enabled": true, "updated": 1730000000 }
+        }
+      ],
+      "nextLink": null
+    }
+  }
+}

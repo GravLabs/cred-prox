@@ -11,24 +11,26 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-09): `0.9.1` is **published on the registry** — the patch on the
-collapsed public line: a negative `expires_in` no longer parks the token cache (it is a
-protocol violation: the token response is rejected through the unusable-response path,
-nothing is cached, and the warning names the field and credential id but never the
-value; `expires_in: 0` still falls back to `DefaultLifetime` with one warning per
-credential), and the M33 soak/failure-injection harness plus its testing report are now
-in the repository. GitHub `main` and tag `0.9.1` sit on **one squashed commit**
-`c243c5fc97a73fda943e2bdab33778fe1c5f7d62` (noreply author; tree identical to the
-internal release commit `92ee3a8`) appended on the previous public tip `db26705e` — a
+Current state (2026-11-10): `0.9.2` is **published on the registry** — the performance
+patch on the collapsed public line: hot-path allocation dropped about 77 % per scrubbed
+proxied request and 24–30 % per scrubbed SSE connection against 0.9.1 (allocation
+gates on the committed benchmark), the pooling and dispose hardening keeps a pooled
+buffer from ever being returned while a read is in flight (post-dispose reads refuse on
+every path), and the repository gained the M34 benchmark regression suite with its
+release comparison gate. No public API change. GitHub `main` and tag `0.9.2` sit on
+**one squashed commit**
+`ed6a527ff308458b209a96cb85e71c994aa252e0` (noreply author; tree identical to the
+internal release commit `7dc8c70`) appended on the previous public tip `c243c5f` — a
 regular append: no collapse, no tag deletions. CI green on the release commit
-(Actions run 42646476058). `0.9.1` shipped end to end: packed once from the public
-commit, each of the eight artifacts exactly once (the push client exits 0 without
-printing response codes; pushes authenticate via the machine-local
-`packageSourceCredentials` — an anonymous PUT answers 401 — and serving is proven
-consumer-side), consumer restore byte-identical, QuickStart smoke green on the
-downloaded bytes — its source links resolve to the publicly referenced commit
-`c243c5fc`. `0.9.1` is the supported version; `0.9.0` and `0.8.2` source links still
-resolve (both commits are publicly referenced). Source links for `0.8.1` and earlier
+(Actions run 42884590564). `0.9.2` shipped end to end: packed once from the public
+commit (deterministic CI path mapping, fresh obj, isolated restore cache), the four
+nupkgs pushed exactly once (the client auto-routes the adjacent snupkgs; pushes
+authenticate via the machine-local `packageSourceCredentials` — an anonymous PUT
+answers 401 — and serving is proven consumer-side), consumer restore byte-identical,
+QuickStart smoke green on the downloaded bytes — the symbol packages carry the full
+public SHA `ed6a527f` and the `/_/` source mapping. `0.9.2` is the supported version;
+`0.9.1`, `0.9.0` and `0.8.2` source links still resolve (their commits are publicly
+referenced). Source links for `0.8.1` and earlier
 point at commits that are off every branch and tag; they resolve only while GitHub
 retains the unreferenced objects (no support purge was requested) —
 **unsupported-by-construction** (see the `0.8.1` history entry). The Entra
@@ -38,7 +40,7 @@ entries remain the consumer contract. The `0.7.1` known issues stay resolved (F1
 CI-path-mapped PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1`
 published packages keep their historical metadata (immutable). The baseline rotation
 **ran with the `0.9.2` prep**: `build/baselines/` holds the published `0.9.1` bytes
-(sha256-verified; ADR-0001); the next rotation runs at the next release prep per the
+(sha256-verified; ADR-0001); the next rotation runs at the `0.9.3` prep per the
 rule below.
 
 ## What gets published
@@ -198,6 +200,50 @@ dotnet nuget locals http-cache --clear
 
 ## Release history
 
+- `0.9.2` (GitHub `ed6a527ff308458b209a96cb85e71c994aa252e0`, internal release commit
+  `7dc8c70`): published 2026-11-10 — patch release, the first gated by the M34
+  benchmark gate: a full `--filter '*'` pass on a quiet machine at the prep commit
+  `715f425` (text-only delta to the release commit), compared against the committed `0.9.1` reference — gate summary:
+  `bench-compare: 13 methods compared, FAIL=0 WARN=1` (the single WARN is the known
+  OAuthCacheHitScrub warn-mode timing drift; the allocation gate, which is what the
+  suite declares, is green). Content: hot-path allocation cut about 77 % per scrubbed
+  proxied request and 24–30 % per scrubbed SSE connection (SSE across three
+  independent runs 81,129–88,747 B); the scrubbing pool never returns a buffer while a
+  read is in flight (dispose transfers ownership; late-landing bytes are discarded and
+  the reader gets `ObjectDisposedException`; post-dispose reads refuse on every path),
+  plus a separate fix for the pre-existing post-dispose upstream reads; the benchmark
+  regression suite and its comparison gate join the repository. No public API change.
+  The prep commit `715f425` (baseline rotation to the published `0.9.1` bytes —
+  sha256-verified, ADR-0001 — version bump, CHANGELOG) passed a fresh-context prep
+  check; five text-only findings were folded into `7dc8c70` before publish. Ceremony:
+  packed **once** from a clean detached worktree at the PUBLIC commit after tree
+  equality with the reviewed `7dc8c70`, `-p:ContinuousIntegrationBuild=true` from
+  fresh obj into an isolated package cache; sanity loop ×4 passed (SourceLink carries
+  the full public SHA and the `/_/*`-to-raw mapping in every symbol package; no
+  builder-home paths in any pdb or dll); APICompat against the rotated `0.9.1`
+  baselines exit 0, additive surface only; extended disclosure scan over every member
+  of all eight packages (49 members incl all eight `*Content_Types*` members) zero
+  hits, exit code captured without a pipe tail. The push round: four nupkgs (the
+  client auto-routes the adjacent snupkgs), each version exactly once — pushes
+  authenticate via the machine-local `packageSourceCredentials`, serving proven
+  consumer-side. Nupkg sha256: `CredProx`
+  `2771228a996579cce334ec47821ae126ffa30bde34d1d2a59b2eb0b90192f91d`,
+  `CredProx.Abstractions`
+  `d7604524302dc463b053fcf1851c9f017456f0dedad6920150a66b73bcb1f74f`,
+  `CredProx.AzureKeyVault`
+  `71110f21b5092fb6b3b9799606c80974a983b06f43395961d91961dfb9147c18`,
+  `CredProx.Testing`
+  `78950e95c94775e8e5eebb04fcb60e20c53e3ed8001ade9d179f29a9e28a337f`. Consumer verify:
+  http-cache cleared, out-of-repo scratch project (the repo-level source mapping pins
+  `CredProx*` to the local feed, so an in-tree restore cannot prove the registry),
+  isolated package cache, all four downloads byte-identical to the pushed artifacts,
+  `samples/QuickStart` smoke green on those exact bytes (WireMock journal shows the
+  credential attached; the caller's echo shows it redacted). GitHub: ONE squashed
+  commit on the previous public tip, noreply identity — a regular append, no collapse,
+  no tag deletions; CI green (Actions run 42884590564). The benchmark baseline was
+  refreshed from a second full pass at the release commit (`baselines/0.9.2/`,
+  MACHINE.md records the noisier pass: FAIL=0 WARN=4, all four timing-only, both SSE
+  arms inflated together; allocations at or below `0.9.1` siblings).
 - `0.9.1` (GitHub `c243c5fc97a73fda943e2bdab33778fe1c5f7d62`, internal release commit
   `92ee3a8`): published 2026-11-09 — patch release. A negative `expires_in` (number or
   numeric string) is now rejected as a protocol violation through the unusable-response

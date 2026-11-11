@@ -2,12 +2,12 @@
   "priority": 1,
   "request": {
     "method": "GET",
-    "urlPathPattern": "/adp/api/.*"
+    "urlPathPattern": "/api/.*"
   },
   "response": {
     "status": 200,
     "headers": { "Content-Type": "text/plain" },
-    "body": "ADP stub received: Authorization = {{request.headers.Authorization}}",
+    "body": "ADP stub received: Authorization = {{request.headers.Authorization}} | client = {{request.headers.X-Client-DN}}",
     "transformers": ["response-template"]
   }
 }
