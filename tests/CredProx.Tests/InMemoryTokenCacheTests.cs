@@ -300,6 +300,29 @@ public sealed class InMemoryTokenCacheTests
         Assert.Throws<ArgumentNullException>(() => cache.Invalidate(null!, null));
     }
 
+    [Fact]
+    public async Task GetTokenAsync_YearOneExpiry_DoesNotUnderflowRefreshAt()
+    {
+        // M38: ComputeRefreshAt evaluates expiresAt - Skew (default 30 s), which underflows
+        // the DateTimeOffset range for a year-1 expiry and threw ArgumentOutOfRangeException
+        // from INSIDE the cache — outside the documented 502 contract (the provider catch
+        // filters never see it). Written as a direct cache call on purpose: the floor must
+        // hold even though the JWT provider keeps such values out through its own path.
+        var cache = CreateCache();
+        var calls = 0;
+
+        ValueTask<(string, DateTimeOffset)> Acquire(CancellationToken _)
+        {
+            calls++;
+            return ValueTask.FromResult(("token-1", DateTimeOffset.MinValue));
+        }
+
+        Assert.Equal("token-1", await cache.GetTokenAsync("cred", null, Acquire, default));
+        // A year-1 expiry reads as already due: the next call re-acquires, and nothing throws.
+        Assert.Equal("token-1", await cache.GetTokenAsync("cred", null, Acquire, default));
+        Assert.Equal(2, calls);
+    }
+
     private static InMemoryTokenCache CreateCache(TimeProvider? time = null) =>
         new(Options.Create(new TokenCacheOptions()), time ?? new FakeTimeProvider(T0));
 }

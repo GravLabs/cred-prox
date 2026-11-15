@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CredProx;
 using CredProx.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -415,9 +416,11 @@ public sealed class TokenExchangeProviderTests
     // culture-invariant, and a NEGATIVE value rejects like OAuth (M33 fault 7 mirrored).
     // The old double.TryParse(string, out _) overload was CurrentCulture + AllowThousands:
     // on a de-DE host "3600.9" cached ~10 h (36 009 s) and "1,000" cached 1 s, and a
-    // negative silently took DefaultLifetime. Non-finite/grouped/non-numeric keep the
-    // fallback in M37 (plan §8.6 policy row). Tests compile against f34b86e and assert the
-    // base exception type only, so the RED run is the bug's own behaviour, not a compile.
+    // negative silently took DefaultLifetime. M37 kept non-finite/grouped/non-numeric on the
+    // fallback; M38 A moved non-finite and grouped to rejection (see the M38 section below and
+    // the changed grouped pin), with non-numeric to follow under M38 B. Tests compile against
+    // f34b86e and assert the base exception type only, so the RED run is the bug's own
+    // behaviour, not a compile.
 
     [Fact]
     public async Task DecimalCommaCulture_ParsesDotAsDecimal()
@@ -439,23 +442,29 @@ public sealed class TokenExchangeProviderTests
     }
 
     [Fact]
-    public async Task DecimalCommaCulture_GroupedValueKeepsDefaultLifetime()
+    public async Task DecimalCommaCulture_GroupedValueRejects()
     {
+        // M38 A CHANGED this pin (it asserted "grouped keeps DefaultLifetime"): under the OAuth
+        // rule the grouped value is a protocol violation now, rejecting through the
+        // protocol-violation path on EVERY culture. The culture-invariance intent of the M37
+        // fold-2 pin stands - what it cached never depends on the machine's culture; the answer
+        // to an unparseable-without-grouping value is now uniformly "reject".
         using var _culture = new CultureOverride("de-DE");
         var time = new FakeTimeProvider();
         var (provider, handler) = CreateProvider(
             Route(jwks: JwksJson(), tokenBody: """{"access_token":"down-tok","expires_in":"1,000"}"""), time);
         var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
 
-        await provider.GetCredentialAsync(
-            ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default);
-        time.Advance(TimeSpan.FromSeconds(60));
-        await provider.GetCredentialAsync(
-            ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default);
-
-        // Invariant + Float rejects the grouping, so the token keeps the 1 h DefaultLifetime
-        // and stays cached. RED at f34b86e: de-DE parsed "1,000" as 1.0 s and re-minted here.
-        Assert.Equal(1, ExchangeCalls(handler));
+        var ex = await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask());
+        Assert.NotNull(ex);
+        Assert.IsAssignableFrom<InvalidOperationException>(ex);
+        Assert.IsNotType<InvalidOperationException>(ex);
+        Assert.Contains("expires_in", ex.Message);
+        Assert.DoesNotContain("1,000", ex.Message);
+        Assert.DoesNotContain("malformed", ex.Message);
+        Assert.Equal(1, ExchangeCalls(handler));            // rejected, nothing cached
     }
 
     [Fact]
@@ -511,4 +520,189 @@ public sealed class TokenExchangeProviderTests
         Assert.Equal(1, ExchangeCalls(handler));
     }
 
+    // ---- M38 (plan §8.6 policy row): this provider adopts OAuth's
+    // rejection rule (A + B): non-finite, thousands-grouped and non-numeric `expires_in` values are
+    // protocol violations on the IdP-failure path - at 3b2d758 every one of them was a NaN that
+    // silently cached DefaultLifetime. C: an accepted lifetime above 24 h clamps to 24 h, and values
+    // that overflow TimeSpan (1e12, 1e300 — 1e12 s = 1e19 ticks > TimeSpan.MaxTicks) clamp instead of
+    // dying in the generic malformed-response re-wrap. The empty-string warning and the once-per-
+    // credential clamp warnings ride the logger seam (additive 4-arg ctor) added in GREEN — they
+    // cannot compile at 3b2d758, the M37 fold-2 precedent for a noted base-incompatible pin. The
+    // tests below compile at 3b2d758 and assert only base types and observable caching: the RED run
+    // is the bug's own behaviour, not a compile failure.
+
+    [Theory]
+    [InlineData("1e400")]         // JSON number +∞: the culture-independent non-finite route (M37 matrix)
+    [InlineData("\"Infinity\"")]  // string arm, invariant parse: +∞ (TE already parses invariant)
+    [InlineData("\"1e400\"")]
+    public async Task M38_NonFiniteExpiresIn_RejectsResponse_CachesNothing(string json)
+    {
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: $$"""{"access_token":"down-tok","expires_in":{{json}}}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
+
+        var ex = await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask());
+        Assert.NotNull(ex);                                 // RED at 3b2d758: NaN silently cached DefaultLifetime
+        Assert.IsAssignableFrom<InvalidOperationException>(ex); // the documented IdP-failure type
+        Assert.IsNotType<InvalidOperationException>(ex);    // a specific rejection, not the re-wrap
+        Assert.Contains("expires_in", ex.Message);          // names the field...
+        Assert.Contains("test", ex.Message);                // ...and the credential id...
+        Assert.DoesNotContain("down-tok", ex.Message);      // ...never the token or the value.
+        Assert.DoesNotContain("Infinity", ex.Message);
+        Assert.DoesNotContain("1e400", ex.Message);
+        Assert.DoesNotContain("malformed", ex.Message);     // the documented rejection, not the re-wrap
+        Assert.Equal(1, ExchangeCalls(handler));
+
+        ex = await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask());
+        Assert.NotNull(ex);
+        Assert.Equal(1, ExchangeCalls(handler));            // backoff re-throw: nothing was cached
+
+        time.Advance(TimeSpan.FromSeconds(6));              // past NegativeCacheTtl
+        Assert.NotNull(await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask()));
+        Assert.Equal(2, ExchangeCalls(handler));            // re-mints once the backoff lapses
+    }
+
+    [Fact]
+    public async Task M38_GroupedExpiresIn_RejectsResponse_CachesNothing()
+    {
+        // A: "1,000" is only parseable via thousands grouping (invariant Float already rejects it);
+        // accepting it would make the cached lifetime culture-dependent — OAuth's M37 A1 ruling now
+        // applies here too. RED at 3b2d758: the unparseable value silently cached DefaultLifetime.
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: """{"access_token":"down-tok","expires_in":"1,000"}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
+
+        var ex = await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask());
+        Assert.NotNull(ex);
+        Assert.IsAssignableFrom<InvalidOperationException>(ex);
+        Assert.IsNotType<InvalidOperationException>(ex);
+        Assert.Contains("expires_in", ex.Message);
+        Assert.Contains("test", ex.Message);
+        Assert.DoesNotContain("down-tok", ex.Message);
+        Assert.DoesNotContain("1,000", ex.Message);
+        Assert.DoesNotContain("malformed", ex.Message);
+        Assert.Equal(1, ExchangeCalls(handler));
+    }
+
+    [Theory]
+    [InlineData("\"abc\"")]
+    [InlineData("\"0x10\"")]
+    [InlineData("\"١٢٣\"")]      // non-ASCII digits: not the JSON number grammar
+    public async Task M38_NonNumericStringExpiresIn_RejectsResponse_CachesNothing(string json)
+    {
+        // B: a value unmistakably not in the JSON number grammar rejects (M38 ruling) instead of
+        // the 3b2d758 silent DefaultLifetime. The empty string is NOT here — it is absent-with-
+        // warning (its once-per-credential warning test rides the GREEN logger seam).
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: $$"""{"access_token":"down-tok","expires_in":{{json}}}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
+
+        var ex = await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask());
+        Assert.NotNull(ex);                                 // RED at 3b2d758: silent DefaultLifetime
+        Assert.IsAssignableFrom<InvalidOperationException>(ex);
+        Assert.IsNotType<InvalidOperationException>(ex);
+        Assert.Contains("expires_in", ex.Message);
+        Assert.Contains("test", ex.Message);
+        Assert.DoesNotContain("down-tok", ex.Message);
+        Assert.DoesNotContain(json.Trim('"'), ex.Message);  // never the value
+        Assert.DoesNotContain("malformed", ex.Message);
+        Assert.Equal(1, ExchangeCalls(handler));
+    }
+
+    [Fact]
+    public async Task M38_LifetimeAboveOneDay_ClampedTo24h()
+    {
+        // C: 48 h is a valid finite lifetime; the cap clamps it to 24 h, so the cache refreshes on
+        // the 24 h clock (80 % is 19.2 h). RED at 3b2d758: 48 h caches and stays served at +20 h.
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: """{"access_token":"down-tok","expires_in":172800}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(30));
+
+        Assert.Equal("down-tok", await provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+        time.Advance(TimeSpan.FromHours(20));               // past 80 % of 24 h, below 80 % of 48 h
+        Assert.Equal("down-tok", await provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+
+        Assert.Equal(2, ExchangeCalls(handler));
+    }
+
+    [Theory]
+    [InlineData("1e12")]   // 1e12 s = 1e19 ticks > TimeSpan.MaxTicks: OverflowException today
+    [InlineData("1e300")]
+    public async Task M38_TimeSpanOverflow_ClampedNotMalformed(string json)
+    {
+        // C: TimeSpan-overflowing lifetimes clamp to 24 h with a warning — RED at 3b2d758: they die
+        // in the generic "malformed token response" re-wrap (the inconsistency plan §8.6 names).
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: $$"""{"access_token":"down-tok","expires_in":{{json}}}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(30));
+
+        // GREEN: the token is served and cached on the clamped 24 h clock, no error at all.
+        Assert.Equal("down-tok", await provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+        time.Advance(TimeSpan.FromHours(20));               // past the clamped refresh point
+        Assert.Equal("down-tok", await provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+
+        Assert.Equal(2, ExchangeCalls(handler));
+    }
+
+    [Fact]
+    public async Task M38_EmptyStringExpiresIn_FallsBackWithOneWarning()
+    {
+        // B boundary: "" is present-but-empty = absent -> DefaultLifetime WITH one warning per
+        // credential (two mints here via the 80 % refresh, one notice total — the OAuth
+        // zero-lifetime rule mirrored). Added WITH outcome B: the warning needs the additive
+        // 4-arg logger ctor, so this pin cannot compile at 3b2d758 (M37 fold-2 precedent —
+        // base-incompatible warning pins, noted on the row).
+        var time = new FakeTimeProvider();
+        var handler = new StubHttpHandler(Route(jwks: JwksJson(),
+            tokenBody: """{"access_token":"down-tok","expires_in":""}"""));
+        var logger = new CollectingLogger();
+        var cache = new InMemoryTokenCache(Options.Create(new TokenCacheOptions()), time);
+        var provider = new TokenExchangeProvider(cache, new StubHttpClientFactory(handler), time, logger);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
+
+        Assert.Equal("down-tok", await provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+        time.Advance(TimeSpan.FromMinutes(50));             // past 80 % of the 1 h default -> second mint
+        Assert.Equal("down-tok", await provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+        Assert.Equal(2, ExchangeCalls(handler));            // the fallback clock, twice
+
+        Assert.Single(logger.Messages, static m => m.Contains("expires_in")); // one notice across mints
+        Assert.DoesNotContain("down-tok", logger.Messages.Single(m => m.Contains("expires_in")));
+    }
+
+    private sealed class CollectingLogger : ILogger<TokenExchangeProvider>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
 }

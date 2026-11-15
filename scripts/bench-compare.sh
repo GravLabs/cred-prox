@@ -16,6 +16,13 @@
 #     at max(32 B, 1%). The applied allowance is named on every gated arm's output line.
 #     An arm joins the map only on measured noise with evidence in docs/benchmarks.md
 #     — never to make a release pass.
+#     The two SSE arms are WARN-only above their fraction, keyed by exact
+#     (suite, method) pair in GROSS_ALLOC_FAIL_MULT: an interleaved A/B attribution
+#     (2026-11-15) showed the released 0.9.4 code exceeds its own 12% allowance in
+#     2 of 3 quiet-gated passes — the same rate as the candidate, with no changed
+#     code in the arm's path — so the fraction cannot gate them as a FAIL. They
+#     still hard-FAIL above 2.5x the BASELINE allocation: the gross-regression trip
+#     line (buffering the stream, a scrub blow-up). Every other arm is unchanged.
 #   - Same-run relative overhead: each suite's methods are divided by that suite's
 #     baseline method WITHIN each run, and the ratio is compared across runs. A rise
 #     above RATIO_WARN always warns; it FAILS only in fail-mode suites and only above
@@ -124,6 +131,19 @@ NOISY_ALLOC_FRACTION = {
 # max(SINGLEFLIGHT_MIN_EPS, 1% of baseline).
 SINGLEFLIGHT_MIN_EPS = 32.0
 SINGLEFLIGHT_KEY = ("TokenCacheBenchmarks", "SingleFlight")
+
+# Arms whose allocation excursion above their NOISY_ALLOC_FRACTION WARNs instead of
+# FAILing, with the multiplier on the BASELINE allocation that still hard-FAILs.
+# Keyed by exact (suite, method) pair — same discipline as the fraction table,
+# never a suite-name match. 2.5x sits above the measured scheduling tail (across
+# nine quiet-gated passes 2026-11-15 the worst value was 1.95x of the 13,117 B
+# reference — and the released-code control alone reached 1.26x — while both trees
+# failed the 12% line at the same rate) and below gross regressions like buffering
+# the stream or a scrub blow-up. docs/benchmarks.md carries the evidence.
+GROSS_ALLOC_FAIL_MULT = {
+    ("OverheadBenchmarks", "SsePlain"): 2.5,
+    ("OverheadBenchmarks", "SseCredProx"): 2.5,
+}
 
 def suite_timing(suite):
     return timing_mode if timing_mode in ("fail", "warn") else TIMING_BY_SUITE.get(suite, "fail")
@@ -251,20 +271,27 @@ for base_file in sorted(glob.glob(os.path.join(base_dir, "*-report-full.json")))
         frac = NOISY_ALLOC_FRACTION.get(sm_key)  # None for every flat arm
         if frac is not None and eps_pct_override is not None:
             frac = eps_pct_override  # the override re-fractions dict arms only
+        gross_mult = GROSS_ALLOC_FAIL_MULT.get(sm_key)  # None for every hard arm
         if frac is None:
             method_eps = eps
             eps_note = f"allow +{method_eps:.0f} B flat"
         else:
             method_eps = b["alloc"] * frac
-            eps_note = f"allow +{method_eps:.0f} B ({frac:.0%} of baseline)"
+            eps_note = (f"allow +{method_eps:.0f} B ({frac:.0%} of baseline)"
+                        + ("" if gross_mult is None else f" warn, fail above {gross_mult}x"))
             if sm_key == SINGLEFLIGHT_KEY:
                 method_eps = max(SINGLEFLIGHT_MIN_EPS, method_eps)
                 eps_note = (f"allow +{method_eps:.0f} B "
                             f"(max({SINGLEFLIGHT_MIN_EPS:.0f} B, {frac:.0%} of baseline))")
         if n["alloc"] > b["alloc"] + method_eps:
-            problems.append((True,
-                f"ALLOC {b['alloc']:.0f} B -> {n['alloc']:.0f} B "
-                f"(+{n['alloc'] - b['alloc']:.0f} B exceeds {eps_note})"))
+            if gross_mult is not None and n["alloc"] > b["alloc"] * gross_mult:
+                problems.append((True,
+                    f"ALLOC {b['alloc']:.0f} B -> {n['alloc']:.0f} B "
+                    f"(x{n['alloc'] / b['alloc']:.2f} of baseline exceeds gross-fail {gross_mult}x)"))
+            else:
+                problems.append((gross_mult is None,
+                    f"ALLOC {b['alloc']:.0f} B -> {n['alloc']:.0f} B "
+                    f"(+{n['alloc'] - b['alloc']:.0f} B exceeds {eps_note})"))
 
         # Thin statistics understate every check below (means, ratios, percentiles).
         # The committed baseline passed review once; the floor gates the NEW run.

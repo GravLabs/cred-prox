@@ -340,7 +340,6 @@ public sealed class OAuthClientCredentialsProviderTests
     [Theory]
     [InlineData("0")]        // number zero: "no stated expiry" -> default lifetime (M33 design decision keeps this)
     [InlineData("\"0\"")]    // string zero, same rule through the string arm
-    [InlineData("\"soon\"")] // unparseable
     [InlineData("null")]     // JSON null reaches neither arm
     public async Task UnusableExpiresIn_FallsBackToDefaultLifetime_AndIsCached(string json)
     {
@@ -349,6 +348,10 @@ public sealed class OAuthClientCredentialsProviderTests
         // would crash) instead of hitting the cache. Negative expires_in is NOT in this row
         // since 0.9.x: a negative lifetime is a protocol violation and REJECTS the response
         // (M33 fault 7) - pinned by NegativeExpiresIn_RejectsResponse_CachesNothing below.
+        // M38 B CHANGED this row: the old unparseable-"soon" fallback is now a rejection
+        // (non-numeric strings join the protocol-violation rule) - pinned by
+        // M38_NonNumericStringExpiresIn_RejectsResponse_CachesNothing below, with "" moved to
+        // absent-with-warning in M38_EmptyStringExpiresIn_FallsBackWithOneWarning.
         var (provider, handler) = CreateProvider(new StubHttpHandler(
             HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}"""));
 
@@ -533,22 +536,145 @@ public sealed class OAuthClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task AbsentAndGarbageExpiresIn_KeepDefaultLifetimeFallback()
+    public async Task AbsentExpiresIn_KeepsDefaultLifetimeFallback_GarbageRejects()
     {
-        // Explicitly pinned beside the negative rows: only NEGATIVE changes behaviour.
-        foreach (var body in new[]
+        // Pre-M38 this pinned "only NEGATIVE changes behaviour" - garbage strings fell back too.
+        // M38 B CHANGED the boundary: absent stays absent (fallback), but a non-numeric string
+        // is now a protocol violation and rejects. Both halves stay pinned here, one row each;
+        // the rejection detail (nothing cached, message hygiene) lives in
+        // M38_NonNumericStringExpiresIn_RejectsResponse_CachesNothing below.
         {
-            """{"access_token":"tok-1"}""",
-            """{"access_token":"tok-1","expires_in":"garbage"}""",
-        })
-        {
-            var (provider, handler) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, body));
+            var (provider, handler) = CreateProvider(new StubHttpHandler(
+                HttpStatusCode.OK, """{"access_token":"tok-1"}"""));
             var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
 
             Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
             Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
             Assert.Single(handler.Requests); // cached for DefaultLifetime, not re-minted
         }
+        {
+            var (provider, handler) = CreateProvider(new StubHttpHandler(
+                HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":"garbage"}"""));
+            var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+            var ex = await Assert.ThrowsAsync<OAuthClientCredentialsProvider.InvalidExpiresInRejectedException>(
+                () => provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask());
+            Assert.Contains("expires_in", ex.Message);
+            Assert.DoesNotContain("garbage", ex.Message);
+        }
+    }
+
+    // ---- M38 (plan §8.6 policy row): B and C, this provider.
+    // B: a non-numeric string that is neither parseable nor grouped ("abc", "0x10", "١٢٣") was the
+    // last silent-DefaultLifetime hole through the string arm — it now rejects like every other
+    // unusable value; the empty string is NOT rejected: it means "absent" and falls back WITH a
+    // once-per-credential warning (the seam exists here since M33, so this pins RED at 3b2d758 —
+    // the fallback clock already matched, only the warning was missing). C: the 24 h cap: 48 h
+    // clamps (RED at 3b2d758: uncapped), and TimeSpan-overflow values (1e12 s = 1e19 ticks >
+    // TimeSpan.MaxTicks, and 1e300) clamp instead of dying in the malformed re-wrap.
+
+    [Theory]
+    [InlineData("\"abc\"")]
+    [InlineData("\"0x10\"")]
+    [InlineData("\"١٢٣\"")]      // non-ASCII digits: not the JSON number grammar
+    public async Task M38_NonNumericStringExpiresIn_RejectsResponse_CachesNothing(string json)
+    {
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(new StubHttpHandler(
+            HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}"""), time);
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+        var ex = await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask());
+        Assert.NotNull(ex);                                 // RED at 3b2d758: silent DefaultLifetime
+        Assert.IsAssignableFrom<InvalidOperationException>(ex); // the documented IdP-failure type
+        Assert.IsNotType<InvalidOperationException>(ex);    // a specific rejection, not the re-wrap
+        Assert.Contains("expires_in", ex.Message);          // names the field...
+        Assert.Contains("test", ex.Message);                // ...and the credential id...
+        Assert.DoesNotContain("tok-1", ex.Message);         // ...never the token or the value.
+        Assert.DoesNotContain(json.Trim('"'), ex.Message);
+        Assert.DoesNotContain("malformed", ex.Message);
+        Assert.Single(handler.Requests);
+
+        Assert.NotNull(await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask()));
+        Assert.Single(handler.Requests);                    // backoff re-throw: nothing was cached
+
+        time.SetUtcNow(time.GetUtcNow() + TimeSpan.FromSeconds(6)); // past NegativeCacheTtl
+        Assert.NotNull(await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask()));
+        Assert.Equal(2, handler.Requests.Count);            // re-mints once the backoff lapses
+    }
+
+    [Fact]
+    public async Task M38_EmptyStringExpiresIn_FallsBackWithOneWarning()
+    {
+        // B boundary: "" is present-but-empty = absent -> DefaultLifetime WITH one warning per
+        // credential (two mints here via the 80 % refresh, one notice total — the zero-lifetime
+        // rule mirrored). RED at 3b2d758: the fallback clock matched but the warning never fired.
+        var time = new FakeTimeProvider();
+        var handler = new StubHttpHandler(
+            HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":""}""");
+        var logger = new CollectingLogger();
+        var cache = new InMemoryTokenCache(Options.Create(new TokenCacheOptions()), time);
+        var provider = new OAuthClientCredentialsProvider(cache, new StubHttpClientFactory(handler), time, logger);
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+        Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        time.Advance(TimeSpan.FromMinutes(50));             // past 80 % of the 1 h default -> second mint
+        Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        Assert.Equal(2, handler.Requests.Count);            // the fallback clock, twice
+
+        Assert.Single(logger.Messages, static m => m.Contains("expires_in")); // RED at 3b2d758: none
+        Assert.DoesNotContain("tok-1", logger.Messages.Single(m => m.Contains("expires_in")));
+    }
+
+    [Fact]
+    public async Task M38_LifetimeAboveOneDay_ClampedTo24h()
+    {
+        // C: 48 h clamps to 24 h (refresh at 80 % = 19.2 h). RED at 3b2d758: uncapped 48 h is
+        // still served at +20 h. The once-per-credential clamp warning is pinned with the second mint.
+        var time = new FakeTimeProvider();
+        var handler = new StubHttpHandler(
+            HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":172800}""");
+        var logger = new CollectingLogger();
+        var cache = new InMemoryTokenCache(Options.Create(new TokenCacheOptions()), time);
+        var provider = new OAuthClientCredentialsProvider(cache, new StubHttpClientFactory(handler), time, logger);
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+        Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        time.Advance(TimeSpan.FromHours(20));               // past 80 % of 24 h, below 80 % of 48 h
+        Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        Assert.Equal(2, handler.Requests.Count);            // RED at 3b2d758: 1 (uncapped, still cached)
+
+        Assert.Single(logger.Messages, static m => m.Contains("expires_in")); // one notice across mints
+    }
+
+    [Theory]
+    [InlineData("1e12")]   // 1e12 s = 1e19 ticks > TimeSpan.MaxTicks: OverflowException today
+    [InlineData("1e300")]
+    public async Task M38_TimeSpanOverflow_ClampedNotMalformed(string json)
+    {
+        // C: RED at 3b2d758 — the await throws the generic "malformed token response" re-wrap of
+        // the OverflowException; the cap clamps these to 24 h instead, no error.
+        var time = new FakeTimeProvider();
+        var handler = new StubHttpHandler(
+            HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}""");
+        var logger = new CollectingLogger();
+        var cache = new InMemoryTokenCache(Options.Create(new TokenCacheOptions()), time);
+        var provider = new OAuthClientCredentialsProvider(cache, new StubHttpClientFactory(handler), time, logger);
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+        Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        time.Advance(TimeSpan.FromHours(20));               // past the clamped refresh point
+        Assert.Equal("tok-1", await provider.GetCredentialAsync(options, Secrets(), Context(), default));
+        Assert.Equal(2, handler.Requests.Count);
+
+        Assert.Single(logger.Messages, static m => m.Contains("expires_in"));
     }
 
     private sealed class CollectingLogger : ILogger<OAuthClientCredentialsProvider>

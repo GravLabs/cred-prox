@@ -7,6 +7,76 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-15
+
+Token lifetime policy unified across all three credential providers (M38): every
+vendor-stated expiry (`expires_in`, `expires_at`) now follows the same accept, cap
+and reject rules on `OAuthClientCredentials`, `TokenExchange` and `JwtAssertion`,
+each with once-per-credential notices. The only public surface change is the
+additive optional-`ILogger` constructor overloads on `TokenExchangeProvider` and
+`JwtAssertionProvider`; no existing API changed.
+
+### Added
+
+- `TokenExchangeProvider` and `JwtAssertionProvider` gained additive constructor
+  overloads with an optional `ILogger<T>` parameter (M38), used for the once-per-credential
+  lifetime notices. The existing constructors are unchanged, and hosts with no logging
+  registered build and run the providers exactly as before.
+
+### Changed
+
+- Token lifetime policy, outcome A (M38): `TokenExchange` and `JwtAssertion` now reject
+  a non-finite or thousands-grouped `expires_in` through the protocol-violation path,
+  the same rule the OAuth client-credentials provider has since 0.9.4 (M37 A1): nothing
+  is cached, the error names the field and the credential id, never the value or the
+  token. `JwtAssertion` keeps its documented precedence — an unusable `expires_in`
+  still gives way to a valid `expires_at`, and only rejects when nothing usable
+  remains. Zero, absent and JSON-null values keep the `DefaultLifetime` fallback on
+  all three providers, unchanged. No public API change.
+- Token lifetime policy, outcome B (M38): all three providers (`OAuthClientCredentials`,
+  `TokenExchange`, `JwtAssertion`) now also reject a non-empty, non-numeric `expires_in`
+  string (`"abc"`, `"0x10"`, non-ASCII digits) through the same protocol-violation path —
+  nothing cached, the error names the field and the credential id, never the value. The
+  empty string `""` means "no stated expiry": it keeps the `DefaultLifetime`/precedence
+  fallback but now logs one warning per credential, mirroring the existing zero-lifetime
+  notice. `TokenExchangeProvider` and `JwtAssertionProvider` gain optional-`ILogger`
+  constructor overloads for these notices (additive; the existing constructors are
+  unchanged). `JwtAssertion`'s rejection message now reads "an invalid `expires_in`
+  value", covering all rejected shapes.
+- Token lifetime policy, outcome C (M38): an accepted vendor lifetime above 24 hours is now
+  capped to 24 hours on all three providers, with one warning per credential. Values too
+  large for a `TimeSpan` (`1e12`, `1e300`) are capped too — they previously surfaced as a
+  generic "malformed response" error through the overflow path; they now cache normally on
+  the capped clock. `JwtAssertion`'s cap rides after its documented precedence, so a
+  far-future `expires_at` is capped to now + 24 hours as well. The cap applies only to
+  vendor-supplied lifetimes — the configured `DefaultLifetime` is never capped. No new
+  option; no public API change.
+- Token lifetime policy, outcome D (M38): `JwtAssertion`'s `expires_at` is now read with an
+  invariant ISO-8601 grammar instead of the host culture: an offset-less value means UTC,
+  not host-local wall time (a non-UTC host previously shifted the cached expiry by its UTC
+  offset), and host-culture dotted formats like `"15.11.2026 22:00:00"` are no longer
+  accepted — they now fall back with a warning, as unparseable values always should have.
+  A JSON-number `expires_at` is accepted as epoch seconds (GitHub-App-style responses emit
+  it). Absent and JSON-null keep the silent fallback. Values that already carry an
+  explicit offset or the UTC designator `Z` — the shape the shipped GitHub App and Azure
+  Container Apps samples emit — are read exactly as before. No public API change.
+- Token lifetime policy, past expiry (M38): `JwtAssertion` now treats an `expires_at` that is
+  already at or before the current time as unusable — the same class as a negative
+  `expires_in` — whether ISO text or epoch seconds (`0` and exactly-now included). When the
+  response states no other usable expiry, it is rejected through the protocol-violation
+  path: nothing is cached, the error names the field and the credential id, never the
+  value. A usable `expires_in` still wins the documented precedence, and a future
+  `expires_at` is unaffected. No public API change.
+- The benchmark regression gate (`scripts/bench-compare.sh`): the two Overhead-suite
+  SSE arms (`SsePlain`, `SseCredProx`) now WARN above the +12% allocation allowance
+  instead of failing, and hard-FAIL only above 2.5× the baseline allocation
+  (per-arm `GROSS_ALLOC_FAIL_MULT`, keyed by exact `(suite, method)` pair). The
+  interleaved A/B attribution of 2026-11-15 showed the released 0.9.4 code failing
+  its own +12% FAIL at the same rate as the candidate — 2 of 3 quiet-gated passes
+  each, with no changed code in the arm's path — so that FAIL could not identify a
+  code change; a gross regression (2.5× and above) still fails. Every other arm is
+  unchanged. Evidence: `docs/benchmarks.md`. No library change.
+
 ## [0.9.4] - 2026-11-15
 
 Library hardening (M37) only — the vendor `expires_in` is parsed with the canonical

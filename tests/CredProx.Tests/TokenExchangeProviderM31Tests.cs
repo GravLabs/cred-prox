@@ -278,9 +278,12 @@ public sealed class TokenExchangeProviderM31Tests
     // TokenExchangeProviderTests.NegativeExpiresIn_RejectsResponse_CachesNothing).
     [Theory]
     [InlineData("0")]    // zero: expires immediately, nonsense
-    [InlineData("\"soon\"")] // unparsable string
     public async Task NonsenseExpiresIn_UsesDefaultLifetime_ServesFromCache(string expiresInJson)
     {
+        // M38 B CHANGED this row: the old unparsable-"soon" fallback is now a rejection
+        // (non-numeric strings are protocol violations) — pinned by
+        // TokenExchangeProviderTests.M38_NonNumericStringExpiresIn_RejectsResponse_CachesNothing.
+        // Zero keeps its silent DefaultLifetime fallback (unchanged since M33).
         var (provider, handler, _) = Create((req, _) => req.RequestUri!.AbsolutePath.Contains("/jwks")
             ? Json(HttpStatusCode.OK, JwksWith(("key-1", IssuerRsa)))
             : Json(HttpStatusCode.OK, $$"""{"access_token":"down-tok","expires_in":{{expiresInJson}}}"""));

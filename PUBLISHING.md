@@ -11,27 +11,29 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-11): `0.9.3` is **published on the registry** — the samples,
-documentation, CI and benchmark-tooling patch: the E6 ADP example rebuilt to the
-known-working certificate arrangement (one named mTLS client certificate on both the
-token call and the API calls, base64 passwordless PFX, Key Vault variant), the new E18
-caller API-key example, fixed real-vendor secret-delivery instructions across the ADP,
-Spotify, MicrosoftGraph and QuickStart examples, CI extended to smoke E6 and E18, and
-the benchmark regression gate's per-arm allocation allowance for the timing-sensitive
-single-flight arm. No library or public API change — `src/` is byte-identical to
-`0.9.2`. GitHub `main` and tag `0.9.3` sit on **one squashed commit**
-`02e495cc2d082903804b82a6da85565625ff8a25` (noreply author; tree identical to the
-internal release commit `d3896d0`) appended on the previous public tip `ed6a527` — a
-regular append: no collapse, no tag deletions. CI green on the release commit
-(Actions run 43039565880, all three jobs — the Examples job now also smokes E6 and
-E18). `0.9.3` shipped end to end: packed once from the public
+Current state (2026-11-15): `0.9.4` is **published on the registry** — the library
+hardening patch: `expires_in` is parsed with the canonical JSON-number grammar on all
+three credential providers — negative values reject through the protocol-violation path
+on all three, non-finite and thousands-grouped values reject on the OAuth
+client-credentials provider while the other two keep the `DefaultLifetime` fallback
+(pending the lifetime-policy decision) — and **nothing is cached on any rejection**.
+The benchmark regression gate gained a statistics-count floor, per-arm N/P95 printing,
+parameter-aware comparison keys and loud partial-run rules; the SSE benchmark workload
+now measures real per-event redaction over a bounded stream. No public API change —
+APICompat against the published `0.9.3` surface is clean on all four packages. GitHub
+`main` and tag `0.9.4` sit on **one squashed commit**
+`ca814c7bf0a5ccce0997a2c2f2a185ed669049d7` (noreply author; tree identical to the
+internal release commit `8df333c`) appended on the previous public tip `02e495cc` — a
+regular append: no collapse, no tag deletions. CI green on the public commit
+(Actions run 43680224691, all three jobs, the Examples job smokes E6 and E18).
+`0.9.4` shipped end to end: packed once from the public
 commit (deterministic CI path mapping, fresh obj, isolated restore cache), the four
 nupkgs pushed exactly once (the client auto-routes the adjacent snupkgs; pushes
 authenticate via the machine-local `packageSourceCredentials` — an anonymous PUT
 answers 401 — and serving is proven consumer-side), consumer restore byte-identical,
 QuickStart smoke green on the downloaded bytes — the symbol packages carry the full
-public SHA `02e495cc` and the `/_/` source mapping. `0.9.3` is the supported version;
-`0.9.2`, `0.9.1`, `0.9.0` and `0.8.2` source links still resolve (their commits are
+public SHA `ca814c7` and the `/_/` source mapping. `0.9.4` is the supported version;
+`0.9.3`, `0.9.2`, `0.9.1`, `0.9.0` and `0.8.2` source links still resolve (their commits are
 publicly referenced). Source links for `0.8.1` and earlier
 point at commits that are off every branch and tag; they resolve only while GitHub
 retains the unreferenced objects (no support purge was requested) —
@@ -41,8 +43,8 @@ users, and the `0.9.0` https default stays breaking as described; both CHANGELOG
 entries remain the consumer contract. The `0.7.1` known issues stay resolved (F1:
 CI-path-mapped PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1`
 published packages keep their historical metadata (immutable). The baseline rotation
-**ran with the `0.9.3` prep**: `build/baselines/` holds the published `0.9.2` bytes
-(sha256-verified; ADR-0001); the next rotation runs at the `0.9.4` prep per the
+**ran with the `0.9.4` prep**: `build/baselines/` holds the published `0.9.3` bytes
+(sha256-verified; ADR-0001); the next rotation runs at the next release prep per the
 rule below.
 
 ## What gets published
@@ -202,6 +204,62 @@ dotnet nuget locals http-cache --clear
 
 ## Release history
 
+- `0.9.4` (GitHub `ca814c7bf0a5ccce0997a2c2f2a185ed669049d7`, internal release commit
+  `8df333c`): published 2026-11-15 — library hardening patch (M37): the vendor
+  `expires_in` is now parsed with the canonical JSON-number grammar on all three
+  credential providers. Negative values reject through the protocol-violation path on
+  all three; non-finite and thousands-grouped values reject on the OAuth
+  client-credentials provider while the other two providers keep the `DefaultLifetime`
+  fallback, pending the lifetime-policy decision. **Nothing is cached on any
+  rejection.** No public API change. The benchmark regression gate gained a
+  statistics-count floor, per-arm N/P95 printing, parameter-aware comparison keys and
+  loud partial-run rules, and the SSE benchmark workload now measures real per-event
+  redaction over a bounded stream. The test battery was measured at the prep commit
+  `0c0fbc1` — the delta from it to the release commit `8df333c` is CHANGELOG text only
+  (the per-provider preamble correction); a fresh-context prep check passed `0c0fbc1`
+  (baseline sha256s against the published record, APICompat proven to have run, the
+  four sample smokes on documented ports including E6 and E18). Benchmarks:
+  the full `--filter '*'` release-record pass on a quiet machine ran at `0c0fbc1` —
+  gate vs the `0.9.3` baseline: `bench-compare: 13 methods compared, FAIL=0 WARN=2`
+  (the two WARNs are warn-mode absolute-mean drifts in the overhead suite,
+  OAuthCacheHitScrub x1.57 and PlainYarp x1.38 with the plain control arm itself
+  +38 % — machine-wide residual; same-run ratios normal or improved; the allocation
+  gate is green: `SseCredProx` 14,622 B inside its 12 % allowance, `SingleFlight`
+  23,456 B inside the max(32 B, 1 %) allowance). The post-publish refresh pass at the
+  release commit `8df333c` on a quiet machine printed the identical summary against
+  the same reference (`SseCredProx` 13,117 B, `SingleFlight` 23,449 B — inside the
+  measured scheduling band) and became `baselines/0.9.4/` (`MACHINE.md` records the
+  pass). Ceremony: packed **once** from a clean detached worktree at the PUBLIC commit
+  after tree equality with the reviewed `8df333c`, `-p:ContinuousIntegrationBuild=true`
+  from fresh obj into an isolated package cache; sanity loop ×4 passed (SourceLink
+  carries the full public SHA and the `/_/*`-to-raw mapping in every symbol package;
+  no builder-home paths in any pdb or dll); APICompat against the rotated `0.9.3`
+  baselines exit 0 on all four packages, no surface change; extended disclosure scan
+  over every member of all eight packages (49 members incl all eight
+  `*Content_Types*` members) zero hits, exit code captured without a pipe tail. The
+  push round: four nupkgs (the client auto-routes the adjacent snupkgs), each version
+  exactly once — every PUT answered `201 Created`; pushes authenticate via the
+  machine-local `packageSourceCredentials`, serving proven consumer-side. Nupkg
+  sha256: `CredProx`
+  `22783b2569a2a7b24b368f797f7c385bba537612dec7f144f9600babcd5b33d8`,
+  `CredProx.Abstractions`
+  `1bca146ccf0c9f8584f187059fedceab680309e9adc26cac8f9ee6cb8cbc2892`,
+  `CredProx.AzureKeyVault`
+  `00333b451cc846591e1934b0054fea7f8392633c9293b924b2a2afe2c72f6b00`,
+  `CredProx.Testing`
+  `a3e93911a35169610dcac7c894d25068f1f183c992d37ab138426e51e8a48998`. Consumer verify:
+  http-cache cleared, out-of-repo scratch project (the repo-level source mapping pins
+  `CredProx*` to the local feed, so an in-tree restore cannot prove the registry),
+  isolated package cache, all four downloads byte-identical to the pushed artifacts,
+  an independent re-check confirming the four hashes and the `ca814c7` commit in every
+  served nuspec, `samples/QuickStart` smoke green on those exact bytes (WireMock
+  journal shows the credential attached; the caller's echo shows it redacted). GitHub:
+  ONE squashed commit on the previous public tip `02e495cc`, noreply identity — a
+  regular append, no collapse, no tag deletions; the fresh-clone audit confirmed one
+  new commit, tree equality with `8df333c` and zero disclosure hits; CI green (Actions
+  run 43680224691, all three jobs, the Examples job including the E6 ADP and E18
+  CallerApiKey smoke steps). The benchmark baseline was refreshed from the pass at the
+  release commit (`baselines/0.9.4/`).
 - `0.9.3` (GitHub `02e495cc2d082903804b82a6da85565625ff8a25`, internal release commit
   `d3896d0`): published 2026-11-11 — patch release, samples, documentation, CI and
   benchmark-tooling only: **no library or public API change** (`src/` byte-identical to

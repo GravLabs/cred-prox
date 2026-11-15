@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using CredProx.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -37,10 +38,23 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
     private const string Rfc8693Grant = "urn:ietf:params:oauth:grant-type:token-exchange";
     private const string AccessTokenTokenType = "urn:ietf:params:oauth:token-type:access_token";
 
+    // M38 C: the upper cap on any vendor-stated lifetime (same fixed rule as the OAuth and
+    // JWT providers). Caching less than the vendor asked for is safe; caching more than a day
+    // is unbounded. Cap the SECONDS before TimeSpan.FromSeconds so values that overflow a
+    // TimeSpan (1e12 s = 1e19 ticks > MaxTicks, and 1e300) clamp instead of throwing.
+    private static readonly TimeSpan MaxLifetime = TimeSpan.FromHours(24);
+
     private readonly ITokenCache _cache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TimeProvider _time;
+    private readonly ILogger<TokenExchangeProvider>? _logger;
     private readonly JsonWebTokenHandler _handler = new();
+
+    // M38 B: an empty 'expires_in' means "no stated expiry" (absent), but the credential
+    // deserves one loud notice — the OAuth zero-lifetime rule (LogZeroLifetime) mirrored.
+    private readonly ConcurrentDictionary<string, byte> _emptyLifetimeLogged = new();
+    // M38 C: one notice per credential for a lifetime clamped to 24 h.
+    private readonly ConcurrentDictionary<string, byte> _cappedLifetimeLogged = new();
 
     // One configuration manager per Authority; each caches its discovery document and
     // refreshes on key rotation. Explicit-JwksUri mode fetches the set directly (the
@@ -70,10 +84,28 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         ITokenCache cache,
         IHttpClientFactory httpClientFactory,
         TimeProvider time)
+        : this(cache, httpClientFactory, time, logger: null)
+    {
+    }
+
+    /// <summary>Creates the provider with an operator log for lifetime notices.</summary>
+    /// <param name="cache">The token cache; the delegated key is <c>(credential, partition + subject)</c>.</param>
+    /// <param name="httpClientFactory">The factory for token-endpoint clients.</param>
+    /// <param name="time">The time source for expiry and token-clock decisions.</param>
+    /// <param name="logger">
+    /// Optional log for per-credential lifetime notices (the empty-<c>expires_in</c> warning, M38 B);
+    /// <c>null</c> stays silent, as the three-parameter overload does.
+    /// </param>
+    public TokenExchangeProvider(
+        ITokenCache cache,
+        IHttpClientFactory httpClientFactory,
+        TimeProvider time,
+        ILogger<TokenExchangeProvider>? logger)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _time = time ?? throw new ArgumentNullException(nameof(time));
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -350,11 +382,12 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
             if (options.ExpiresInField is not null &&
                 document.RootElement.TryGetProperty(options.ExpiresInField, out var expiresIn))
             {
-                lifetime = ReadLifetime(expiresIn, options.DefaultLifetime, credentialName);
+                lifetime = ReadLifetime(expiresIn, options.DefaultLifetime, credentialName, this);
             }
         }
         catch (Exception ex) when (ex is (JsonException or InvalidOperationException or FormatException or OverflowException)
-            and not OAuthClientCredentialsProvider.NegativeExpiresInRejectedException)
+            and not OAuthClientCredentialsProvider.NegativeExpiresInRejectedException
+            and not OAuthClientCredentialsProvider.InvalidExpiresInRejectedException)
         {
             throw new InvalidOperationException(
                 $"The token-exchange endpoint for credential '{credentialName}' returned a malformed token response.", ex);
@@ -454,32 +487,107 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         return value;
     }
 
-    private static TimeSpan ReadLifetime(JsonElement expiresIn, TimeSpan defaultLifetime, string credentialName)
+    private static TimeSpan ReadLifetime(
+        JsonElement expiresIn,
+        TimeSpan defaultLifetime,
+        string credentialName,
+        TokenExchangeProvider provider)
     {
-        // M37 fold 2 (hardening review F1 + fold ruling): parse with the canonical JSON-number
-        // grammar - invariant culture, no thousands grouping - like M37 A1 did for OAuth. The
-        // old overload was CurrentCulture + AllowThousands: a de-DE host read "3600.9" as
-        // 36 009 s (a ~10 h cache) and "1,000" as 1 s. A negative value is a protocol
-        // violation (M33 fault 7 mirrored from OAuth): reject through the IdP-failure path -
-        // nothing cached, the message names the field and credential id, never the value or
-        // the token. Zero keeps the documented DefaultLifetime fallback (M33), and so do
-        // non-finite, grouped and non-numeric values in M37 (plan §8.6 policy row).
-        var seconds = expiresIn.ValueKind switch
+        // M38 A+B: OAuth's rule verbatim (M37 A1 + M33 fault 7 + M38 B). Parse
+        // with the canonical JSON-number grammar — invariant culture, no thousands grouping — and
+        // reject the protocol violations through the IdP-failure path: non-finite, thousands-grouped
+        // and any other non-empty non-numeric string throw InvalidExpiresInRejectedException,
+        // negatives throw NegativeExpiresInRejectedException — nothing cached, the message names the
+        // field and the credential id, never the value or the token. Zero keeps the documented
+        // DefaultLifetime fallback (M33), and JSON null or any other non-number kind is simply
+        // absent. The empty string is absent too — but it is a vendor telling us it tried to state
+        // a lifetime and said nothing, so it falls back WITH one warning per credential (M38 B).
+        if (expiresIn.ValueKind == JsonValueKind.String && string.IsNullOrEmpty(expiresIn.GetString()))
+        {
+            provider.LogEmptyLifetime(credentialName);
+            return defaultLifetime;
+        }
+
+        var text = expiresIn.ValueKind == JsonValueKind.String ? expiresIn.GetString() : null;
+        double? seconds = expiresIn.ValueKind switch
         {
             JsonValueKind.Number => expiresIn.GetDouble(),
             JsonValueKind.String when double.TryParse(
-                expiresIn.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
-            _ => double.NaN,
+                text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            // Unmistakably meant as a number, parseable only via thousands grouping; accepting it
+            // would make the cached lifetime culture-dependent (the OAuth M37 A1 decision, mirrored).
+            JsonValueKind.String when IsGroupedNumber(text) => throw new OAuthClientCredentialsProvider.InvalidExpiresInRejectedException(
+                $"The token-exchange endpoint for credential '{credentialName}' returned a thousands-grouped 'expires_in' value; the token response was rejected."),
+            // M38 B: a non-empty string that is not a JSON number in any culture ("abc", "0x10",
+            // non-ASCII digits) is a protocol violation, not a silent DefaultLifetime.
+            JsonValueKind.String => throw new OAuthClientCredentialsProvider.InvalidExpiresInRejectedException(
+                $"The token-exchange endpoint for credential '{credentialName}' returned an unusable 'expires_in' string; the token response was rejected."),
+            _ => null,
         };
 
-        if (double.IsFinite(seconds) && seconds < 0)
+        if (seconds is double value)
         {
-            throw new OAuthClientCredentialsProvider.NegativeExpiresInRejectedException(
-                $"The token-exchange endpoint for credential '{credentialName}' returned a negative 'expires_in' value; the token response was rejected.");
+            if (!double.IsFinite(value))
+            {
+                // RFC 6749 counts seconds: Infinity/NaN are not lifetimes.
+                throw new OAuthClientCredentialsProvider.InvalidExpiresInRejectedException(
+                    $"The token-exchange endpoint for credential '{credentialName}' returned a non-finite 'expires_in' value; the token response was rejected.");
+            }
+
+            if (value < 0)
+            {
+                throw new OAuthClientCredentialsProvider.NegativeExpiresInRejectedException(
+                    $"The token-exchange endpoint for credential '{credentialName}' returned a negative 'expires_in' value; the token response was rejected.");
+            }
+
+            if (value > 0)
+            {
+                return provider.CapLifetime(value, credentialName); // M38 C: the 24 h cap
+            }
         }
 
-        return double.IsFinite(seconds) && seconds > 0
-            ? TimeSpan.FromSeconds(seconds)
-            : defaultLifetime;
+        // Zero or absent by here (the empty string already warned and returned above; every other
+        // non-empty string either parsed or threw).
+        return defaultLifetime;
     }
+
+    private TimeSpan CapLifetime(double seconds, string credentialName)
+    {
+        // M38 C: any accepted lifetime above 24 h is capped (early refresh only re-mints). The
+        // comparison is on the SECONDS so a value too large for a TimeSpan (1e12 s = 1e19 ticks >
+        // MaxTicks, 1e300) is capped BEFORE TimeSpan.FromSeconds — no OverflowException, no
+        // generic malformed-response re-wrap. One loud notice per credential (the zero/empty
+        // rule mirrored).
+        if (seconds <= MaxLifetime.TotalSeconds)
+        {
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        if (_logger is not null && _cappedLifetimeLogged.TryAdd(credentialName, 0))
+        {
+            _logger.LogWarning(
+                "The token-exchange endpoint for credential '{Credential}' returned an 'expires_in' longer than 24 hours; the token is cached for 24 hours.",
+                credentialName);
+        }
+
+        return MaxLifetime;
+    }
+
+    private void LogEmptyLifetime(string credentialName)
+    {
+        // Some vendors send "" to mean "no stated expiry" — serving DefaultLifetime is the
+        // documented behaviour (M38 B: "" is absent), but an empty lifetime field deserves one
+        // loud notice per credential, exactly like the OAuth zero-lifetime rule it mirrors.
+        if (_logger is null || !_emptyLifetimeLogged.TryAdd(credentialName, 0))
+        {
+            return;
+        }
+
+        _logger.LogWarning(
+            "The token-exchange endpoint for credential '{Credential}' returned an empty 'expires_in' value; the token is cached for the configured DefaultLifetime.",
+            credentialName);
+    }
+
+    private static bool IsGroupedNumber(string? text) =>
+        double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _);
 }

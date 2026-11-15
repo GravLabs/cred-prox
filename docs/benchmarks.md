@@ -55,7 +55,7 @@ Unchanged-code reruns on the shared development machine, 2026-11:
 | Overhead suite, same-run ratio (SSE arms) | ×1.6 – ×1.8 |
 | Overhead suite, absolute mean | up to ±45% |
 | Overhead suite, allocations (echo arms) | ≤ 7 B (≤0.1%) |
-| Overhead suite, allocations (SSE arms, 3-event bounded stream) | Six pinned passes at unchanged workload (2026-11-14, after the M37 workload change): SseCredProx 12,116–15,989 B around the 14,469 B reference — max upward excursion +1,520 B (10.5%); SsePlain 7,292–8,551 B vs the 8,766 B reference, never above it. At the 12% allowance the largest SseCredProx regression the gate can still miss is +1,736 B (+1,737 B is the smallest it catches) (the old ~5 s abandoned stream measured +3.3% / +5.6% of much larger values) |
+| Overhead suite, allocations (SSE arms, 3-event bounded stream) | Six pinned passes at unchanged workload (2026-11-14, after the M37 workload change): SseCredProx 12,116–15,989 B around the 14,469 B reference — max upward excursion +1,520 B (10.5%); SsePlain 7,292–8,551 B vs the 8,766 B reference, never above it. At the 12% allowance the largest SseCredProx regression the gate can still miss is +1,736 B (+1,737 B is the smallest it catches) (the old ~5 s abandoned stream measured +3.3% / +5.6% of much larger values). Interleaved A/B attribution (2026-11-15, six quiet-gated passes, the released 0.9.4 commit against the 0.10.0 candidate): the RELEASED code itself measured 14,434–16,578 B against the 13,117 B 0.9.4 reference while the candidate reached 25,567 B (1.95×) with none of the changed code in the arm's path — both trees exceeded the +12% line in 2 of 3 passes, so a fixed 12% FAIL cannot gate these arms |
 | Micro suites, same-run ratio | ≤ ×1.13 (worst: the sub-microsecond destination arms — nanosecond-scale measurements against nanosecond-scale denominators) |
 | Micro suites, absolute mean | ≤ +2.1% (except arms below ~100 ns, which track the ratio) |
 | Micro suites, allocations | ≤ 16 B — **except** `TokenCacheBenchmarks.SingleFlight`: band 23,444 – 23,520 B (≈76 B) at unchanged `src/` |
@@ -78,7 +78,7 @@ Exits non-zero on a regression. Per method:
 
 | Check | Overhead suite | Micro suites |
 |---|---|---|
-| Allocated bytes/op | FAIL above +32 B (SSE arms: +12%) | FAIL above +32 B (`SingleFlight`: max(32 B, 1% of baseline)) |
+| Allocated bytes/op | FAIL above +32 B (SSE arms: above +12% **WARN**, hard FAIL above 2.5× the baseline allocation) | FAIL above +32 B (`SingleFlight`: max(32 B, 1% of baseline)) |
 | Same-run ratio rise | WARN above ×1.15 (noise reaches ×2.8 — a fail-gate there would be theatre) | WARN above ×1.15, **FAIL** above ×1.25 (worst observed unchanged drift ×1.13 — the warn threshold sits above it) |
 | Absolute mean rise | WARN above ×1.15 | WARN above ×1.15 |
 | New-run `Statistics.N` below `N_FLOOR` (10) | WARN | WARN |
@@ -90,6 +90,16 @@ release pass. The key is the exact `(suite, method)` pair in `NOISY_ALLOC_FRACTI
 allocation. Every other arm keeps the flat 32 B: the flat epsilon is the default,
 never the proportional one. The applied allowance is printed on every gated arm as
 `[allow ...]`.
+
+The two SSE arms are warn-only above their allowance and hard-FAIL above 2.5× the
+baseline allocation (`GROSS_ALLOC_FAIL_MULT`, keyed by the same exact
+`(suite, method)` pair): the 2026-11-15 interleaved A/B attribution above shows the
+released code failing its own +12% FAIL at the same rate as the candidate (2 of 3
+passes in both trees): scheduling noise alone reaches 1.26× — the released-code
+control's own maximum (16,578 B) — and the observed candidate tail reaches 1.95×,
+so a FAIL there cannot identify a code change. A gross regression (buffering the stream end to end,
+a scrub blow-up) lands above 2.5× and still FAILs. Every other arm is unchanged:
+the flat 32 B stays a hard FAIL and so does `SingleFlight`'s max(32 B, 1%).
 
 The comparison key is `(suite class, method, Parameters)`: `[Params]`/`[Arguments]`
 rows stay distinct arms instead of silently collapsing into one, and the suite
@@ -107,7 +117,8 @@ FAILs below) — also counts: FAIL in fail-mode suites, WARN in warn-mode ones, 
 summary line can never read clean while a timing gate sat out.
 
 Overrides: `EPS_ALLOC`, `EPS_ALLOC_PCT` (explicit: re-fractions every proportional
-arm; unset: the per-arm fractions above; never touches flat arms), `RATIO_WARN`, `RATIO_FAIL`, `MEAN_WARN`,
+arm; the value is a FRACTION of the baseline — `0.08` allows 8%, `1` allows 100%;
+unset: the per-arm fractions above; never touches flat arms), `RATIO_WARN`, `RATIO_FAIL`, `MEAN_WARN`,
 `N_FLOOR` (statistics-count warn floor, default 10), `ALLOW_PARTIAL=1` (accept a
 partial run, loudly), and `TIMING_MODE=fail|warn` to
 force one mode for all suites — for example on a dedicated benchmarking machine,
@@ -151,7 +162,7 @@ micro method were each caught by the gate during development of the script
 4. Compare the previous release's baseline against the new run before overwriting
    history, so a regression is never baked into the new reference.
 
-The 0.9.3 baseline lives in `baselines/0.9.3/`.
+The 0.9.4 baseline lives in `baselines/0.9.4/`.
 
 ## A quieter machine (recommendation)
 

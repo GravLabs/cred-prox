@@ -141,15 +141,21 @@ public sealed class TokenExchangeOptions : IHasAttachment, IHasPartitionConfig, 
     /// <summary>
     /// The JSON field carrying the lifetime in seconds; <see langword="null"/> skips it.
     /// Default <c>expires_in</c>. Parsed as a JSON number independently of the machine
-    /// culture; a finite positive value sets the lifetime, zero, a non-finite value or
-    /// an unparseable one falls back to <see cref="DefaultLifetime"/>, and a negative
-    /// value rejects the response (M37 fold 2, mirroring the M33 ruling).
+    /// culture; a finite positive value sets the lifetime. The value is ABSENT when the
+    /// field is missing, JSON null, an empty string (one warning per credential) or
+    /// <c>0</c>, and then <see cref="DefaultLifetime"/> applies; a negative, non-finite,
+    /// thousands-grouped or otherwise non-numeric value is a protocol violation: the
+    /// response is rejected and nothing is cached (the OAuth rule — M33/M37 there, M38 A+B
+    /// here). An accepted lifetime above 24 hours is capped to 24 hours with one warning
+    /// per credential (M38 C); <see cref="DefaultLifetime"/> itself is never capped.
     /// </summary>
     public string? ExpiresInField { get; set; } = "expires_in";
 
     /// <summary>
-    /// Lifetime assumed when the response carries no expiry field or its value is zero,
-    /// non-finite or unparseable. Default one hour.
+    /// Lifetime assumed when the response carries no usable expiry: the expiry field absent,
+    /// JSON null, an empty string, or <c>0</c>. A negative, non-finite, thousands-grouped or
+    /// otherwise non-numeric value does not fall back; it rejects the response (M38 A+B).
+    /// Default one hour.
     /// </summary>
     public TimeSpan DefaultLifetime { get; set; } = TimeSpan.FromHours(1);
 

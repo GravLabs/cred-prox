@@ -34,11 +34,14 @@ public sealed class OAuthClientCredentialsOptions : IHasAttachment, IHasPartitio
 
     /// <summary>
     /// Lifetime assumed when the token response carries no usable <c>expires_in</c>: the
-    /// field absent, non-numeric, or <c>0</c> (some IdPs use 0 for "no stated expiry"; that
-    /// case also logs one warning per credential). A <b>negative</b> <c>expires_in</c> is a
-    /// protocol violation and does not fall back: the response is rejected, the request
-    /// fails <c>credprox.credential_unavailable</c> (502), and nothing is cached.
-    /// Default one hour.
+    /// field absent, JSON null, an empty string (logs one warning per credential, M38 B),
+    /// or <c>0</c> (some IdPs use 0 for "no stated expiry"; that case also logs one warning
+    /// per credential). A <b>negative</b>, non-finite, thousands-grouped or otherwise
+    /// non-numeric <c>expires_in</c> is a protocol violation and does not fall back: the
+    /// response is rejected, the request fails <c>credprox.credential_unavailable</c> (502),
+    /// and nothing is cached. An accepted lifetime above 24 hours is capped to 24 hours
+    /// with one warning per credential (M38 C); <see cref="DefaultLifetime"/> itself is
+    /// never capped. Default one hour.
     /// </summary>
     public TimeSpan DefaultLifetime { get; set; } = TimeSpan.FromHours(1);
 

@@ -176,7 +176,16 @@ public sealed class InMemoryTokenCache : ITokenCache
     private DateTimeOffset ComputeRefreshAt(DateTimeOffset startedAt, DateTimeOffset expiresAt)
     {
         var refreshAt = startedAt + (expiresAt - startedAt) * _options.RefreshFraction;
-        var skewBound = expiresAt - _options.Skew;
+        // M38: expiresAt - Skew used to underflow the DateTimeOffset range for a year-1
+        // expiry and threw ArgumentOutOfRangeException from inside the cache — outside every
+        // provider catch filter, so the documented 502 mapping never happened. Floor at
+        // DateTimeOffset.MinValue instead: such an entry simply reads as already due.
+        // Defensive on its own — the JWT provider already rejects past absolute expiries.
+        // Compared as expiresAt - MinValue (never negative, never overflows a TimeSpan) so an
+        // arbitrarily large Skew — the option validates only non-negativity — cannot throw here.
+        var skewBound = expiresAt - DateTimeOffset.MinValue < _options.Skew
+            ? DateTimeOffset.MinValue
+            : expiresAt - _options.Skew;
         return skewBound < refreshAt ? skewBound : refreshAt;
     }
 

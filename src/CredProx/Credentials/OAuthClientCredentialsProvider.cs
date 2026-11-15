@@ -33,11 +33,18 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
     /// <summary>The name of the HttpClient used for token calls.</summary>
     public const string HttpClientName = "credprox-token";
 
+    // M38 C: the upper cap on any vendor-stated lifetime. An early refresh only re-mints, so
+    // caching less than the vendor asked for is safe; caching more (a days-long "expires_in")
+    // keeps a token CredProx cannot bound. Not a new option - one fixed rule for all providers.
+    private static readonly TimeSpan MaxLifetime = TimeSpan.FromHours(24);
+
     private readonly ITokenCache _cache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TimeProvider _time;
     private readonly ILogger<OAuthClientCredentialsProvider>? _logger;
     private readonly ConcurrentDictionary<string, byte> _zeroLifetimeLogged = new();
+    private readonly ConcurrentDictionary<string, byte> _emptyLifetimeLogged = new();
+    private readonly ConcurrentDictionary<string, byte> _cappedLifetimeLogged = new();
 
     /// <summary>Creates the provider.</summary>
     /// <param name="cache">The token cache keyed by <c>(credential, partition)</c>.</param>
@@ -213,6 +220,14 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
         // ("1e400" = +∞) is the culture-independent route.
         // Before the IsFinite guard at the return all of these became a silent
         // DefaultLifetime - a full-hour token lifetime minted from a nonsense expiry.
+        // M38 B: the empty string is the one string that is absent, not a violation - it falls
+        // back WITH one warning per credential (the zero-lifetime rule mirrored).
+        if (expiresIn.ValueKind == JsonValueKind.String && string.IsNullOrEmpty(expiresIn.GetString()))
+        {
+            provider.LogEmptyLifetime(credentialName);
+            return defaultLifetime;
+        }
+
         var text = expiresIn.ValueKind == JsonValueKind.String ? expiresIn.GetString() : null;
         double? seconds = expiresIn.ValueKind switch
         {
@@ -224,6 +239,11 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
             // rationale in the CHANGELOG).
             JsonValueKind.String when IsGroupedNumber(text) => throw new InvalidExpiresInRejectedException(
                 $"The OAuth token endpoint for credential '{credentialName}' returned a thousands-grouped 'expires_in' value; the token response was rejected."),
+            // M38 B: a non-empty string that is not a JSON number in any culture ("abc", "0x10",
+            // non-ASCII digits) is a protocol violation, not a silent DefaultLifetime. This was
+            // the last silent-fallback hole in the string arm.
+            JsonValueKind.String => throw new InvalidExpiresInRejectedException(
+                $"The OAuth token endpoint for credential '{credentialName}' returned an unusable 'expires_in' string; the token response was rejected."),
             _ => null,
         };
 
@@ -257,10 +277,32 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
         }
 
         // Finite and positive by here (negatives threw, zero falls back); NaN/Infinity
-        // cannot reach the return.
+        // cannot reach the return. M38 C: above 24 h the lifetime is capped - the seconds
+        // comparison also takes the TimeSpan-overflow values (1e12, 1e300) out of
+        // TimeSpan.FromSeconds, where they used to throw into the malformed-response re-wrap.
         return seconds is double positive && positive > 0
-            ? TimeSpan.FromSeconds(positive)
+            ? provider.CapLifetime(positive, credentialName)
             : defaultLifetime;
+    }
+
+    private TimeSpan CapLifetime(double seconds, string credentialName)
+    {
+        // M38 C: early refresh only re-mints, so caching below the vendor's request is safe;
+        // caching above a day is unbounded. One loud notice per credential, the zero-lifetime
+        // rule mirrored.
+        if (seconds <= MaxLifetime.TotalSeconds)
+        {
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        if (_logger is not null && _cappedLifetimeLogged.TryAdd(credentialName, 0))
+        {
+            _logger.LogWarning(
+                "The OAuth token endpoint for credential '{Credential}' returned an 'expires_in' longer than 24 hours; the token is cached for 24 hours.",
+                credentialName);
+        }
+
+        return MaxLifetime;
     }
 
     private static bool IsGroupedNumber(string? text) =>
@@ -277,6 +319,21 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
 
         _logger.LogWarning(
             "The OAuth token endpoint for credential '{Credential}' returned 'expires_in' 0; the token is cached for the configured DefaultLifetime.",
+            credentialName);
+    }
+
+    private void LogEmptyLifetime(string credentialName)
+    {
+        // Present-but-empty is how some gateways render "no stated expiry" (M38 B ruling): it
+        // means absent - DefaultLifetime - but the credential deserves one loud notice, the
+        // zero-lifetime rule beside it mirrored.
+        if (_logger is null || !_emptyLifetimeLogged.TryAdd(credentialName, 0))
+        {
+            return;
+        }
+
+        _logger.LogWarning(
+            "The OAuth token endpoint for credential '{Credential}' returned an empty 'expires_in' value; the token is cached for the configured DefaultLifetime.",
             credentialName);
     }
 
@@ -298,8 +355,9 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
     }
 
     /// <summary>
-    /// Signals a token response rejected for a non-finite or thousands-grouped <c>expires_in</c>
-    /// (M37 A1). Same IdP-failure path as <see cref="NegativeExpiresInRejectedException"/>:
+    /// Signals a token response rejected for a non-finite, thousands-grouped or otherwise
+    /// non-numeric <c>expires_in</c> (M37 A1, extended by M38 B). Same IdP-failure path as
+    /// <see cref="NegativeExpiresInRejectedException"/>:
     /// credential_unavailable, nothing cached, the message names the field and credential id,
     /// never the value or the token.
     /// </summary>

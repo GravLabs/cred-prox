@@ -74,23 +74,37 @@ public sealed class JwtAssertionOptions : IHasAttachment, IHasPartitionConfig, I
     /// <summary>
     /// The JSON field carrying the lifetime in seconds; <see langword="null"/> skips it.
     /// Default <c>expires_in</c>. Parsed as a JSON number independently of the machine
-    /// culture; a finite positive value sets the lifetime, while zero, a negative value,
-    /// a non-finite one or an unparseable one is unusable (M37 fold 2). A negative value
-    /// rejects the response unless <see cref="ExpiresAtField"/> carries a usable expiry.
+    /// culture; a finite positive value sets the lifetime. Zero and an empty string are
+    /// ABSENT (the empty string logs one warning per credential) and fall through to
+    /// <see cref="ExpiresAtField"/> and then <see cref="DefaultLifetime"/>. A negative,
+    /// non-finite, thousands-grouped or otherwise non-numeric value is a protocol violation:
+    /// it gives way to a usable <see cref="ExpiresAtField"/> expiry (M37 precedence), but
+    /// otherwise rejects the response with nothing cached (M38 A+B). An accepted lifetime
+    /// above 24 hours is capped to 24 hours with one warning per credential (M38 C).
     /// </summary>
     public string? ExpiresInField { get; set; } = "expires_in";
 
     /// <summary>
-    /// The JSON field carrying an ISO 8601 absolute expiry (GitHub App's
-    /// <c>expires_at</c>); consulted when <see cref="ExpiresInField"/> is absent or
-    /// unusable (zero, negative, non-finite or unparseable).
+    /// The JSON field carrying an absolute expiry (GitHub App's <c>expires_at</c>);
+    /// consulted when <see cref="ExpiresInField"/> is absent or unusable (zero, negative,
+    /// non-finite or unparseable). Read culture-invariantly: an offset-less text value is
+    /// UTC (never host-local), a JSON number is epoch seconds, and a present-but-unparseable
+    /// value falls back with one warning per credential (M38 D). An expiry already at or before
+    /// the current time is unusable — like a negative <see cref="ExpiresInField"/>, it rejects
+    /// the response when no usable <see cref="ExpiresInField"/> resolved it. A
+    /// resulting lifetime above 24 hours is capped to 24 hours with one warning per credential
+    /// (M38 C).
     /// <see langword="null"/> skips it.
     /// </summary>
     public string? ExpiresAtField { get; set; }
 
     /// <summary>
-    /// Lifetime assumed when the response carries no usable expiry (no expiry field, or
-    /// one whose value is zero, non-finite or unparseable). Default one hour.
+    /// Lifetime assumed when the response carries no usable expiry: no expiry field, an
+    /// <see cref="ExpiresInField"/> that is zero or an empty string, and no usable
+    /// <see cref="ExpiresAtField"/>. An unusable-but-invalid value (negative, non-finite,
+    /// thousands-grouped, non-numeric) does not fall back; it rejects the response when no
+    /// expiry field resolved (M38 A+B). <see cref="DefaultLifetime"/> itself is never capped
+    /// (M38 C). Default one hour.
     /// </summary>
     public TimeSpan DefaultLifetime { get; set; } = TimeSpan.FromHours(1);
 
