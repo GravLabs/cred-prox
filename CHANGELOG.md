@@ -5,6 +5,73 @@ All notable changes to CredProx are documented here. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, the public API may
 change between minor versions; `[Experimental]` APIs may change at any time.
 
+## [Unreleased]
+
+## [0.9.4] - 2026-11-15
+
+Library hardening (M37) only — the vendor `expires_in` is parsed with the canonical
+JSON-number grammar on all three credential providers. Negative values reject through
+the protocol-violation path on all three; non-finite and thousands-grouped values
+reject on the OAuth client-credentials provider, while the other two providers keep
+the `DefaultLifetime` fallback, pending the lifetime-policy decision. Nothing is
+cached on any rejection; no public API change (`src/` additions are internal types).
+
+### Changed
+
+- The benchmark regression gate (`scripts/bench-compare.sh`) hardened (M37):
+  a new-run arm with `Statistics.N` below `N_FLOOR` (10) warns and every `ok`
+  line prints N and P95; `[Params]` rows keep `Parameters` in the comparison
+  key and a row duplicated in title AND parameters FAILs; a `RATIO-SKIPPED`
+  arm counts (FAIL in fail-mode suites, WARN in warn-mode ones) so the summary
+  never reads clean while a timing gate sat out; `ALLOW_PARTIAL=1` with zero
+  methods compared FAILs; inverted `RATIO_WARN`/`RATIO_FAIL` refuses to start
+  (exit 2). The SSE workload now measures real per-event redaction over a
+  bounded three-event stream, the Overhead baseline was re-captured for it,
+  and the SSE allocation allowance is re-ruled 8% → 12% on a measured six-pass
+  band: max upward excursion over the reference is +1,520 B (10.5%), so 12%
+  covers the noise and misses no regression above +1,736 B on the SSE arms
+  (`docs/benchmarks.md`, `baselines/0.9.3/MACHINE.md`).
+- `TokenExchangeProvider` and `JwtAssertionProvider` now reject a negative `expires_in` — the caller gets `credprox.credential_unavailable` and nothing is cached, where a `DefaultLifetime` token was cached before (see the Fixed entry for the full contract, including the `expires_at` precedence `JwtAssertionProvider` keeps).
+
+### Fixed
+
+- `OAuthClientCredentialsProvider` now rejects a token response whose `expires_in`
+  is a non-finite numeric string (`"Infinity"`, `"-Infinity"`, `"NaN"`) or
+  thousands-grouped (`"1,000"`). The old `double.TryParse` overload accepted
+  `Infinity`/`-Infinity` only under the invariant culture (an
+  InvariantGlobalization host); under ICU cultures the non-finite symbol is
+  `∞`, so those two names do not parse there (`NaN` parses under several ICU
+  cultures), while exponent overflow (`"1e400"` = +∞) arrives the same way on
+  every host. Whatever did parse as non-finite fell silently through to
+  `DefaultLifetime` — a token minted from a nonsense expiry was cached and
+  served for a full hour. Rejection
+  follows the M33 negative-`expires_in` protocol-violation path: nothing cached,
+  `credprox.credential_unavailable`, and a message naming the field and the
+  credential id, never the value or the token. String `expires_in` now parses
+  with the canonical JSON-number grammar (`NumberStyles.Float`,
+  `CultureInfo.InvariantCulture`) instead of the machine's current culture with
+  thousands grouping. Grouped digits are rejected deliberately: `expires_in` is
+  a JSON number, and a grouped string parses only under some cultures — accepting
+  it would make the cached token lifetime depend on the machine's current
+  culture, and rejecting a value that is unmistakably a malformed number is the
+  safer default over a silent fallback. The `expires_in: 0` one-warning
+  `DefaultLifetime` fallback is unchanged.
+- `TokenExchangeProvider` and `JwtAssertionProvider` parse a string `expires_in`
+  with the canonical JSON-number grammar (`NumberStyles.Float`,
+  `CultureInfo.InvariantCulture`), as the OAuth provider now does: on a
+  decimal-comma host `"3600.9"` cached a ~10-hour lifetime (and `"1,000"`
+  collapsed to one second), so the cached token lifetime no longer depends on
+  the machine's current culture. Both also reject a negative `expires_in`
+  through the M33 protocol-violation path — nothing cached, the message naming
+  the field and the credential id, never the value or the token. The ordering
+  differs where an absolute expiry exists: `TokenExchangeProvider` has no
+  absolute-expiry field, so a negative `expires_in` always rejects;
+  `JwtAssertionProvider` treats it as unusable rather than an instant throw — a
+  valid `ExpiresAtField` keeps precedence, and only a negative value with no
+  usable `expires_at` rejects. Zero stays its own unchanged branch in both:
+  never rejected, falling back to `DefaultLifetime` (and, in
+  `JwtAssertionProvider`, to a valid `expires_at` first).
+
 ## [0.9.3] - 2026-11-11
 
 Samples, documentation, CI and benchmark reference data only — no library or public API change.

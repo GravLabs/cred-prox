@@ -401,6 +401,88 @@ public sealed class OAuthClientCredentialsProviderTests
         Assert.Equal(2, handler.Requests.Count);      // re-mints once the backoff lapses
     }
 
+    // --- M37 A1 (plan §8.6): non-finite and grouped-digit expires_in strings REJECT too ---
+    //
+    // The old double.TryParse(string, out _) overload was CurrentCulture with AllowThousands:
+    // "1,000" parsed or not depending on the machine. Its non-finite NAMES are host-dependent
+    // too - "Infinity"/"-Infinity" parse only under the invariant culture (what an
+    // InvariantGlobalization host runs), while ICU cultures render the symbol as ∞ and reject
+    // the names ("NaN" still parses under en-US/de-DE/sv-SE, not ar-EG). The culture-independent
+    // route a non-finite value actually arrived by is exponent overflow: "1e400" is +∞ under
+    // every culture (measured across a five-culture matrix in the M37 hardening review). Pre-M37 A1 all of these
+    // fell through the IsFinite guard at the return to DefaultLifetime - a full-hour token
+    // lifetime minted from a nonsense expiry, silently. They are now protocol violations on
+    // the same IdP-failure path as a negative value: rejected, nothing cached, message names
+    // the field and credential id, never the value or the token. These assert the base
+    // exception type only so they compile against pre-M37 sources for the recorded RED run
+    // (the "1e400" rows included: cached silently at f34b86e in every culture).
+
+    [Theory]
+    [InlineData("\"Infinity\"")]
+    [InlineData("\"-Infinity\"")]
+    [InlineData("\"NaN\"")]
+    [InlineData("\"1e400\"")]   // +∞ via exponent overflow: the host-independent non-finite
+    [InlineData("\"-1e400\"")]  // -∞ the same way; RED at f34b86e, cached as DefaultLifetime
+    public async Task NonFiniteExpiresInString_RejectsResponse_CachesNothing(string json)
+    {
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(new StubHttpHandler(
+            HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}"""), time);
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+        // Record, not ThrowsAsync: the specific rejection subtype does not exist pre-M37
+        // (the RED run compiles against f34b86e), and ThrowsAsync pins the exact type.
+        // NotNull is what fails RED at f34b86e - the pre-fix code caches silently.
+        var ex = await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask());
+        Assert.NotNull(ex);
+        Assert.IsAssignableFrom<InvalidOperationException>(ex); // the documented IdP-failure type
+        Assert.IsNotType<InvalidOperationException>(ex);         // a specific rejection, not the re-wrap
+        Assert.Contains("expires_in", ex.Message);       // names the field...
+        Assert.Contains("test", ex.Message);             // ...and the credential id...
+        Assert.DoesNotContain("tok-1", ex.Message);      // ...never the token or the value.
+        Assert.DoesNotContain("Infinity", ex.Message);
+        Assert.DoesNotContain("NaN", ex.Message);
+        Assert.DoesNotContain("malformed", ex.Message);  // the documented rejection, not the re-wrap
+        Assert.Single(handler.Requests);
+
+        Assert.NotNull(await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask()));
+        Assert.Single(handler.Requests);                 // backoff re-throw: nothing was cached
+
+        time.SetUtcNow(time.GetUtcNow() + TimeSpan.FromSeconds(6)); // past NegativeCacheTtl
+        Assert.NotNull(await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask()));
+        Assert.Equal(2, handler.Requests.Count);         // re-mints once the backoff lapses
+    }
+
+    [Theory]
+    [InlineData("\"1,000\"")]  // grouped digits: parses ONLY via AllowThousands, culture-dependent
+    public async Task GroupedDigitsExpiresInString_RejectsResponse_CachesNothing(string json)
+    {
+        // M37 A1 decision: grouped digits REJECT (the safer default, rationale in the
+        // CHANGELOG) - "1,000" is unmistakably meant as a number, and accepting it would
+        // make the cached token lifetime depend on the machine's current culture.
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(new StubHttpHandler(
+            HttpStatusCode.OK, $$"""{"access_token":"tok-1","expires_in":{{json}}}"""), time);
+
+        var options = OAuthOptions(OAuthClientAuthentication.BasicHeader);
+
+        var ex = await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(options, Secrets(), Context(), default).AsTask());
+        Assert.NotNull(ex);                                // RED at f34b86e: cached silently there
+        Assert.IsAssignableFrom<InvalidOperationException>(ex);
+        Assert.IsNotType<InvalidOperationException>(ex);   // a specific rejection, not the re-wrap
+        Assert.Contains("expires_in", ex.Message);
+        Assert.Contains("test", ex.Message);
+        Assert.DoesNotContain("tok-1", ex.Message);
+        Assert.DoesNotContain("1,000", ex.Message);
+        Assert.DoesNotContain("malformed", ex.Message);
+        Assert.Single(handler.Requests);
+    }
+
     [Theory]
     [InlineData("0")]
     [InlineData("\"0\"")]

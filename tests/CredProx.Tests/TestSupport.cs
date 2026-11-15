@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using CredProx;
 using CredProx.Abstractions;
@@ -139,4 +140,23 @@ internal static class TestSecrets
 
         return new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
     }
+}
+
+/// <summary>
+/// Overrides <see cref="CultureInfo.CurrentCulture"/> for the duration of a using scope and
+/// restores it on dispose (M37 fold 2: <c>expires_in</c> parsing must not depend on the host
+/// culture; the tests asserting the pre-fix culture damage need a decimal-comma culture to
+/// prove it). Flows with the async call chain like any ExecutionContext state.
+/// </summary>
+internal sealed class CultureOverride : IDisposable
+{
+    private readonly CultureInfo _previous;
+
+    public CultureOverride(string name)
+    {
+        _previous = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = new CultureInfo(name);
+    }
+
+    public void Dispose() => CultureInfo.CurrentCulture = _previous;
 }

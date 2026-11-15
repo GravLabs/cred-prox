@@ -11,26 +11,28 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-10): `0.9.2` is **published on the registry** — the performance
-patch on the collapsed public line: hot-path allocation dropped about 77 % per scrubbed
-proxied request and 24–30 % per scrubbed SSE connection against 0.9.1 (allocation
-gates on the committed benchmark), the pooling and dispose hardening keeps a pooled
-buffer from ever being returned while a read is in flight (post-dispose reads refuse on
-every path), and the repository gained the M34 benchmark regression suite with its
-release comparison gate. No public API change. GitHub `main` and tag `0.9.2` sit on
-**one squashed commit**
-`ed6a527ff308458b209a96cb85e71c994aa252e0` (noreply author; tree identical to the
-internal release commit `7dc8c70`) appended on the previous public tip `c243c5f` — a
+Current state (2026-11-11): `0.9.3` is **published on the registry** — the samples,
+documentation, CI and benchmark-tooling patch: the E6 ADP example rebuilt to the
+known-working certificate arrangement (one named mTLS client certificate on both the
+token call and the API calls, base64 passwordless PFX, Key Vault variant), the new E18
+caller API-key example, fixed real-vendor secret-delivery instructions across the ADP,
+Spotify, MicrosoftGraph and QuickStart examples, CI extended to smoke E6 and E18, and
+the benchmark regression gate's per-arm allocation allowance for the timing-sensitive
+single-flight arm. No library or public API change — `src/` is byte-identical to
+`0.9.2`. GitHub `main` and tag `0.9.3` sit on **one squashed commit**
+`02e495cc2d082903804b82a6da85565625ff8a25` (noreply author; tree identical to the
+internal release commit `d3896d0`) appended on the previous public tip `ed6a527` — a
 regular append: no collapse, no tag deletions. CI green on the release commit
-(Actions run 42884590564). `0.9.2` shipped end to end: packed once from the public
+(Actions run 43039565880, all three jobs — the Examples job now also smokes E6 and
+E18). `0.9.3` shipped end to end: packed once from the public
 commit (deterministic CI path mapping, fresh obj, isolated restore cache), the four
 nupkgs pushed exactly once (the client auto-routes the adjacent snupkgs; pushes
 authenticate via the machine-local `packageSourceCredentials` — an anonymous PUT
 answers 401 — and serving is proven consumer-side), consumer restore byte-identical,
 QuickStart smoke green on the downloaded bytes — the symbol packages carry the full
-public SHA `ed6a527f` and the `/_/` source mapping. `0.9.2` is the supported version;
-`0.9.1`, `0.9.0` and `0.8.2` source links still resolve (their commits are publicly
-referenced). Source links for `0.8.1` and earlier
+public SHA `02e495cc` and the `/_/` source mapping. `0.9.3` is the supported version;
+`0.9.2`, `0.9.1`, `0.9.0` and `0.8.2` source links still resolve (their commits are
+publicly referenced). Source links for `0.8.1` and earlier
 point at commits that are off every branch and tag; they resolve only while GitHub
 retains the unreferenced objects (no support purge was requested) —
 **unsupported-by-construction** (see the `0.8.1` history entry). The Entra
@@ -39,8 +41,8 @@ users, and the `0.9.0` https default stays breaking as described; both CHANGELOG
 entries remain the consumer contract. The `0.7.1` known issues stay resolved (F1:
 CI-path-mapped PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1`
 published packages keep their historical metadata (immutable). The baseline rotation
-**ran with the `0.9.2` prep**: `build/baselines/` holds the published `0.9.1` bytes
-(sha256-verified; ADR-0001); the next rotation runs at the `0.9.3` prep per the
+**ran with the `0.9.3` prep**: `build/baselines/` holds the published `0.9.2` bytes
+(sha256-verified; ADR-0001); the next rotation runs at the `0.9.4` prep per the
 rule below.
 
 ## What gets published
@@ -200,6 +202,72 @@ dotnet nuget locals http-cache --clear
 
 ## Release history
 
+- `0.9.3` (GitHub `02e495cc2d082903804b82a6da85565625ff8a25`, internal release commit
+  `d3896d0`): published 2026-11-11 — patch release, samples, documentation, CI and
+  benchmark-tooling only: **no library or public API change** (`src/` byte-identical to
+  `0.9.2`). Content: the E6 ADP example rebuilt to the known-working certificate
+  arrangement (OAuth client credentials plus one named mTLS client certificate
+  presented on both the token call and the API calls, base64 passwordless PKCS#12,
+  with a Key Vault variant whose live rotation reaching new connections the offline
+  stack witnesses); the new E18 caller API-key example (keys as pure configuration,
+  missing and wrong keys indistinguishable, the key stripped before forwarding);
+  fixed real-vendor secret-delivery instructions in the ADP, Spotify, MicrosoftGraph
+  and QuickStart examples (the previously published hyphenated environment-variable
+  form is refused by bash; the published secret names keep their hyphens, delivery
+  now uses one bash-valid form); CI extended to smoke E6 and E18. The benchmark
+  regression gate gained a per-arm allocation allowance for the timing-sensitive
+  single-flight arm — owner ruling: fix the gate, no release exemption.
+  `TokenCacheBenchmarks.SingleFlight` runs 64 concurrent waiters on a cold key, and
+  its per-op allocation follows scheduling: measured band 23,444–23,520 B at
+  unchanged `src/`. The allowance keys on the exact `(suite, method)` pair, is
+  max(32 B, 1 % of the baseline), leaves every other arm on the flat 32 B default,
+  keeps the SSE arms at 8 %, and prints the applied allowance on every gated arm
+  (`docs/benchmarks.md`). Benchmarks: the full `--filter '*'` release-record pass on
+  a quiet machine ran at commit `603dc5b` — the deltas from it to the release commit
+  `d3896d0` are text and gate-script only (`CHANGELOG.md`, `docs/benchmarks.md`,
+  `docs/credprox-plan.md`, `scripts/bench-compare.sh`); `src/` and the benchmark
+  code are byte-identical — gate summary:
+  `bench-compare: 13 methods compared, FAIL=0 WARN=3` (the three WARNs are the known
+  overhead-suite warn-mode mean drifts; the allocation gate is green and
+  `SingleFlight` measured 23,383 B, below the committed baseline unaided). The
+  post-publish refresh pass at the release commit `d3896d0` printed the identical
+  summary against the `0.9.2` reference (`SingleFlight` 23,520 B, inside the
+  measured band) and became `baselines/0.9.3/` (`MACHINE.md` records the pass). The
+  test battery was measured at the prep commit `57bef10` — the deltas from it to
+  `d3896d0` are text-only and gate-script-only. A fresh-context prep check passed
+  `57bef10` (baseline sha256s against the published record, APICompat proven to have
+  run); the gate change passed its own check at `54cfef7` (identical-bytes re-gate,
+  sabotage probes both directions, untouched-coverage proof); the override-fold fix
+  passed at `d3896d0`; the samples rode the M36 security pass and two rechecks.
+  Ceremony: packed **once** from a clean detached worktree at the PUBLIC commit after
+  tree equality with the reviewed `d3896d0`, `-p:ContinuousIntegrationBuild=true`
+  from fresh obj into an isolated package cache; sanity loop ×4 passed (SourceLink
+  carries the full public SHA and the `/_/*`-to-raw mapping in every symbol package;
+  no builder-home paths in any pdb or dll); APICompat against the rotated `0.9.2`
+  baselines exit 0, no surface change; extended disclosure scan over every member of
+  all eight packages (49 members incl all eight `*Content_Types*` members) zero hits,
+  exit code captured without a pipe tail. The push round: four nupkgs (the client
+  auto-routes the adjacent snupkgs), each version exactly once — pushes authenticate
+  via the machine-local `packageSourceCredentials`, serving proven consumer-side.
+  Nupkg sha256: `CredProx`
+  `c4624cb4e762905d639f80832be44ffd96acbdd034da1ebbea01653a39271f3e`,
+  `CredProx.Abstractions`
+  `0bd160689017c7991135d9d3f15b7d509e6f8fa188b37bf871c1d770b1b2e7c1`,
+  `CredProx.AzureKeyVault`
+  `360d5dd9c5c7ee886ad5d158bb081eb8c11b2eb4e7f2d1a70a6ba46e4f0f2e9e`,
+  `CredProx.Testing`
+  `02709b32ac71ecf3c0b924b88dac8b8439e0f2aab2f2677ed0bf0799f2c6adce`. Consumer verify:
+  http-cache cleared, out-of-repo scratch project (the repo-level source mapping pins
+  `CredProx*` to the local feed, so an in-tree restore cannot prove the registry),
+  isolated package cache, all four downloads byte-identical to the pushed artifacts,
+  an independent re-check confirming the four hashes and the `02e495cc` commit in
+  every nuspec, `samples/QuickStart` smoke green on those exact bytes (WireMock
+  journal shows the credential attached; the caller's echo shows it redacted).
+  GitHub: ONE squashed commit on the previous public tip, noreply identity — a
+  regular append, no collapse, no tag deletions; CI green (Actions run 43039565880,
+  all three jobs, the Examples job now including the E6 ADP and E18 CallerApiKey
+  smoke steps). The benchmark baseline was refreshed from the pass at the release
+  commit (`baselines/0.9.3/`).
 - `0.9.2` (GitHub `ed6a527ff308458b209a96cb85e71c994aa252e0`, internal release commit
   `7dc8c70`): published 2026-11-10 — patch release, the first gated by the M34
   benchmark gate: a full `--filter '*'` pass on a quiet machine at the prep commit

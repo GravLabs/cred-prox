@@ -73,19 +73,24 @@ public sealed class JwtAssertionOptions : IHasAttachment, IHasPartitionConfig, I
 
     /// <summary>
     /// The JSON field carrying the lifetime in seconds; <see langword="null"/> skips it.
-    /// Default <c>expires_in</c>.
+    /// Default <c>expires_in</c>. Parsed as a JSON number independently of the machine
+    /// culture; a finite positive value sets the lifetime, while zero, a negative value,
+    /// a non-finite one or an unparseable one is unusable (M37 fold 2). A negative value
+    /// rejects the response unless <see cref="ExpiresAtField"/> carries a usable expiry.
     /// </summary>
     public string? ExpiresInField { get; set; } = "expires_in";
 
     /// <summary>
     /// The JSON field carrying an ISO 8601 absolute expiry (GitHub App's
-    /// <c>expires_at</c>); consulted only when <see cref="ExpiresInField"/> is absent.
+    /// <c>expires_at</c>); consulted when <see cref="ExpiresInField"/> is absent or
+    /// unusable (zero, negative, non-finite or unparseable).
     /// <see langword="null"/> skips it.
     /// </summary>
     public string? ExpiresAtField { get; set; }
 
     /// <summary>
-    /// Lifetime assumed when the response carries no expiry field. Default one hour.
+    /// Lifetime assumed when the response carries no usable expiry (no expiry field, or
+    /// one whose value is zero, non-finite or unparseable). Default one hour.
     /// </summary>
     public TimeSpan DefaultLifetime { get; set; } = TimeSpan.FromHours(1);
 

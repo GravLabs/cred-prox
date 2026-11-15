@@ -574,4 +574,116 @@ public sealed class JwtAssertionProviderTests : IDisposable
         Assert.Contains("The signing certificate could not be loaded", ex.Message, StringComparison.Ordinal);
         Assert.IsAssignableFrom<FormatException>(ex.InnerException);
     }
+
+    // ---- M37 fold 2 (hardening review F1 + fold rulings): the
+    // expires_in parse is culture-invariant, and a NEGATIVE value is unusable - expires_at
+    // keeps precedence when valid, and only a negative with nothing usable left rejects
+    // (M33 fault 7 mirrored from OAuth, nothing cached). ZERO keeps the fallback in every
+    // case: valid expires_at first, else DefaultLifetime (ExpiresIn_Zero_... pins the
+    // no-ExpiresAtField shape). Non-finite/grouped/non-numeric keep the fallback in M37
+    // (plan §8.6 policy row). Tests compile against f34b86e; the RED run is behaviour.
+
+    [Fact]
+    public async Task ExpiresIn_DecimalCommaCulture_ParsesDotAsDecimal()
+    {
+        using var _culture = new CultureOverride("de-DE");
+        var time = new FakeTimeProvider();
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":"3600.9"}"""), time);
+
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+        time.Advance(TimeSpan.FromMinutes(50)); // past 80 % of 3600.9 s; a 1 h default would still be cached
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+
+        // RED at f34b86e: de-DE reads "3600.9" as 36 009 s - still cached at 50 min.
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task ExpiresIn_DecimalCommaCulture_GroupedValueKeepsDefaultLifetime()
+    {
+        using var _culture = new CultureOverride("de-DE");
+        var time = new FakeTimeProvider();
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":"1,000"}"""), time);
+
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+        time.Advance(TimeSpan.FromSeconds(60));
+        await provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default);
+
+        // Grouping is unparseable under invariant Float, so the 1 h DefaultLifetime applies.
+        // RED at f34b86e: de-DE parsed "1,000" as 1.0 s and re-minted at +60 s.
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ExpiresIn_Negative_NoExpiresAt_RejectsResponse_CachesNothing()
+    {
+        var time = new FakeTimeProvider();
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":-30}"""), time);
+
+        var ex = await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+        Assert.NotNull(ex);                                 // RED at f34b86e: cached for DefaultLifetime there
+        Assert.IsAssignableFrom<InvalidOperationException>(ex); // the documented IdP-failure type
+        Assert.IsNotType<InvalidOperationException>(ex);    // a specific rejection, not the re-wrap
+        Assert.Contains("expires_in", ex.Message);          // names the field...
+        Assert.Contains("test", ex.Message);                // ...and the credential id...
+        Assert.DoesNotContain("tok-1", ex.Message);         // ...never the token or the value.
+        Assert.DoesNotContain("-30", ex.Message);
+        Assert.DoesNotContain("malformed", ex.Message);
+        Assert.Single(handler.Requests);
+
+        Assert.NotNull(await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default).AsTask()));
+        Assert.Single(handler.Requests);                    // backoff re-throw: nothing was cached
+
+        time.Advance(TimeSpan.FromSeconds(6));              // past NegativeCacheTtl
+        Assert.NotNull(await Record.ExceptionAsync(() =>
+            provider.GetCredentialAsync(AssertionOptions(), Secrets(RsaPem(), EcPem()), Context(), default).AsTask()));
+        Assert.Equal(2, handler.Requests.Count);            // re-mints once the backoff lapses
+    }
+
+    [Fact]
+    public async Task ExpiresIn_Negative_ValidExpiresAt_UsesAbsoluteExpiry()
+    {
+        // Ruling 02:19Z: a negative expires_in is UNUSABLE, not an instant throw - the
+        // ExpiresAtField branch (JwtAssertionProvider.cs:156-169 chain) wins when configured
+        // and valid; rejection fires only when no usable expires_at exists. This pins the
+        // precedence (nothing pinned it at f34b86e; GREEN on both trees by design).
+        var time = new FakeTimeProvider();
+        var absolute = time.GetUtcNow().UtcDateTime.AddHours(2).ToString("O");
+        var (provider, _, handler) = CreateProvider(new StubHttpHandler(
+            HttpStatusCode.OK,
+            $$"""{"access_token":"tok-1","expires_in":-1,"expires_at":"{{absolute}}"}"""), time);
+        var options = AssertionOptions();
+        options.ExpiresAtField = "expires_at";
+
+        await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
+        time.Advance(TimeSpan.FromMinutes(55)); // 80 % of 2 h is 96 min; a 1 h DefaultLifetime would be refreshing
+        await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
+
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ExpiresIn_Zero_ValidExpiresAt_UsesAbsoluteExpiry()
+    {
+        // Ruling 02:20Z precision: ZERO is its own branch and unchanged in every case -
+        // it falls through to a valid expires_at exactly as at f34b86e (GREEN both trees).
+        var time = new FakeTimeProvider();
+        var absolute = time.GetUtcNow().UtcDateTime.AddHours(2).ToString("O");
+        var (provider, _, handler) = CreateProvider(new StubHttpHandler(
+            HttpStatusCode.OK,
+            $$"""{"access_token":"tok-1","expires_in":0,"expires_at":"{{absolute}}"}"""), time);
+        var options = AssertionOptions();
+        options.ExpiresAtField = "expires_at";
+
+        await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
+        time.Advance(TimeSpan.FromMinutes(55));
+        await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
+
+        Assert.Single(handler.Requests);
+    }
 }

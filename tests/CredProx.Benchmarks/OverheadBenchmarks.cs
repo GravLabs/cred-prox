@@ -1,3 +1,4 @@
+using System.Text;
 using BenchmarkDotNet.Attributes;
 using CredProx;
 using Microsoft.AspNetCore.Builder;
@@ -27,15 +28,19 @@ namespace CredProx.Benchmarks;
 ///  - OAuthCacheHitScrub:  the same plus response scrubbing on (the production default).
 ///  - SsePlain / SseCredProx: time-to-first-event on an SSE stream, plain YARP versus
 ///    CredProx with static-key attach and scrubbing on (per-event scrubbing is M22's
-///    default posture for text/event-stream). The SSE payload carries no secret bytes —
-///    the arm measures the stream-scrubbing gate and the per-event machinery, not the
-///    redaction work itself, so it understates the cost of per-event redaction. The SSE
-///    op includes connection setup and teardown — identical treatment in both arms keeps
-///    the difference meaningful.
+///    default posture for text/event-stream). The stub echoes the credential-bearing
+///    headers INTO each event payload, so the CredProx arm pays for real per-event
+///    redaction (M37: the payload previously carried no secret bytes, so the arm
+///    measured the scrubbing gate and per-event machinery while understating the
+///    redaction work itself). The stub stops after three events, and
+///    TimeToFirstEvent asserts the first read starts with `data:` before abandoning
+///    the response. The SSE op includes connection setup and teardown — identical
+///    treatment in both arms keeps the difference meaningful.
 ///
-/// The upstream echoes the credential-bearing headers into the response body (so the
-/// scrubber has real work to do when it is on, exactly like an echo-style vendor),
-/// serves the OAuth token endpoint, and streams the SSE events.
+/// The upstream echoes the credential-bearing headers into the response body and into
+/// the SSE event payloads (so the scrubber has real work to do when it is on, exactly
+/// like an echo-style vendor), serves the OAuth token endpoint, and streams the SSE
+/// events.
 /// </summary>
 [MemoryDiagnoser]
 public class OverheadBenchmarks
@@ -164,7 +169,11 @@ public class OverheadBenchmarks
 
     /// <summary>
     /// Reads until the first SSE event arrives, then abandons the response. The whole op
-    /// is the client-side time-to-first-event; both SSE arms run it identically.
+    /// is the client-side time-to-first-event; both SSE arms run it identically. The
+    /// first read must start with `data:`: if scrubbing or a proxy change ever ships a
+    /// mangled first event, this arm must go RED, not stay green on a garbage payload
+    /// (M37). A failure here surfaces as a failed benchmark, which the gate catches as
+    /// an arm with no statistics.
     /// </summary>
     private static async Task TimeToFirstEvent(HttpClient client)
     {
@@ -173,12 +182,20 @@ public class OverheadBenchmarks
         response.EnsureSuccessStatusCode();
         await using var body = await response.Content.ReadAsStreamAsync();
         var buffer = new byte[64];
-        while (await body.ReadAsync(buffer) > 0)
+        // The upstream flushes the first event before anything else, so the first
+        // non-empty read is the first-event moment.
+        var read = await body.ReadAsync(buffer);
+        if (read <= 0)
         {
-            // The upstream flushes the first event before anything else, so the first
-            // non-empty read is the first-event moment.
-            return;
+            throw new InvalidOperationException("SSE stream ended before the first event");
         }
+
+        if (!buffer.AsSpan(0, read).StartsWith("data:"u8))
+        {
+            throw new InvalidOperationException(
+                $"first SSE read is not a data: event: {Encoding.ASCII.GetString(buffer, 0, read)}");
+        }
+
     }
 
     private static void PrimeSse(HttpClient client)
@@ -266,8 +283,9 @@ public class OverheadBenchmarks
 
     /// <summary>
     /// The stub vendor: an echo endpoint that mirrors the credential-bearing headers into
-    /// the (text) body, the OAuth token endpoint, and a flushed SSE stream. Text content
-    /// types matter: the M20 scrubber's eligibility gate engages only on them.
+    /// the (text) body and a three-event SSE stream that echoes them into each event,
+    /// plus the OAuth token endpoint. Text content types matter: the M20 scrubber's
+    /// eligibility gate engages only on them.
     /// </summary>
     private static IHost StartUpstream()
     {
@@ -288,14 +306,28 @@ public class OverheadBenchmarks
                             {
                                 context.Response.ContentType = "text/event-stream";
                                 context.Response.Headers["Cache-Control"] = "no-cache";
-                                await context.Response.WriteAsync("data: first\n\n");
+                                // Echo the credential-bearing headers into the events like
+                                // the echo vendor below, so the CredProx arm's per-event
+                                // scrubber has real redaction work. The plain-YARP arm
+                                // never sees these headers on the request, so both payload
+                                // SHAPES stay identical and the same-run ratio keeps
+                                // measuring the same bytes plus the scrubbing (M37).
+                                var sseKey = context.Request.Headers["X-Test-Key"].ToString();
+                                var sseAuth = context.Request.Headers.Authorization.ToString();
+                                await context.Response.WriteAsync(
+                                    $"data: first key={sseKey} auth={sseAuth}\n\n");
                                 await context.Response.Body.FlushAsync();
                                 try
                                 {
-                                    for (var n = 0; n < 100; n++)
+                                    // At most three events in total: the benchmark abandons
+                                    // the read after the first, and the old 100-tick loop
+                                    // kept writing for ~5 s against the abandoned
+                                    // connection on every iteration (M37).
+                                    for (var n = 0; n < 2; n++)
                                     {
                                         await Task.Delay(50, context.RequestAborted);
-                                        await context.Response.WriteAsync("data: tick\n\n");
+                                        await context.Response.WriteAsync(
+                                            $"data: tick {n} key={sseKey} auth={sseAuth}\n\n");
                                         await context.Response.Body.FlushAsync();
                                     }
                                 }

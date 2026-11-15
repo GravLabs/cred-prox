@@ -55,7 +55,7 @@ Unchanged-code reruns on the shared development machine, 2026-11:
 | Overhead suite, same-run ratio (SSE arms) | ×1.6 – ×1.8 |
 | Overhead suite, absolute mean | up to ±45% |
 | Overhead suite, allocations (echo arms) | ≤ 7 B (≤0.1%) |
-| Overhead suite, allocations (SSE arms) | +3.3% / +5.6% |
+| Overhead suite, allocations (SSE arms, 3-event bounded stream) | Six pinned passes at unchanged workload (2026-11-14, after the M37 workload change): SseCredProx 12,116–15,989 B around the 14,469 B reference — max upward excursion +1,520 B (10.5%); SsePlain 7,292–8,551 B vs the 8,766 B reference, never above it. At the 12% allowance the largest SseCredProx regression the gate can still miss is +1,736 B (+1,737 B is the smallest it catches) (the old ~5 s abandoned stream measured +3.3% / +5.6% of much larger values) |
 | Micro suites, same-run ratio | ≤ ×1.13 (worst: the sub-microsecond destination arms — nanosecond-scale measurements against nanosecond-scale denominators) |
 | Micro suites, absolute mean | ≤ +2.1% (except arms below ~100 ns, which track the ratio) |
 | Micro suites, allocations | ≤ 16 B — **except** `TokenCacheBenchmarks.SingleFlight`: band 23,444 – 23,520 B (≈76 B) at unchanged `src/` |
@@ -70,7 +70,7 @@ inline-vs-scheduled completion: unchanged-src reruns measured 23,444 / 23,481 /
 ## The gate: `scripts/bench-compare.sh`
 
 ```bash
-scripts/bench-compare.sh tests/CredProx.Benchmarks/baselines/0.9.1 \
+scripts/bench-compare.sh tests/CredProx.Benchmarks/baselines/0.9.3 \
     tests/CredProx.Benchmarks/BenchmarkDotNet.Artifacts/results
 ```
 
@@ -78,9 +78,10 @@ Exits non-zero on a regression. Per method:
 
 | Check | Overhead suite | Micro suites |
 |---|---|---|
-| Allocated bytes/op | FAIL above +32 B (SSE arms: +8%) | FAIL above +32 B (`SingleFlight`: max(32 B, 1% of baseline)) |
+| Allocated bytes/op | FAIL above +32 B (SSE arms: +12%) | FAIL above +32 B (`SingleFlight`: max(32 B, 1% of baseline)) |
 | Same-run ratio rise | WARN above ×1.15 (noise reaches ×2.8 — a fail-gate there would be theatre) | WARN above ×1.15, **FAIL** above ×1.25 (worst observed unchanged drift ×1.13 — the warn threshold sits above it) |
 | Absolute mean rise | WARN above ×1.15 | WARN above ×1.15 |
+| New-run `Statistics.N` below `N_FLOOR` (10) | WARN | WARN |
 
 The allocation allowance is per-arm. An arm gets a proportional allowance only on
 MEASURED scheduling noise with evidence in "Measured noise" above — never to make a
@@ -90,12 +91,30 @@ allocation. Every other arm keeps the flat 32 B: the flat epsilon is the default
 never the proportional one. The applied allowance is printed on every gated arm as
 `[allow ...]`.
 
+The comparison key is `(suite class, method, Parameters)`: `[Params]`/`[Arguments]`
+rows stay distinct arms instead of silently collapsing into one, and the suite
+baseline-arm check runs once per parameter set present in either tree. A report row
+duplicated in title AND parameters makes the key ambiguous (JSON order would decide
+which row wins) — the gate FAILs on it and never partial-downgrades it.
+
+Every `ok` line prints the arm's N and P95 (`µs`, `n/a` when BDN wrote no
+percentiles) so a quiet pass still shows what the verdict rested on; an arm whose
+new-run `Statistics.N` is below `N_FLOOR` (default 10) WARNs — a thin sample cannot
+support the statistics the gate reads. The floor gates the new run only: the
+committed baseline passed review once. A `RATIO-SKIPPED` arm — its same-run ratio
+uncomputable because the suite's baseline arm is missing or unusable (which itself
+FAILs below) — also counts: FAIL in fail-mode suites, WARN in warn-mode ones, so the
+summary line can never read clean while a timing gate sat out.
+
 Overrides: `EPS_ALLOC`, `EPS_ALLOC_PCT` (explicit: re-fractions every proportional
 arm; unset: the per-arm fractions above; never touches flat arms), `RATIO_WARN`, `RATIO_FAIL`, `MEAN_WARN`,
-`ALLOW_PARTIAL=1` (accept a partial run, loudly), and `TIMING_MODE=fail|warn` to
+`N_FLOOR` (statistics-count warn floor, default 10), `ALLOW_PARTIAL=1` (accept a
+partial run, loudly), and `TIMING_MODE=fail|warn` to
 force one mode for all suites — for example on a dedicated benchmarking machine,
 where tightening the overhead timing gate becomes reasonable (see "A quieter
-machine" below).
+machine" below). The script refuses to start (exit 2) when `RATIO_WARN` ≥
+`RATIO_FAIL`: inverted thresholds would put the warn above the fail, making the
+timing FAIL unreachable.
 
 A method or suite present in the baseline but absent from the new run **FAILS** —
 a lost or renamed arm is a regression, not a gap in the report. To gate a single
@@ -104,6 +123,12 @@ baseline JSON (the gate then covers exactly that suite), or run against the full
 baseline with `ALLOW_PARTIAL=1`, which downgrades the missing suites and methods to
 loud warnings for a deliberate partial pass. A suite's baseline arm missing on
 either side always FAILs: without its denominator the suite cannot gate timing.
+With `ALLOW_PARTIAL=1`, a run that compares ZERO methods FAILs — partial still has
+to mean some coverage; an empty results directory is not a partial pass. A no-statistics
+arm fails the same way: the SSE framing/redaction assertion throws inside the benchmark,
+which makes that BenchmarkDotNet arm NA while `dotnet run` itself still exits 0 —
+`bench-compare` catches it because an arm without statistics FAILs even with
+`ALLOW_PARTIAL=1`.
 
 Known blind spots: the same-run ratio is blind to a slowdown of the *baseline* arm
 itself (plain YARP getting slower makes CredProx look better) — the absolute-mean
@@ -126,7 +151,7 @@ micro method were each caught by the gate during development of the script
 4. Compare the previous release's baseline against the new run before overwriting
    history, so a regression is never baked into the new reference.
 
-The 0.9.2 baseline lives in `baselines/0.9.2/`.
+The 0.9.3 baseline lives in `baselines/0.9.3/`.
 
 ## A quieter machine (recommendation)
 

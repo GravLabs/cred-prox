@@ -86,10 +86,11 @@ public sealed class TokenExchangeProviderTests
         new() { CredentialName = "test", Partition = partition, InboundToken = inbound };
 
     private static (TokenExchangeProvider Provider, StubHttpHandler Handler) CreateProvider(
-        Func<HttpRequestMessage, int, HttpResponseMessage>? responder = null)
+        Func<HttpRequestMessage, int, HttpResponseMessage>? responder = null,
+        FakeTimeProvider? time = null)
     {
         var handler = new StubHttpHandler(responder ?? Route(jwks: JwksJson()));
-        var time = new FakeTimeProvider();
+        time ??= new FakeTimeProvider();
         var cache = new InMemoryTokenCache(Options.Create(new TokenCacheOptions()), time);
         return (new TokenExchangeProvider(cache, new StubHttpClientFactory(handler), time), handler);
     }
@@ -408,6 +409,106 @@ public sealed class TokenExchangeProviderTests
 
         Assert.Contains("test", ex.Message, StringComparison.Ordinal);
         Assert.Equal(0, ExchangeCalls(handler));
+    }
+
+    // ---- M37 fold 2 (hardening review F1 + fold ruling): expires_in parsing is
+    // culture-invariant, and a NEGATIVE value rejects like OAuth (M33 fault 7 mirrored).
+    // The old double.TryParse(string, out _) overload was CurrentCulture + AllowThousands:
+    // on a de-DE host "3600.9" cached ~10 h (36 009 s) and "1,000" cached 1 s, and a
+    // negative silently took DefaultLifetime. Non-finite/grouped/non-numeric keep the
+    // fallback in M37 (plan §8.6 policy row). Tests compile against f34b86e and assert the
+    // base exception type only, so the RED run is the bug's own behaviour, not a compile.
+
+    [Fact]
+    public async Task DecimalCommaCulture_ParsesDotAsDecimal()
+    {
+        using var _culture = new CultureOverride("de-DE");
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: """{"access_token":"down-tok","expires_in":"3600.9"}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
+
+        Assert.Equal("down-tok", await provider.GetCredentialAsync(
+            ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+        time.Advance(TimeSpan.FromMinutes(50)); // past 80 % of 3600.9 s; a 1 h default would still be cached
+        await provider.GetCredentialAsync(
+            ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default);
+
+        // RED at f34b86e: de-DE reads "3600.9" as 36 009 s, so the token is still cached at 50 min.
+        Assert.Equal(2, ExchangeCalls(handler));
+    }
+
+    [Fact]
+    public async Task DecimalCommaCulture_GroupedValueKeepsDefaultLifetime()
+    {
+        using var _culture = new CultureOverride("de-DE");
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: """{"access_token":"down-tok","expires_in":"1,000"}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
+
+        await provider.GetCredentialAsync(
+            ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default);
+        time.Advance(TimeSpan.FromSeconds(60));
+        await provider.GetCredentialAsync(
+            ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default);
+
+        // Invariant + Float rejects the grouping, so the token keeps the 1 h DefaultLifetime
+        // and stays cached. RED at f34b86e: de-DE parsed "1,000" as 1.0 s and re-minted here.
+        Assert.Equal(1, ExchangeCalls(handler));
+    }
+
+    [Fact]
+    public async Task NegativeExpiresIn_RejectsResponse_CachesNothing()
+    {
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: """{"access_token":"down-tok","expires_in":-30}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
+
+        var ex = await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask());
+        Assert.NotNull(ex);                                 // RED at f34b86e: cached for DefaultLifetime there
+        Assert.IsAssignableFrom<InvalidOperationException>(ex); // the documented IdP-failure type
+        Assert.IsNotType<InvalidOperationException>(ex);    // a specific rejection, not the re-wrap
+        Assert.Contains("expires_in", ex.Message);          // names the field...
+        Assert.Contains("test", ex.Message);                // ...and the credential id...
+        Assert.DoesNotContain("down-tok", ex.Message);      // ...never the token or the value.
+        Assert.DoesNotContain("-30", ex.Message);
+        Assert.DoesNotContain("malformed", ex.Message);
+        Assert.Equal(1, ExchangeCalls(handler));
+
+        ex = await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask());
+        Assert.NotNull(ex);
+        Assert.Equal(1, ExchangeCalls(handler));            // backoff re-throw: nothing was cached
+
+        time.Advance(TimeSpan.FromSeconds(6));              // past NegativeCacheTtl
+        Assert.NotNull(await Record.ExceptionAsync(() => provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default)
+            .AsTask()));
+        Assert.Equal(2, ExchangeCalls(handler));            // re-mints once the backoff lapses
+    }
+
+    [Fact]
+    public async Task ZeroExpiresIn_KeepsDefaultLifetime()
+    {
+        // M33 ruling pinned for this provider (JwtAssertionProviderTests.cs:466 pins the
+        // sibling): 0 means "no stated expiry" for some IdPs - DefaultLifetime, not a reject.
+        var time = new FakeTimeProvider();
+        var (provider, handler) = CreateProvider(
+            Route(jwks: JwksJson(), tokenBody: """{"access_token":"down-tok","expires_in":"0"}"""), time);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(3));
+
+        await provider.GetCredentialAsync(
+            ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default);
+        time.Advance(TimeSpan.FromMinutes(30));             // inside the 1 h default, past any 0 s cache
+        await provider.GetCredentialAsync(
+            ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default);
+
+        Assert.Equal(1, ExchangeCalls(handler));
     }
 
 }

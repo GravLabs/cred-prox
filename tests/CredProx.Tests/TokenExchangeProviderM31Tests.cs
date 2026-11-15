@@ -273,8 +273,10 @@ public sealed class TokenExchangeProviderM31Tests
 
     // ---- expires_in shapes vs DefaultLifetime (1 h default) (:427) ----
 
+    // M37 fold 2: a negative expires_in no longer lands here - TokenExchange rejects the
+    // response outright (architect ruling 02:18Z; pinned by
+    // TokenExchangeProviderTests.NegativeExpiresIn_RejectsResponse_CachesNothing).
     [Theory]
-    [InlineData("-5")]   // negative: nonsense, not a past expiry
     [InlineData("0")]    // zero: expires immediately, nonsense
     [InlineData("\"soon\"")] // unparsable string
     public async Task NonsenseExpiresIn_UsesDefaultLifetime_ServesFromCache(string expiresInJson)

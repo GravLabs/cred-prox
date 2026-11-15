@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -146,29 +147,50 @@ public sealed class JwtAssertionProvider : ICredentialProvider<JwtAssertionOptio
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         string accessToken;
-        DateTimeOffset expiresAt;
+        DateTimeOffset expiresAt = default;
         try
         {
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
             accessToken = ReadRequiredString(root, options.TokenField);
 
-            expiresAt = _time.GetUtcNow() + options.DefaultLifetime;
+            // M37 fold 2 (architect rulings 02:18Z/02:19Z/02:20Z): ExpiresAtField is consulted
+            // when ExpiresInField is absent OR unusable (zero, negative, non-finite,
+            // unparseable) - the documented precedence, now stated. A negative expires_in is
+            // UNUSABLE, not an instant throw: it still gives way to a valid expires_at, and
+            // only rejects - M33 fault 7 mirrored from OAuth, nothing cached - when nothing
+            // usable remains, because the only path left would be the fault-7 DefaultLifetime.
+            // Zero is its own branch and unchanged in every case: never rejects, falls to a
+            // valid expires_at, else DefaultLifetime (JwtAssertionProviderTests pins both).
+            var resolvedExpiry = false;
+            var negativeExpiresIn = false;
             if (options.ExpiresInField is { } expiresInField &&
                 root.TryGetProperty(expiresInField, out var expiresIn) &&
-                TryReadSeconds(expiresIn, out var seconds))
+                TryReadSeconds(expiresIn, out var seconds, out negativeExpiresIn))
             {
-                expiresAt = _time.GetUtcNow() + TimeSpan.FromSeconds(seconds);
+                expiresAt = _time.GetUtcNow() + TimeSpan.FromSeconds(seconds); // positive by contract
+                resolvedExpiry = true;
             }
             else if (options.ExpiresAtField is { } expiresAtField &&
-                     root.TryGetProperty(expiresAtField, out var expiresAtElement) &&
-                     expiresAtElement.ValueKind == JsonValueKind.String &&
-                     DateTimeOffset.TryParse(expiresAtElement.GetString(), out var absolute))
+                root.TryGetProperty(expiresAtField, out var expiresAtElement) &&
+                expiresAtElement.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(expiresAtElement.GetString(), out var absolute))
             {
                 expiresAt = absolute;
+                resolvedExpiry = true;
+            }
+            if (!resolvedExpiry && negativeExpiresIn)
+            {
+                throw new OAuthClientCredentialsProvider.NegativeExpiresInRejectedException(
+                    $"The JWT assertion exchange endpoint for credential '{credentialName}' returned a negative 'expires_in' value; the token response was rejected.");
+            }
+            if (!resolvedExpiry)
+            {
+                expiresAt = _time.GetUtcNow() + options.DefaultLifetime;
             }
         }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or OverflowException)
+        catch (Exception ex) when (ex is (JsonException or InvalidOperationException or FormatException or OverflowException)
+            and not OAuthClientCredentialsProvider.NegativeExpiresInRejectedException)
         {
             // The body may echo request fragments; never include it in the error.
             throw new InvalidOperationException(
@@ -247,15 +269,27 @@ public sealed class JwtAssertionProvider : ICredentialProvider<JwtAssertionOptio
         return value;
     }
 
-    private static bool TryReadSeconds(JsonElement element, out double seconds)
+    /// <summary>
+    /// Reads a vendor lifetime in seconds with the canonical JSON-number grammar - invariant
+    /// culture, no thousands grouping (M37 fold 2; the old overload was CurrentCulture +
+    /// AllowThousands, so a de-DE host read "3600.9" as 36 009 s and "1,000" as 1 s).
+    /// Returns true only for a finite POSITIVE value; a parseable NEGATIVE value sets
+    /// <paramref name="negative"/> so the caller can apply the M33 fault-7 ruling (M37 fold 2:
+    /// expires_at precedence first, rejection when nothing usable remains). Non-finite,
+    /// grouped and non-numeric values set neither and keep the documented fallback (plan
+    /// §8.6 policy row).
+    /// </summary>
+    private static bool TryReadSeconds(JsonElement element, out double seconds, out bool negative)
     {
         seconds = element.ValueKind switch
         {
             JsonValueKind.Number => element.GetDouble(),
-            JsonValueKind.String when double.TryParse(element.GetString(), out var parsed) => parsed,
+            JsonValueKind.String when double.TryParse(
+                element.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => double.NaN,
         };
 
+        negative = double.IsFinite(seconds) && seconds < 0;
         return double.IsFinite(seconds) && seconds > 0;
     }
 }

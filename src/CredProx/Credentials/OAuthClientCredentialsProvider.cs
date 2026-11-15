@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -15,9 +16,13 @@ namespace CredProx;
 /// <c>(credential, partition)</c> through <see cref="ITokenCache"/>. A non-2xx response or a
 /// malformed token body fails as <see cref="InvalidOperationException"/> — the core turns
 /// that into <c>credprox.credential_unavailable</c> (502) without forwarding. A negative
-/// <c>expires_in</c> is treated the same way (protocol violation, nothing cached); an absent,
-/// non-numeric or zero <c>expires_in</c> falls back to <see cref="OAuthClientCredentialsOptions.DefaultLifetime"/>
-/// (zero logs one warning per credential). Error messages
+/// <c>expires_in</c>, a non-finite one (the names <c>Infinity</c>, <c>-Infinity</c>, <c>NaN</c>
+/// in a string) or a thousands-grouped one (M37 A1) are treated the same way (protocol
+/// violations, nothing cached); an absent, non-numeric or zero <c>expires_in</c> falls back to
+/// <see cref="OAuthClientCredentialsOptions.DefaultLifetime"/>
+/// (zero logs one warning per credential). String <c>expires_in</c> parses with the canonical
+/// JSON-number grammar (<see cref="NumberStyles.Float"/>, <see cref="CultureInfo.InvariantCulture"/>)
+/// so the cached lifetime never depends on the machine's current culture. Error messages
 /// never contain secret values or response bodies. <c>TokenEndpoint</c>, <c>ClientId</c>
 /// and <c>ClientSecret</c> accept the §3.2 template forms (<c>{partition}</c> and secret
 /// references), so one credential can serve per-partition vendor accounts.
@@ -169,7 +174,9 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
             }
         }
         catch (Exception ex) when (ex is JsonException or FormatException or OverflowException
-            or (InvalidOperationException and not NegativeExpiresInRejectedException))
+            or (InvalidOperationException
+                and not NegativeExpiresInRejectedException
+                and not InvalidExpiresInRejectedException))
         {
             // The body may echo request fragments; never include it in the error.
             throw new InvalidOperationException(
@@ -197,16 +204,41 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
         string credentialName,
         OAuthClientCredentialsProvider provider)
     {
+        // M37 A1: the string arm parses with the canonical JSON-number grammar only. The
+        // old double.TryParse(string, out _) overload was CurrentCulture with AllowThousands:
+        // "1,000" parsed or not depending on the machine, and the non-finite names arrived
+        // host-dependently - "Infinity"/"-Infinity" parse only under the invariant culture (an
+        // InvariantGlobalization host), while ICU cultures render the symbol as ∞ and reject
+        // the names ("NaN" parses under en-US/de-DE/sv-SE, not ar-EG); exponent overflow
+        // ("1e400" = +∞) is the culture-independent route.
+        // Before the IsFinite guard at the return all of these became a silent
+        // DefaultLifetime - a full-hour token lifetime minted from a nonsense expiry.
+        var text = expiresIn.ValueKind == JsonValueKind.String ? expiresIn.GetString() : null;
         double? seconds = expiresIn.ValueKind switch
         {
             JsonValueKind.Number => expiresIn.GetDouble(),
-            JsonValueKind.String when double.TryParse(expiresIn.GetString(), out var parsed) => parsed,
+            JsonValueKind.String when double.TryParse(
+                text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            // Unmistakably meant as a number, parseable only via thousands grouping; accepting
+            // it would make the cached lifetime culture-dependent. Reject (M37 A1 decision,
+            // rationale in the CHANGELOG).
+            JsonValueKind.String when IsGroupedNumber(text) => throw new InvalidExpiresInRejectedException(
+                $"The OAuth token endpoint for credential '{credentialName}' returned a thousands-grouped 'expires_in' value; the token response was rejected."),
             _ => null,
         };
 
-        if (seconds is double finite)
+        if (seconds is double value)
         {
-            if (double.IsFinite(finite) && finite < 0)
+            if (!double.IsFinite(value))
+            {
+                // RFC 6749 counts seconds: Infinity/NaN are not lifetimes. Reject through the
+                // documented IdP-failure path like the negative case - nothing cached, and the
+                // message names the field and credential id, never the value or the token.
+                throw new InvalidExpiresInRejectedException(
+                    $"The OAuth token endpoint for credential '{credentialName}' returned a non-finite 'expires_in' value; the token response was rejected.");
+            }
+
+            if (value < 0)
             {
                 // RFC 6749 defines expires_in as a lifetime in seconds: a negative value is a
                 // protocol violation, and caching the token it stamps serves a guaranteed
@@ -218,16 +250,21 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
                     $"The OAuth token endpoint for credential '{credentialName}' returned a negative 'expires_in' value; the token response was rejected.");
             }
 
-            if (finite == 0)
+            if (value == 0)
             {
                 provider.LogZeroLifetime(credentialName);
             }
         }
 
-        return seconds is double positive && double.IsFinite(positive) && positive > 0
+        // Finite and positive by here (negatives threw, zero falls back); NaN/Infinity
+        // cannot reach the return.
+        return seconds is double positive && positive > 0
             ? TimeSpan.FromSeconds(positive)
             : defaultLifetime;
     }
+
+    private static bool IsGroupedNumber(string? text) =>
+        double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out _);
 
     private void LogZeroLifetime(string credentialName)
     {
@@ -246,12 +283,29 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
     /// <summary>
     /// Signals a token response rejected for a negative <c>expires_in</c>. Flows through the
     /// same IdP-failure path as any unusable response (<c>credprox.credential_unavailable</c>,
-    /// nothing cached); kept distinct only so the malformed-body re-wrap below does not erase
-    /// the field name from the warning.
+    /// nothing cached); kept distinct only so the malformed-body re-wrap does not erase the
+    /// field name from the warning. Thrown by all three providers that parse a vendor
+    /// <c>expires_in</c> from a response body - this one, <c>TokenExchangeProvider</c> and
+    /// <c>JwtAssertionProvider</c> (M37 fold 2 mirrors the M33 ruling across them); one
+    /// internal type because the contract is identical.
     /// </summary>
     internal sealed class NegativeExpiresInRejectedException : InvalidOperationException
     {
         public NegativeExpiresInRejectedException(string message)
+            : base(message)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Signals a token response rejected for a non-finite or thousands-grouped <c>expires_in</c>
+    /// (M37 A1). Same IdP-failure path as <see cref="NegativeExpiresInRejectedException"/>:
+    /// credential_unavailable, nothing cached, the message names the field and credential id,
+    /// never the value or the token.
+    /// </summary>
+    internal sealed class InvalidExpiresInRejectedException : InvalidOperationException
+    {
+        public InvalidExpiresInRejectedException(string message)
             : base(message)
         {
         }

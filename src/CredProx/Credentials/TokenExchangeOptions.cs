@@ -140,12 +140,16 @@ public sealed class TokenExchangeOptions : IHasAttachment, IHasPartitionConfig, 
 
     /// <summary>
     /// The JSON field carrying the lifetime in seconds; <see langword="null"/> skips it.
-    /// Default <c>expires_in</c>.
+    /// Default <c>expires_in</c>. Parsed as a JSON number independently of the machine
+    /// culture; a finite positive value sets the lifetime, zero, a non-finite value or
+    /// an unparseable one falls back to <see cref="DefaultLifetime"/>, and a negative
+    /// value rejects the response (M37 fold 2, mirroring the M33 ruling).
     /// </summary>
     public string? ExpiresInField { get; set; } = "expires_in";
 
     /// <summary>
-    /// Lifetime assumed when the response carries no expiry field. Default one hour.
+    /// Lifetime assumed when the response carries no expiry field or its value is zero,
+    /// non-finite or unparseable. Default one hour.
     /// </summary>
     public TimeSpan DefaultLifetime { get; set; } = TimeSpan.FromHours(1);
 

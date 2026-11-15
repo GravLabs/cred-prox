@@ -420,7 +420,9 @@ public sealed class ScrubbingPoolTests
 
     // R1 stress. CopyOutput has no await, so a reader cannot be literally parked
     // inside it — there is no seam to park in, and a test-side post-dispose stamp
-    // loses the microsecond race to the copy in flight. So let the pool itself be
+    // loses the microsecond race to the copy in flight. The three fail-closed
+    // guards inside CopyOutput stay unreachable to a deterministic test by design
+    // and are accepted as guards (plan §8.6, M37). So let the pool itself be
     // the second writer the ruling warns about: every Return here is clearArray:
     // true (like the production call sites), so on the broken shape a dispose
     // landing while the sync reader is mid-CopyOutput hands Array.Clear of the
@@ -438,6 +440,12 @@ public sealed class ScrubbingPoolTests
         {
             expected[c] = true;
         }
+
+        // M37 C liveness: disposes the stress disposer fired with a read in flight.
+        // The negative asserts above would pass unchanged on a machine where the
+        // aim always misses the copy window — this count is what proves the stress
+        // actually stressed something (plan §8.6).
+        int midCopyDisposes = 0;
 
         for (var iteration = 0; iteration < iterations; iteration++)
         {
@@ -563,6 +571,7 @@ public sealed class ScrubbingPoolTests
                             && Stopwatch.GetElapsedTime(rentT) >= aim)
                         {
                             stream.Dispose(); // broken shape: live batch returned mid-copy
+                            Interlocked.Increment(ref midCopyDisposes);
                             return;
                         }
                     }
@@ -585,6 +594,13 @@ public sealed class ScrubbingPoolTests
             Assert.True(exposure is null, "R1 use-after-return: " + exposure);
             Assert.All(pools, p => Assert.False(p.DoubleReturn, "a buffer was returned while still owned"));
         }
+
+        // Per-test liveness (M37 C): at least one dispose must have landed with a
+        // read in flight across the whole stress run. A test whose aim always
+        // misses exercised nothing and must not read green.
+        Assert.True(midCopyDisposes >= 1,
+            $"R1 stress liveness: {midCopyDisposes} disposes landed inside a read window — " +
+            "the stress never exercised the mid-copy dispose (plan §8.6).");
     }
 
     [Fact]

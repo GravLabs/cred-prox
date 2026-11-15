@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
@@ -349,10 +350,11 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
             if (options.ExpiresInField is not null &&
                 document.RootElement.TryGetProperty(options.ExpiresInField, out var expiresIn))
             {
-                lifetime = ReadLifetime(expiresIn, options.DefaultLifetime);
+                lifetime = ReadLifetime(expiresIn, options.DefaultLifetime, credentialName);
             }
         }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or OverflowException)
+        catch (Exception ex) when (ex is (JsonException or InvalidOperationException or FormatException or OverflowException)
+            and not OAuthClientCredentialsProvider.NegativeExpiresInRejectedException)
         {
             throw new InvalidOperationException(
                 $"The token-exchange endpoint for credential '{credentialName}' returned a malformed token response.", ex);
@@ -452,14 +454,29 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         return value;
     }
 
-    private static TimeSpan ReadLifetime(JsonElement expiresIn, TimeSpan defaultLifetime)
+    private static TimeSpan ReadLifetime(JsonElement expiresIn, TimeSpan defaultLifetime, string credentialName)
     {
+        // M37 fold 2 (hardening review F1 + fold ruling): parse with the canonical JSON-number
+        // grammar - invariant culture, no thousands grouping - like M37 A1 did for OAuth. The
+        // old overload was CurrentCulture + AllowThousands: a de-DE host read "3600.9" as
+        // 36 009 s (a ~10 h cache) and "1,000" as 1 s. A negative value is a protocol
+        // violation (M33 fault 7 mirrored from OAuth): reject through the IdP-failure path -
+        // nothing cached, the message names the field and credential id, never the value or
+        // the token. Zero keeps the documented DefaultLifetime fallback (M33), and so do
+        // non-finite, grouped and non-numeric values in M37 (plan §8.6 policy row).
         var seconds = expiresIn.ValueKind switch
         {
             JsonValueKind.Number => expiresIn.GetDouble(),
-            JsonValueKind.String when double.TryParse(expiresIn.GetString(), out var parsed) => parsed,
+            JsonValueKind.String when double.TryParse(
+                expiresIn.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => double.NaN,
         };
+
+        if (double.IsFinite(seconds) && seconds < 0)
+        {
+            throw new OAuthClientCredentialsProvider.NegativeExpiresInRejectedException(
+                $"The token-exchange endpoint for credential '{credentialName}' returned a negative 'expires_in' value; the token response was rejected.");
+        }
 
         return double.IsFinite(seconds) && seconds > 0
             ? TimeSpan.FromSeconds(seconds)
