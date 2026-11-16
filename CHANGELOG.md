@@ -7,6 +7,88 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-16
+
+Agent tokens (M39): an agent presents a short-lived Microsoft Entra (or any OIDC) access
+token instead of a stored secret, and Entra app roles narrow it to named rules — a token
+gets exactly the operations its roles name, and a caller without named rules admits no
+token. The documentation leads with the most useful examples and the Spotify example is
+removed (M40). Minor bump: the caller-token API is additive and the release carries one
+Breaking change — the caller contract surface (`CallerDefinition`, `CallerOperationRule`,
+`CallerIdentity`) collapses to single constructors with optional parameters; migration is
+a recompile, and existing positional call sites need no edits, except that deconstructing a
+`CallerIdentity` now takes three variables (see Breaking).
+
+### Added
+
+- Caller tokens for agents (M39, ADR-0004; sample E19 `samples/AgentTokens`):
+  `services.AddCredProxCallerTokenAuthentication(configuration)` registers a stock JWT
+  bearer scheme (`CredProxAuth.CallerTokenScheme`) that validates short-lived Entra / OIDC
+  access tokens, configured under `CredProx:CallerToken` (`Authority`, `Audience`, optional
+  `MaxTokenAge`). A caller accepts tokens from the clients listed in its new
+  `TokenClientIds`; operation rules gain an optional `Name`, and a token gets exactly the
+  operations whose names appear in its `roles`/`scp`. New public types:
+  `CallerTokenOptions`, `ICallerTokenMapper` with `DefaultCallerTokenMapper`,
+  `CallerTokenMapping`, `CallerRequestScopes`, and `CallerIdentity.ClientId`. Caller API
+  keys keep working unchanged; a request may use either.
+- Caller-token handler swap point (M39, ADR-0004):
+  `AddCredProxCallerTokenAuthentication` takes an optional `registerScheme` callback.
+  When supplied it runs instead of the stock JWT bearer registration, so a host can
+  register its own validation handler under `CredProxAuth.CallerTokenScheme`
+  (`Microsoft.Identity.Web`, another OIDC issuer, an introspection handler) without the
+  scheme-collision throw and without leaving `CallerTokenOptions` unregistered; the
+  required `Authority`/`Audience` checks apply to the default path only, and
+  `MaxTokenAge` still binds in both. A host that only tunes the stock handler uses the
+  standard `PostConfigure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, …)`.
+- Caller-token authentication claim-shape disclosure (M39, ADR-0004): the caller-token
+  scheme sets `MapInboundClaims = false`, so a caller token's claims reach the mapper and
+  the host's `HttpContext.User` under Entra's raw names — `roles`, `scp`, `azp`, `appid`,
+  `uti` — and the stock JWT bearer rename to the long claim types never happens on this
+  scheme. `RoleClaimType` is pinned to the raw `roles`, so `ClaimsPrincipal.IsInRole`
+  keeps working for hosts on the token path.
+
+### Changed
+
+- Caller tokens require named rules: a token gets exactly the operations its roles name;
+  a caller without named rules admits no token (M39, ADR-0004). The token's scope set
+  intersects the caller's operation rules through the rule `Name` only: an unnamed rule
+  admits no token (it stays a caller-key-path rule), a token whose roles name no rule
+  gets nothing, a token carrying no roles at all is denied, and a caller that declares no
+  operation rules denies every token request — all with the existing
+  `403 credprox.operation_not_allowed`. The caller-key path is byte-for-byte unchanged:
+  an empty allow-list there is still opt-out.
+- `CredProx:CallerToken:MaxTokenAge` (M39) is now enforced by the CredProx caller-
+  authentication stage before any `ICallerTokenMapper` runs, so replacing the mapper
+  cannot drop the bound; an `iat` more than the JWT bearer handler's default five-minute
+  clock skew in the future is rejected as well. The value must be greater than zero and
+  less than 24 h — anything else now refuses startup — and is written `d.HH:mm:ss`: a
+  bare number binds as days (`15` is fifteen days; fifteen minutes is `00:15:00`). It is
+  read once at startup; changing it requires a restart.
+- Diagnosability of refused caller tokens (M39): the authentication and operation stages
+  log the refusal reason server-side (stale token, unlisted client, no matching named
+  rule); response bodies are unchanged. A caller that lists `TokenClientIds` but names no
+  operation rule logs one startup warning naming it ("this caller can never admit a
+  token") — the host starts and its caller-key path keeps working.
+- Configuration hardening (M39): an `Operations:N:Name` with leading or trailing
+  whitespace is refused at startup naming the caller and rule index, like padded
+  `TokenClientIds` entries already were, instead of binding and matching nothing.
+
+### Breaking
+
+- The caller contract surface collapses to single constructors with optional parameters
+  (M39; pre-1.0, no released consumer is affected). Removed: `CallerDefinition`'s
+  four-argument constructor `(String, IReadOnlyList<CallerKey>,
+  IReadOnlyList<CallerOperationRule>, CallerLimits)`, `CallerOperationRule`'s
+  three-argument constructor `(String, IReadOnlyCollection<String>,
+  IReadOnlyCollection<String>)`, `CallerIdentity`'s two-argument constructor
+  `(String, String)` and its two-argument `Deconstruct`. Replacements:
+  `CallerDefinition(callerId, keys, operations, limits = null, tokenClientIds = null)`,
+  `CallerOperationRule(route, methods, pathPatterns, name = null)`, and the positional
+  record `CallerIdentity(CallerId, KeyId, ClientId = null)`. Migration: recompile against
+  this package — existing positional call sites are source-compatible and need no
+  edits; deconstruct with three variables
+  (`var (callerId, keyId, clientId) = identity;`) or read the properties.
+
 ## [0.10.0] - 2026-11-15
 
 Token lifetime policy unified across all three credential providers (M38): every

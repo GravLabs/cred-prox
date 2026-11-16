@@ -23,8 +23,8 @@ disclosure timeline with you.
 
 | Version | Supported |
 |---|---|
-| 0.3.x (current) | ✅ fixes land on `main` and ship in the next release |
-| < 0.3 | ❌ pre-release; upgrade |
+| The latest release (see the [CHANGELOG](CHANGELOG.md)) | ✅ fixes land on `main` and ship in the next release |
+| Older releases | ❌ upgrade to the latest release |
 
 There are no backport branches yet. Fixes ship forward.
 

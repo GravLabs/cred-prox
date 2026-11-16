@@ -129,7 +129,7 @@ jobs:
 
   # Plan §6: examples build against the packed packages (catching packaging mistakes) and
   # the offline-capable ones smoke against local stubs/containers.
-  # E4 (Spotify) and E5 (Graph) build here; their live smokes need vendor accounts (nightly).
+  # E5 (Graph) builds here; it has no smoke yet (planned offline smoke: plan M41).
   examples:
     name: Examples build and smoke
     runs-on: ubuntu-latest
@@ -151,7 +151,7 @@ jobs:
 
       - name: Build all examples (Release, against the packages)
         run: |
-          for p in QuickStart OAuthKeycloak MutualTls Spotify MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie CallerApiKey; do
+          for p in QuickStart OAuthKeycloak MutualTls MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie CallerApiKey AgentTokens; do
             dotnet build "samples/$p" --configuration Release
           done
 
@@ -211,3 +211,8 @@ jobs:
       # Caller API keys: 401 missing == 401 wrong with no echo, key stripped upstream (WireMock).
       - name: Smoke E18 CallerApiKey (WireMock)
         run: samples/CallerApiKey/smoke.sh
+
+      # Agent tokens: named role admits, unlisted or absent roles 403, unlisted client and
+      # stale token 401, bearer stripped before forwarding (offline OIDC stub).
+      - name: Smoke E19 AgentTokens (offline OIDC stub)
+        run: samples/AgentTokens/smoke.sh

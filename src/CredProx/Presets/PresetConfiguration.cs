@@ -33,13 +33,15 @@ internal static class PresetConfiguration
     /// The six vendor presets CredProx 0.3 embedded and 0.4 removed: the library ships no
     /// built-in vendor knowledge, and every vendor is shown as explicit config in its own
     /// sample. A credential that still names one of these gets an error pointing at the
-    /// sample whose config replaces the preset — unless the host defines a preset of that
+    /// sample whose config replaces the preset (the Spotify sample was retired, so
+    /// <c>spotify</c> points at the OAuthKeycloak sample, which shows the same
+    /// client-credentials mechanism) — unless the host defines a preset of that
     /// name itself, which wins (the name is the host's to reuse).
     /// </summary>
     private static readonly Dictionary<string, string> RemovedBuiltInPresets =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["spotify"] = "samples/Spotify",
+            ["spotify"] = "samples/OAuthKeycloak",
             ["microsoft-graph"] = "samples/MicrosoftGraph",
             ["github-app"] = "samples/GitHubApp",
             ["keycloak"] = "samples/OAuthKeycloak",

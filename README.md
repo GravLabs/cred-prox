@@ -5,7 +5,14 @@ Outbound credential and policy brokering for third-party APIs, built on
 
 Callers send requests without secrets. CredProx attaches the right credential (OAuth tokens,
 API keys, client certificates, signatures), enforces per-caller policy, and forwards the
-request. Vendor integration is **configuration only** — no vendor-specific C#.
+request. Vendor integration is **configuration only**, with no vendor-specific C#.
+
+**Built for AI agents and other short-lived workers.** An agent never holds a vendor secret,
+and it doesn't need a long-lived CredProx secret either. It presents a short-lived Microsoft
+Entra (or any OpenID Connect) access token, obtained through a managed identity or workload
+identity federation, and Entra app roles narrow what it may call. See
+[`samples/AgentTokens`](samples/AgentTokens) and
+[ADR-0004](docs/adr/0004-short-lived-scoped-caller-tokens.md).
 
 ```csharp
 builder.Services.AddCredProxTokenCache();
@@ -21,36 +28,52 @@ builder.Services.AddReverseProxy()
 {
   "CredProx": {
     "Credentials": {
-      "spotify": {
+      "graph": {
         "Type": "OAuthClientCredentials",
-        "TokenEndpoint": "https://accounts.spotify.com/api/token",
+        "TokenEndpoint": "https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token",
         "ClientId": "<app-client-id>",
-        "ClientSecret": "secret:spotify-client-secret",
-        "ClientAuthentication": "BasicHeader"
+        "Scope": "https://graph.microsoft.com/.default",
+        "ClientSecret": "secret:graph-client-secret"
       }
     },
-    "Secrets": { "spotify-client-secret": "<app-client-secret>" }
+    "Secrets": { "graph-client-secret": "<app-client-secret>" }
   },
   "ReverseProxy": {
     "Routes": {
-      "spotify": {
-        "ClusterId": "spotify",
-        "Match": { "Path": "/spotify/{**catch-all}" },
-        "Metadata": { "CredProx.Credential": "spotify" }
+      "graph": {
+        "ClusterId": "graph",
+        "Match": { "Path": "/graph/{**catch-all}" },
+        "Transforms": [ { "PathRemovePrefix": "/graph" } ],
+        "Metadata": { "CredProx.Credential": "graph" }
       }
+    },
+    "Clusters": {
+      "graph": { "Destinations": { "graph": { "Address": "https://graph.microsoft.com/" } } }
     }
   }
 }
 ```
 
-A caller calls `/spotify/...` with no `Authorization` header; the vendor receives the OAuth
-token. Start with [`samples/QuickStart`](samples/QuickStart) — fourteen samples (E1–E14,
-[samples/README.md](samples/README.md)) cover OAuth client credentials, mTLS, login
-exchanges with per-environment partitions, per-caller credentials, token exchange for
-per-user downstream credentials, GitHub App, HMAC signing, custom plugins and operations
-under load. Each vendor — Spotify, Microsoft Graph,
-ADP, GitHub App, Keycloak — is one isolated sample with its full setup spelled out in
-plain config; the library ships no built-in vendor presets.
+A caller calls `/graph/v1.0/users` with no `Authorization` header; Microsoft Graph receives
+an Entra access token that CredProx obtained, cached and refreshed.
+
+## Start here
+
+| If you want to… | Example |
+|---|---|
+| Give AI agents short-lived, scoped access with no stored secret (Entra) | [AgentTokens](samples/AgentTokens) (E19) |
+| Put an AI agent's tool calls behind per-agent allow-lists | [AgentEgress](samples/AgentEgress) (E15) |
+| Front an AI provider: caller keys in, provider key injected, streaming intact | [AiGateway](samples/AiGateway) (E13) |
+| Call Microsoft Graph or any Entra-protected API, with a secret or secretless | [MicrosoftGraph](samples/MicrosoftGraph) (E5) |
+| OAuth client credentials end to end (cache, single-flight, refresh) | [OAuthKeycloak](samples/OAuthKeycloak) (E2) |
+| OAuth plus a client certificate on every hop (ADP shape) | [ADP](samples/ADP) (E6) |
+| Exchange a user's token for a per-user downstream token | [TokenExchange](samples/TokenExchange) (E14) |
+| Authenticate callers with API keys kept as config | [CallerApiKey](samples/CallerApiKey) (E18) |
+
+Smallest possible host: [`samples/QuickStart`](samples/QuickStart). Every example, with
+what it needs and how it is verified, is listed in [samples/README.md](samples/README.md).
+Each vendor is one isolated sample with its full setup in plain config; the library ships
+no built-in vendor presets.
 
 ## What's in the box
 
@@ -64,21 +87,25 @@ plain config; the library ships no built-in vendor presets.
   startup; Azure Key Vault add-on.
 - **Destinations & connections**: static or templated with fail-closed allow-lists;
   client certificates and mTLS per cluster, with reload.
-- **Caller authentication**: inbound API keys, per-caller vendor accounts, fail-closed
+- **Caller authentication**: short-lived Entra / OpenID Connect access tokens whose roles
+  narrow the caller's rules, inbound API keys, per-caller vendor accounts, and fail-closed
   operation allow-lists.
 - **Operations**: throttling with `Retry-After`, per-cluster retries/circuit breakers,
   credential health probes, audit log with redaction and pluggable sinks.
+- **Safety nets**: a per-vendor and per-caller **kill switch** by configuration alone,
+  `401 credprox.consent_required` when a user still has to grant consent, and **response
+  scrubbing** that removes an echoed credential before the caller sees it.
 - **Plugins**: `CredProx.Abstractions` is the contract; `CredProx.Testing` ships the
   fakes and conformance suites the built-ins themselves are tested with.
 
 ## Vendors
 
 [docs/vendors/](docs/vendors/) carries a copy-paste `CredProx:` config block per
-vendor — [ADP](docs/vendors/adp.md), [Workday](docs/vendors/workday.md),
-[Salesforce](docs/vendors/salesforce.md), [ServiceNow](docs/vendors/servicenow.md),
-[GitHub Apps](docs/vendors/github-apps.md), [Microsoft Graph](docs/vendors/graph.md)
-and [Spotify](docs/vendors/spotify.md) — each with the auth model, required secret
-names, scopes and gotchas. Every block is bound and validated through the real
+vendor: [Microsoft Graph](docs/vendors/graph.md), [ADP](docs/vendors/adp.md),
+[Workday](docs/vendors/workday.md), [Salesforce](docs/vendors/salesforce.md),
+[ServiceNow](docs/vendors/servicenow.md) and [GitHub Apps](docs/vendors/github-apps.md).
+Each one covers the auth model, required secret names, scopes and gotchas.
+Every block is bound and validated through the real
 fail-closed startup path by a CI test, so a snippet with a wrong or misspelled key
 fails the build, not your deploy. Facts are sample-traceable, cited to vendor docs,
 or explicitly marked unverified. These are docs, not built-ins — the library still
@@ -103,14 +130,11 @@ yet; the standard DI-based proxy setup is warning-clean under
 
 ## Status
 
-**0.6.0** — kill switch (take a cluster or caller out of service by config, live on reload),
-consent-required signalling, and response secret scrubbing: any credential value the
-pipeline injects is removed when the upstream reflects it back, with `text/event-stream`
-scrubbed per event so streaming latency survives (breaking config: list entries under
-`CredProx` sections must now be indexed, and unknown keys in the remaining sections refuse
-startup — see the [CHANGELOG](CHANGELOG.md) migration notes). Example E15 `samples/AgentEgress`
-shows the AI-agent egress shape. The public API is stable within `0.6.x`; APIs marked
-`[Experimental]` may change before 1.0.
+Pre-1.0 and actively developed. The [CHANGELOG](CHANGELOG.md) is the source of truth for the
+current version, what changed and any migration steps; read it before upgrading across a
+minor version. The public API is stable within a minor version (`0.x.*`). APIs marked
+`[Experimental]` may change before 1.0, and that covers the caller-authentication plugin
+points.
 
 ## Security
 

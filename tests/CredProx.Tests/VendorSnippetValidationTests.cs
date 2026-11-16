@@ -43,7 +43,7 @@ public sealed class VendorSnippetValidationTests
 
     private static readonly string[] ExpectedPages =
     [
-        "adp.md", "github-apps.md", "graph.md", "salesforce.md", "servicenow.md", "spotify.md", "workday.md",
+        "adp.md", "github-apps.md", "graph.md", "salesforce.md", "servicenow.md", "workday.md",
     ];
 
     // ---- roster + extraction ----
@@ -123,7 +123,7 @@ public sealed class VendorSnippetValidationTests
     /// <summary>The registration half: this is where unknown-key refusal happens.</summary>
     private static ServiceProvider Register(IConfiguration config)
     {
-        // Same registration set a sample host runs (samples/Spotify/Program.cs:27-34),
+        // Same registration set a sample host runs (samples/MicrosoftGraph/Program.cs:84-91),
         // minus the web host: cache, config secrets, built-in credential types, the
         // config-bound credential registry, then the YARP + CredProx feature.
         var services = new ServiceCollection();

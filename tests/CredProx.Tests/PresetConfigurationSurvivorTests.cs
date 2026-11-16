@@ -21,7 +21,7 @@ public sealed class PresetConfigurationSurvivorTests
     }
 
     [Theory]
-    [InlineData("spotify", "samples/Spotify")]
+    [InlineData("spotify", "samples/OAuthKeycloak")]
     [InlineData("microsoft-graph", "samples/MicrosoftGraph")]
     [InlineData("github-app", "samples/GitHubApp")]
     [InlineData("keycloak", "samples/OAuthKeycloak")]

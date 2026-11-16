@@ -3,15 +3,19 @@
 Each example is a small, runnable ASP.NET Core host with its own README: what it
 demonstrates, what you need, the exact config, and a `curl` showing the request **without**
 a credential going in and the upstream receiving one. Vendor integrations are **config
-only** — no vendor-specific C#.
+only**, with no vendor-specific C#.
+
+**Start here:** AgentTokens (E19) for AI agents on Entra, then AgentEgress (E15), AiGateway
+(E13), MicrosoftGraph (E5), OAuthKeycloak (E2), ADP (E6), TokenExchange (E14) and
+CallerApiKey (E18). QuickStart (E1) is the smallest host. The README's "Start here" table
+maps each one to the problem it solves.
 
 | # | Project | Demonstrates | Needs | Verified by |
 |---|---------|--------------|-------|-------------|
 | E1 | [QuickStart](QuickStart/README.md) | Smallest host; `StaticKey` into a public echo service | Nothing | `-- --smoke` (in-process) or `./smoke.sh` (WireMock) |
 | E2 | [OAuthKeycloak](OAuthKeycloak/README.md) | `OAuthClientCredentials` end to end; cache, single-flight, refresh-on-401 | Docker | `./smoke.sh` |
 | E3 | [MutualTls](MutualTls/README.md) | Client certificate per cluster + live rotation; BadSSL variant | Docker (local) / nothing (badssl) | `./smoke.sh` |
-| E4 | [Spotify](Spotify/README.md) | A real public vendor in explicit config: `OAuthClientCredentials` + Basic client auth + two host values | Free Spotify app | build (nightly smoke with creds) |
-| E5 | [MicrosoftGraph](MicrosoftGraph/README.md) | Entra client credentials in explicit config **and** secretless `TokenCredential`; Key Vault secret source | Entra app (+Azure for identity) | build (nightly smoke with creds) |
+| E5 | [MicrosoftGraph](MicrosoftGraph/README.md) | Entra client credentials in explicit config **and** secretless `TokenCredential`; Key Vault secret source | Entra app (+Azure for identity) | build (offline smoke planned: M41) |
 | E6 | [ADP](ADP/README.md) | ADP's shape as config, the original certificate arrangement: OAuth client credentials (Basic auth, query-string grant kept verbatim) + **one named mTLS connection on both the token call and the API calls**, certificate as a base64 passwordless PFX (the Key Vault certificate backing-secret format); nginx enforces the certificate offline; Key Vault variant with an offline live-rotation witness; measured wire shape recorded | Docker (nginx mTLS + WireMock + offline KV stub) | `./smoke.sh` |
 | E7 | [PerCallerCredentials](PerCallerCredentials/README.md) | Caller keys, per-caller credential/operation allow-lists, audit redaction | Docker (Keycloak) | `./smoke.sh` |
 | E8 | [GitHubApp](GitHubApp/README.md) | `JwtAssertion` in `BearerExchange` mode, all in config: app JWT → installation token → GitHub REST | Nothing (stub mode) / GitHub App (live) | `-- --smoke` (in-process stubs) |
@@ -25,11 +29,12 @@ only** — no vendor-specific C#.
 | E16 | [SessionCookie](SessionCookie/README.md) | Session-cookie login (the generic Cayuse shape): form login → `Set-Cookie` replayed via `Location: Cookie` (caller cookies replaced, never merged), `{partition}` per-environment accounts/secrets with a strict `X-API-Env` allow-list, transparent refresh through server-side expiry, scrubbed session echo, vendor 404 normalised to `problem+json` (with a per-route opt-out) | Nothing (in-process CRM stub) | `-- --smoke` (in-process) |
 | E17 | [AzureContainerApps](AzureContainerApps/README.md) | Round-2 live Azure host, one image three modes (proxy / counterparty / battery, zero public listeners); offline in-process smoke plus a real-provider vault-reload proof against a loopback Key Vault stub | Nothing offline; Azure resources for the live run, driven only through the maintainer's gate | `docker run --rm <image> --mode proxy --smoke` |
 | E18 | [CallerApiKey](CallerApiKey/README.md) | Caller API keys as config: `X-API-Key` validated against a secret-backed SHA-256 store, 401 missing == 401 wrong with nothing echoed, key stripped before forwarding (journal-proven) | Docker (WireMock stub) | `./smoke.sh` |
+| E19 | [AgentTokens](AgentTokens/README.md) | AI agents with no stored secret: the agent gets a short-lived Microsoft Entra access token (managed identity / workload identity federation, Azure.Identity). CredProx validates it, maps the client (`azp`) to a caller and admits only the operations its app roles name (named rules, never wider); `MaxTokenAge` refuses stale tokens and the bearer is stripped before forwarding. Includes the Entra setup | Docker (locally signed OIDC issuer + upstream stub, offline); an Entra tenant for a live run | `./smoke.sh` |
 
 The library ships **no built-in vendor presets** (0.4.0): every vendor above is one
 isolated sample whose full setup is plain config. A community preset
 (`CredProx:Presets` or a custom `IPresetSource`) can package a sample's fixed facts for
-reuse — see the Spotify README.
+reuse; see CONTRIBUTING.md.
 
 ## Before you build: pack the packages
 

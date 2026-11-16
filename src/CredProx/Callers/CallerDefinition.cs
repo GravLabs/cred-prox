@@ -42,7 +42,8 @@ public sealed class CallerKey
 /// <summary>
 /// One operation-allow-list entry of a caller (§4 Phase B): which route (any when
 /// omitted), which methods (any when empty) and which path patterns (any when empty) the
-/// caller may use. Patterns are matched against the decoded request path; <c>*</c> matches
+/// caller may use, optionally gated by a scope <see cref="CallerOperationRule.Name"/>
+/// (M39, ADR-0004). Patterns are matched against the decoded request path; <c>*</c> matches
 /// exactly one path segment, a trailing <c>**</c> matches the remaining segments (zero or
 /// more). Matching is ordinal and case-sensitive — the strictest reading, so case tricks
 /// and homoglyphs simply do not match.
@@ -54,11 +55,22 @@ public sealed class CallerOperationRule
     /// <param name="route">The route id this entry applies to; <see langword="null"/> for any route.</param>
     /// <param name="methods">The admitted HTTP methods; empty for any.</param>
     /// <param name="pathPatterns">The admitted path patterns; empty for any path.</param>
-    public CallerOperationRule(string? route, IReadOnlyCollection<string> methods, IReadOnlyCollection<string> pathPatterns)
+    /// <param name="name">
+    /// The scope name of this entry (M39, ADR-0004): on a request carrying a scope set
+    /// (a caller token's <c>roles</c>/<c>scp</c>) only named entries run, and only when
+    /// their name is among the request's scopes. <see langword="null"/> means the entry
+    /// admits keys but never a token — name your rules to give an agent caller scopes.
+    /// </param>
+    public CallerOperationRule(
+        string? route,
+        IReadOnlyCollection<string> methods,
+        IReadOnlyCollection<string> pathPatterns,
+        string? name = null)
     {
         Route = string.IsNullOrEmpty(route) ? null : route;
         Methods = new HashSet<string>(methods ?? [], StringComparer.Ordinal);
         PathPatterns = (pathPatterns ?? []).ToArray();
+        Name = string.IsNullOrEmpty(name) ? null : name;
     }
 
     /// <summary>The route id this entry applies to; <see langword="null"/> for any route.</summary>
@@ -69,6 +81,14 @@ public sealed class CallerOperationRule
 
     /// <summary>The admitted path patterns; empty for any path.</summary>
     public IReadOnlyList<string> PathPatterns { get; }
+
+    /// <summary>
+    /// The scope name of this entry (M39, ADR-0004), compared ordinal to the request's
+    /// scope set; <see langword="null"/> for an unnamed entry, which no token request
+    /// can match (the caller-key path ignores it). <see cref="Matches"/> ignores it —
+    /// the allow-list stage applies it.
+    /// </summary>
+    public string? Name { get; }
 
     /// <summary>Whether this entry admits the given operation.</summary>
     /// <param name="routeId">The matched route id.</param>
@@ -105,20 +125,26 @@ public sealed class CallerDefinition
 {
     /// <summary>Creates a caller definition.</summary>
     /// <param name="callerId">The configured caller id (the config key).</param>
-    /// <param name="keys">The active keys; must not be empty.</param>
+    /// <param name="keys">The active keys; together with <paramref name="tokenClientIds"/> must not be empty.</param>
     /// <param name="operations">The operation allow-list entries; empty means unrestricted.</param>
     /// <param name="limits">The request budget; <see langword="null"/> for unlimited.</param>
+    /// <param name="tokenClientIds">
+    /// Application (client) ids whose caller tokens authenticate as this caller (M39,
+    /// ADR-0004); <see langword="null"/> means none. A caller may take keys, token
+    /// clients, or both — keys only with none.
+    /// </param>
     public CallerDefinition(
         string callerId,
         IReadOnlyList<CallerKey> keys,
         IReadOnlyList<CallerOperationRule> operations,
-        CallerLimits? limits = null)
+        CallerLimits? limits = null,
+        IReadOnlyList<string>? tokenClientIds = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(callerId);
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(operations);
 
-        if (keys.Count == 0)
+        if (keys.Count == 0 && (tokenClientIds is null || tokenClientIds.Count == 0))
         {
             throw new ArgumentException($"Caller '{callerId}' must declare at least one key.", nameof(keys));
         }
@@ -127,6 +153,7 @@ public sealed class CallerDefinition
         Keys = keys;
         Operations = operations;
         Limits = limits;
+        TokenClientIds = tokenClientIds ?? [];
     }
 
     /// <summary>The configured caller id; also the value the <c>caller:</c> partition source yields.</summary>
@@ -140,6 +167,14 @@ public sealed class CallerDefinition
 
     /// <summary>The caller's request budget (§3.7); <see langword="null"/> means unlimited.</summary>
     public CallerLimits? Limits { get; }
+
+    /// <summary>
+    /// Application (client) ids whose caller tokens authenticate as this caller (M39,
+    /// ADR-0004); empty when the caller takes only API keys. Matching is
+    /// case-insensitive; one client id may be listed by at most one caller (the binder
+    /// rejects the ambiguity).
+    /// </summary>
+    public IReadOnlyList<string> TokenClientIds { get; }
 }
 
 /// <summary>

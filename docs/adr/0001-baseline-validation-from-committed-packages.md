@@ -6,7 +6,7 @@ Status: accepted (M25, GitHub public pivot)
 ## Context
 
 Every `dotnet pack` runs APICompat against the last published release
-(`<PackageValidationBaselineVersion>`, currently `0.9.4`) so a public-surface removal
+(`<PackageValidationBaselineVersion>`, currently `0.10.0`) so a public-surface removal
 fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
 Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
 declared the internal LAN NuGet registry (anonymous download), and the SDK's
@@ -22,10 +22,10 @@ Commit the **published baseline packages** under `build/baselines/` and point
 `<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
 
 ```
-build/baselines/CredProx.0.9.4.nupkg               22783b2569a2a7b24b368f797f7c385bba537612dec7f144f9600babcd5b33d8
-build/baselines/CredProx.Abstractions.0.9.4.nupkg  1bca146ccf0c9f8584f187059fedceab680309e9adc26cac8f9ee6cb8cbc2892
-build/baselines/CredProx.AzureKeyVault.0.9.4.nupkg 00333b451cc846591e1934b0054fea7f8392633c9293b924b2a2afe2c72f6b00
-build/baselines/CredProx.Testing.0.9.4.nupkg       a3e93911a35169610dcac7c894d25068f1f183c992d37ab138426e51e8a48998
+build/baselines/CredProx.0.10.0.nupkg               38235f8d20776ff06cfd785853a29f554e43f904e81d1bb83a4ba99d0c50bc1a
+build/baselines/CredProx.Abstractions.0.10.0.nupkg  ae5b3494c3428c4c0b8f25d8daf645fa3c7fc8e94a5634131d237e504f8a31aa
+build/baselines/CredProx.AzureKeyVault.0.10.0.nupkg 44975f741ade7736d13165a7b3a9b799f09f9eda8a00de8a960dd8b7591a0643
+build/baselines/CredProx.Testing.0.10.0.nupkg       b8ed195d6b9ed96f5ebc44294f85953cb517f5b04dff03af459373d0ad3a5e42
 ```
 
 The files are the bytes downloaded from the registry that published them (sha256 above;
@@ -72,7 +72,11 @@ rotated at the `0.10.0` prep (2026-11-15, owner "1 yes" ruling d-f8dcadee to pub
 M38 as a minor): those registry-served `0.9.4` bytes — sha256 verified equal to the
 published artifacts recorded in PUBLISHING.md's release history, and member-wise
 disclosure-scanned before commit — replace the `0.9.3` set, whose entries are in git
-history at that commit. Pack the
+history at that commit. `0.10.0` rotated at the `0.11.0` prep (2026-11-16, owner
+decision d-72cfeb67 to publish M39 and M40 as a minor): those registry-served `0.10.0`
+bytes — sha256 verified equal to the published artifacts recorded in PUBLISHING.md's
+release history — replace the `0.9.4` set, whose entries are in git history at that
+commit. Pack the
 **fresh**
 `obj/` after rotating (see
 Consequences): a repack on an untouched obj skips validation silently.

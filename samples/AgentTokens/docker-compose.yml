@@ -1,0 +1,13 @@
+services:
+  issuer:
+    image: wiremock/wiremock:3.9.2
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./wiremock/issuer/mappings:/home/wiremock/mappings:ro
+  upstream:
+    image: wiremock/wiremock:3.9.2
+    ports:
+      - "8086:8080"
+    volumes:
+      - ./wiremock/upstream/mappings:/home/wiremock/mappings:ro

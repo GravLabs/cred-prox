@@ -6,8 +6,8 @@ pipeline feature implements. This package has no dependencies beyond .NET and no
 implementation — implement it against a released `CredProx` and your plugin needs no
 fork of the library.
 
-The contract is versioned with the library and frozen in shape while `CredProx` is on a
-`0.3.x` minor; APIs marked `[Experimental]` may change before 1.0.
+The contract is versioned with the library and stable within a minor version (`0.x.*`);
+APIs marked `[Experimental]` may change before 1.0.
 
 ## What you can build
 

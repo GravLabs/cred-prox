@@ -57,16 +57,17 @@
 
   <!-- NuGet package metadata. -->
   <PropertyGroup>
-    <!-- Single version for the whole repo; milestones bump it (plan §7). 0.10.0 ships
-         the M38 token-lifetime policy: JwtAssertion's optional 'expires_at' is parsed as
-         an invariant absolute expiry (epoch or ISO; explicit offset/Z read exactly as
-         before), a value at or before now rejects as unusable through the
-         protocol-violation path, and vendor-supplied lifetimes cap at 24 h - the
-         configured DefaultLifetime is never capped. The token cache floors its refresh
-         arithmetic at DateTimeOffset.MinValue. Minor bump: TokenExchangeProvider and
-         JwtAssertionProvider gain optional-ILogger constructor overloads (additive
-         public surface, no breaking change). -->
-    <Version>0.10.0</Version>
+    <!-- Single version for the whole repo; milestones bump it (plan §7). 0.11.0 ships
+         the M39 agent tokens: a caller presents a short-lived OIDC access token whose
+         Entra app roles admit exactly the named operation rules - a caller without
+         named rules admits no token - with a host-swappable validation handler,
+         MaxTokenAge enforced at the caller-authentication stage, raw Entra claim names
+         (MapInboundClaims is off on the caller-token scheme), and server-side refusal
+         diagnostics. Minor bump: the caller-token API is additive, and one Breaking
+         change (allowed pre-1.0) collapses the caller contract surface to single
+         constructors with optional parameters (CallerDefinition, CallerOperationRule,
+         CallerIdentity). -->
+    <Version>0.11.0</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Authors>Hector Ramos</Authors>
     <Company>Hector Ramos</Company>
@@ -77,11 +78,11 @@
   </PropertyGroup>
 
   <!-- Package quality (plan §7): SourceLink for GitHub, package README, and API
-       compatibility validation. The PackageValidation baseline is the published 0.9.4
-       bytes (rotated at the 0.10.0 prep, 2026-11-15 - ADR-0001; the 0.9.3 generation from
-       the 0.9.4 rotation is in git history, and the internal-URL nuspec residue the 0.7.0
+       compatibility validation. The PackageValidation baseline is the published 0.10.0
+       bytes (rotated at the 0.11.0 prep, 2026-11-16 - ADR-0001; the 0.9.4 generation from
+       the 0.10.0 rotation is in git history, and the internal-URL nuspec residue the 0.7.0
        baselines carried has been out of every generation since). Every pack compares
-       the public surface against the published 0.9.4. The baseline
+       the public surface against the published 0.10.0. The baseline
        packages are the published bytes, committed under
        build/baselines (docs/adr/0001), so validation needs no network or LAN feed —
        this machine and a GitHub-hosted runner compare against identical bytes.
@@ -108,7 +109,7 @@
     <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
     <EnableSourceLink>true</EnableSourceLink>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.9.4</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.10.0</PackageValidationBaselineVersion>
     <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
          entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
          $(MSBuildProjectName) equals $(PackageId) for all four packable projects. -->

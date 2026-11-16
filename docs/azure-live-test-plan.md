@@ -32,8 +32,8 @@ app registration as the intended proof — this plan makes that proof exist, on
 the maintainer's subscription, and closes the biggest fidelity gap in the test
 story.
 
-What is NOT in scope: E4 Spotify and E6 ADP live vendor smokes (no vendor
-accounts; unchanged build-only status), and any change to published behaviour.
+What is NOT in scope: E6 ADP live vendor smokes (no vendor
+accounts; unchanged build-only status; E4 Spotify was retired in M40), and any change to published behaviour.
 Expected code delta in `src/`: zero — this validates what is shipped.
 
 ## Ground rules (all phases)

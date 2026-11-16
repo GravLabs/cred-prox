@@ -75,7 +75,7 @@ src/CredProx/                core + built-in features
 src/CredProx.AzureKeyVault/  add-on: Key Vault secret source, TokenCredential
 src/CredProx.Testing/        fakes + conformance suites for plugin authors
 tests/…                      see the table above
-samples/                     E1–E14 (plan §6) — examples are the main documentation
+samples/                     the examples (plan §6), the main documentation
 ```
 
 ## Adding a vendor
@@ -84,9 +84,10 @@ The library ships **no built-in vendor presets** (0.4.0): every vendor lives in 
 isolated sample — README, explicit config, WireMock stubs where it runs offline, smoke
 script. To add one:
 
-1. Create `samples/<Vendor>` modeled on the closest existing sample (E4 Spotify is the
-   smallest OAuth client-credentials shape; E12 LoginExchange shows partitions and the
-   allow-list). Write the credential block out in full — no preset references.
+1. Create `samples/<Vendor>` modeled on the closest existing sample (E2 OAuthKeycloak is
+   the OAuth client-credentials shape with an offline smoke; E6 ADP adds a client
+   certificate; E12 LoginExchange shows partitions and the allow-list).
+   Write the credential block out in full — no preset references.
 2. Add it to `CredProx.slnx` and the CI sample build loop
    (`.github/workflows/ci.yml`), plus a smoke step if it runs offline.
 3. A preset is a **distribution** choice for preset authors, not a library feature:

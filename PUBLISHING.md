@@ -11,41 +11,38 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-15): `0.9.4` is **published on the registry** — the library
-hardening patch: `expires_in` is parsed with the canonical JSON-number grammar on all
-three credential providers — negative values reject through the protocol-violation path
-on all three, non-finite and thousands-grouped values reject on the OAuth
-client-credentials provider while the other two keep the `DefaultLifetime` fallback
-(pending the lifetime-policy decision) — and **nothing is cached on any rejection**.
-The benchmark regression gate gained a statistics-count floor, per-arm N/P95 printing,
-parameter-aware comparison keys and loud partial-run rules; the SSE benchmark workload
-now measures real per-event redaction over a bounded stream. No public API change —
-APICompat against the published `0.9.3` surface is clean on all four packages. GitHub
-`main` and tag `0.9.4` sit on **one squashed commit**
-`ca814c7bf0a5ccce0997a2c2f2a185ed669049d7` (noreply author; tree identical to the
-internal release commit `8df333c`) appended on the previous public tip `02e495cc` — a
-regular append: no collapse, no tag deletions. CI green on the public commit
-(Actions run 43680224691, all three jobs, the Examples job smokes E6 and E18).
-`0.9.4` shipped end to end: packed once from the public
-commit (deterministic CI path mapping, fresh obj, isolated restore cache), the four
-nupkgs pushed exactly once (the client auto-routes the adjacent snupkgs; pushes
-authenticate via the machine-local `packageSourceCredentials` — an anonymous PUT
-answers 401 — and serving is proven consumer-side), consumer restore byte-identical,
-QuickStart smoke green on the downloaded bytes — the symbol packages carry the full
-public SHA `ca814c7` and the `/_/` source mapping. `0.9.4` is the supported version;
-`0.9.3`, `0.9.2`, `0.9.1`, `0.9.0` and `0.8.2` source links still resolve (their commits are
-publicly referenced). Source links for `0.8.1` and earlier
-point at commits that are off every branch and tag; they resolve only while GitHub
-retains the unreferenced objects (no support purge was requested) —
-**unsupported-by-construction** (see the `0.8.1` history entry). The Entra
-on-behalf-of removal shipped at `0.8.0` stays **breaking** for `Mode: EntraObo`
-users, and the `0.9.0` https default stays breaking as described; both CHANGELOG
-entries remain the consumer contract. The `0.7.1` known issues stay resolved (F1:
-CI-path-mapped PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1`
-published packages keep their historical metadata (immutable). The baseline rotation
-**ran with the `0.9.4` prep**: `build/baselines/` holds the published `0.9.3` bytes
-(sha256-verified; ADR-0001); the next rotation runs at the next release prep per the
-rule below.
+Current state (2026-11-15): `0.10.0` is **published on the registry** — the M38 token-lifetime
+policy: vendor-stated expiry (`expires_in`, `expires_at`) follows one invariant accept/cap/reject
+grammar across all three credential providers (explicit offset or `Z` reads exactly as before; an
+accepted lifetime above 24 h is capped to 24 h; non-numeric, non-finite and thousands-grouped
+values reject through the protocol-violation path with nothing cached; an already-past
+`expires_at` rejects as unusable; the configured `DefaultLifetime` is never capped), and the token
+cache floors its refresh arithmetic at `DateTimeOffset.MinValue`. The only public surface change
+is additive optional-`ILogger` constructor overloads on `TokenExchangeProvider` and
+`JwtAssertionProvider`; APICompat against the published `0.9.4` surface is otherwise clean on all
+four packages. The benchmark regression gate's SSE allocation arms now WARN above their 12 %
+allowance and hard-FAIL only above 2.5× the baseline allocation (measured scheduling-noise
+attribution below). GitHub `main` and tag `0.10.0` sit on **one squashed commit**
+`3ba52649c85a3d8b56ab4473c7ea87678e7ac3ba` (noreply author; tree identical to the internal release
+commit `6f247e0`) appended on the previous public tip `ca814c7` — a regular append: no collapse,
+no tag deletions. CI green on the public commit (Actions run 43765381059, all three jobs, the
+Examples job smokes E6 and E18). `0.10.0` shipped end to end: packed once from the public commit
+(deterministic CI path mapping, fresh obj, isolated restore cache), the four nupkgs pushed exactly
+once (the client auto-routes the adjacent snupkgs; pushes authenticate via the machine-local
+`packageSourceCredentials` — an anonymous PUT answers 401 — and serving is proven consumer-side),
+consumer restore byte-identical, QuickStart smoke green on the downloaded bytes — the symbol
+packages carry the full public SHA `3ba5264` and the `/_/` source mapping. `0.10.0` is the
+supported version; `0.9.4`, `0.9.3`, `0.9.2`, `0.9.1`, `0.9.0` and `0.8.2` source links still
+resolve (their commits are publicly referenced). Source links for `0.8.1` and earlier point at
+commits that are off every branch and tag; they resolve only while GitHub retains the
+unreferenced objects (no support purge was requested) — **unsupported-by-construction** (see the
+`0.8.1` history entry). The Entra on-behalf-of removal shipped at `0.8.0` stays **breaking** for
+`Mode: EntraObo` users, and the `0.9.0` https default stays breaking as described; both CHANGELOG
+entries remain the consumer contract. The `0.7.1` known issues stay resolved (F1: CI-path-mapped
+PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1` published packages keep
+their historical metadata (immutable). The baseline rotation **ran with the `0.10.0` prep**:
+`build/baselines/` holds the published `0.9.4` bytes (sha256-verified; ADR-0001); the next
+rotation runs at the next release prep per the rule below.
 
 ## What gets published
 
@@ -203,6 +200,64 @@ dotnet nuget locals http-cache --clear
   `README`/plan are the contract; changing one is a plan change, not a packaging fix.
 
 ## Release history
+
+- `0.10.0` (GitHub `3ba52649c85a3d8b56ab4473c7ea87678e7ac3ba`, internal release commit
+  `6f247e0`): published 2026-11-15 — the M38 token-lifetime policy (minor): vendor-stated expiry
+  (`expires_in`, `expires_at`) now follows one invariant grammar on all three credential
+  providers. An explicit offset or `Z` is read exactly as before; an accepted vendor lifetime
+  above 24 h is capped to 24 h (`DefaultLifetime` is never capped); non-numeric, non-finite and
+  thousands-grouped values reject through the protocol-violation path with nothing cached;
+  `JwtAssertion`'s `expires_at` accepts epoch seconds and an invariant ISO-8601 grammar
+  (offset-less means UTC); an already-past expiry rejects as unusable. The token cache floors
+  its refresh arithmetic at `DateTimeOffset.MinValue`. Public surface: additive optional-`ILogger`
+  constructor overloads on `TokenExchangeProvider` and `JwtAssertionProvider` only; no existing
+  API changed. The benchmark gate's SSE allocation arms became warn-above-12 % /
+  hard-FAIL-above-2.5× after the 2026-11-15 interleaved A/B attribution: at unchanged workload
+  the RELEASED-code control itself reached 16,578 B (1.26× — its own maximum across six
+  quiet-gated passes) while the candidate tail reached 25,567 B (1.95×) with none of the changed
+  code in the arm's path, so a fixed 12 % FAIL could not identify a code change. The test battery
+  was measured at the prep commit `f84a116` — the delta to the release commit `6f247e0` is
+  docs-only ×2 plus comment-only src/tests (18 lines, zero non-comment), and a fresh-context
+  prep check passed `f84a116`. The release gate itself ran on the preserved prep-check bench
+  bytes (sha256 20/20) with the shipped `f84a116` gate script and printed
+  `bench-compare: 13 methods compared, FAIL=0 WARN=4` (`OAuthCacheHit`, `OAuthCacheHitScrub`,
+  `StaticKeyAttach`, `SseCredProx` 23,149 B = 1.76×); the released `8df333c` script on the same
+  bytes prints `FAIL=1 WARN=3` — its FAIL is that same `SseCredProx` allocation arm the gate
+  change above addresses. Benchmarks: the post-publish refresh pass at `6f247e0` on a quiet
+  machine gated against the `0.9.4` baseline:
+  `bench-compare: 13 methods compared, FAIL=0 WARN=3` (all three WARNs are warn-mode
+  overhead-suite checks: `OAuthCacheHit` ratio ×1.19, `SseCredProx` ratio ×1.44, and
+  `SsePlain` allocations 8,325→9,960 B above its 12 % warn allowance and far below the
+  2.5× hard-FAIL — the M37-recorded non-deterministic arm; `SseCredProx` 13,618 B inside
+  its allowance, `SingleFlight` 23,434 B inside its 23,444–23,520 B band). A second quiet
+  pass on the same commit ~25 min earlier printed `FAIL=0 WARN=5` with the same arms plus
+  two warn-mode ratio drifts inside the documented ×1.6–2.8 echo noise — the WARN count
+  moves pass to pass on this shared machine and `FAIL=0` is the stable signal; the pass
+  above is the one that became `baselines/0.10.0/` (`MACHINE.md` records the environment).
+  Ceremony: packed **once** from a clean detached worktree at the PUBLIC commit after tree
+  equality with `6f247e0`, `-p:ContinuousIntegrationBuild=true` from fresh obj into an isolated
+  package cache; sanity loop ×4 passed (SourceLink carries the full public SHA and the
+  `/_/*`-to-raw mapping in every symbol package; no builder-home paths in any pdb or dll);
+  APICompat against the rotated `0.9.4` baselines exit 0 on all four packages (validation run
+  proven by the per-project `Microsoft.NET.ApiCompat.ValidatePackage.semaphore` — its messages
+  are Low-importance and absent from minimal-verbosity logs by design); member-wise disclosure
+  scan over all eight packages zero hits. The push round: four nupkgs (the client auto-routes
+  the adjacent snupkgs), each version exactly once — every PUT answered `201 Created`; pushes
+  authenticate via the machine-local `packageSourceCredentials`, serving proven consumer-side.
+  Nupkg sha256: `CredProx` `38235f8d20776ff06cfd785853a29f554e43f904e81d1bb83a4ba99d0c50bc1a`,
+  `CredProx.Abstractions` `ae5b3494c3428c4c0b8f25d8daf645fa3c7fc8e94a5634131d237e504f8a31aa`,
+  `CredProx.AzureKeyVault` `44975f741ade7736d13165a7b3a9b799f09f9eda8a00de8a960dd8b7591a0643`,
+  `CredProx.Testing` `b8ed195d6b9ed96f5ebc44294f85953cb517f5b04dff03af459373d0ad3a5e42`.
+  Consumer verify: http-cache cleared, out-of-repo scratch project, isolated package cache, all
+  four downloads byte-identical to the pushed artifacts, each served nuspec carrying commit
+  `3ba5264`; `samples/QuickStart` smoke green on those exact bytes. **Not verified at publish
+  (kept honest):** the SourceLink debugger step-through (CI asserts the path form in the packed
+  PDBs instead); the consumer-side `.snupkg` download path (symbol packages were checked at pack
+  time only); the QuickStart smoke ran the in-process `--smoke` stand-in, not the Docker/WireMock
+  E1 variant. GitHub: ONE squashed commit on the previous public tip `ca814c7`, noreply identity
+  — a regular append, no collapse, no tag deletions; the fresh-clone audit confirmed one new
+  commit, tree equality with `6f247e0` and zero disclosure hits; CI green (Actions run 43765381059,
+  all three jobs).
 
 - `0.9.4` (GitHub `ca814c7bf0a5ccce0997a2c2f2a185ed669049d7`, internal release commit
   `8df333c`): published 2026-11-15 — library hardening patch (M37): the vendor

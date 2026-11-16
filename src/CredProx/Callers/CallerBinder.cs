@@ -96,6 +96,30 @@ public sealed class CallerBinder
             }
         }
 
+        // One client id may belong to exactly one caller (M39): the token mapper matches
+        // case-insensitively, so an "Agent-A"/"agent-a" pair would authenticate one
+        // Entra app as two different callers — which caller wins would be registry luck.
+        // Fail closed naming both owners.
+        var clientOwners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (callerId, definition) in callers)
+        {
+            foreach (var clientId in definition.TokenClientIds)
+            {
+                if (clientOwners.TryGetValue(clientId, out var owner))
+                {
+                    // M39: a case-variant pair inside ONE caller is its own
+                    // defect — the two-owner wording would name the same caller twice.
+                    errors.Add(string.Equals(owner, callerId, StringComparison.Ordinal)
+                        ? $"The client id '{clientId}' is listed twice by caller '{callerId}' (client ids collide case-insensitively within a caller)."
+                        : $"The client id '{clientId}' is listed by more than one caller ('{owner}' and '{callerId}').");
+                }
+                else
+                {
+                    clientOwners[clientId] = callerId;
+                }
+            }
+        }
+
         return (errors.Count == 0 ? new CallerRegistry(callers) : null, errors);
     }
 
@@ -151,7 +175,33 @@ public sealed class CallerBinder
             keys.Add(new CallerKey(keyId, hash, expiresAt));
         }
 
-        if (keys.Count == 0 && errors.Count == 0)
+        // M39 (ADR-0004): token clients are the caller's second credential. A blank
+        // entry is a config error naming the caller — a silently-dropped "" would
+        // otherwise sit in TokenClientIds and match nothing (fail closed, M14a rule).
+        var tokenClientIds = new List<string>();
+        foreach (var clientSection in section.GetSection("TokenClientIds").GetChildren())
+        {
+            var clientId = clientSection.Value;
+            if (string.IsNullOrWhiteSpace(clientId))
+            {
+                errors.Add($"The caller '{callerId}' has an empty TokenClientIds entry.");
+                continue;
+            }
+
+            // M39: padded entries look bound in config but match nothing (the
+            // mapper compares verbatim), so they are refused, never silently trimmed.
+            if (!string.Equals(clientId, clientId.Trim(), StringComparison.Ordinal))
+            {
+                errors.Add(
+                    $"The caller '{callerId}' has a TokenClientIds entry with leading or trailing "
+                    + "whitespace — client ids are matched verbatim, so a padded entry admits nobody.");
+                continue;
+            }
+
+            tokenClientIds.Add(clientId);
+        }
+
+        if (keys.Count == 0 && tokenClientIds.Count == 0 && errors.Count == 0)
         {
             errors.Add($"The caller '{callerId}' declares no usable key under Keys.");
         }
@@ -173,12 +223,12 @@ public sealed class CallerBinder
         }
 
         definition = null!;
-        if (errors.Count > 0 || keys.Count == 0)
+        if (errors.Count > 0 || (keys.Count == 0 && tokenClientIds.Count == 0))
         {
             return false;
         }
 
-        definition = new CallerDefinition(callerId, keys, operations, limits);
+        definition = new CallerDefinition(callerId, keys, operations, limits, tokenClientIds);
         return true;
     }
 
@@ -282,10 +332,31 @@ public sealed class CallerBinder
             }
         }
 
+        // M39 (ADR-0004): an optional scope name, e.g. an Entra app-role value. An empty
+        // name would match no role — the same typo-shaped fail-closed family as Route.
+        var name = ruleSection["Name"];
+        if (name is not null && string.IsNullOrWhiteSpace(name))
+        {
+            errors.Add($"The caller '{callerId}' declares an operation with an empty Name.");
+            return false;
+        }
+
+        // M39: scope matching is ordinal, so a padded name — config-clean at a
+        // glance — can never intersect a real role and locks the rule out for everyone.
+        // Refused like a padded TokenClientIds entry, never silently trimmed.
+        if (name is not null && !string.Equals(name, name.Trim(), StringComparison.Ordinal))
+        {
+            errors.Add(
+                $"The caller '{callerId}' declares '{ruleSection.Path}' with a Name that has leading or "
+                + "trailing whitespace — scope names are matched verbatim, so a padded name admits nobody.");
+            return false;
+        }
+
         rule = new CallerOperationRule(
             route,
             methods.Where(m => m is not null).Select(m => m!).ToList(),
-            patterns.Where(p => p is not null).Select(p => p!).ToList());
+            patterns.Where(p => p is not null).Select(p => p!).ToList(),
+            name);
         return true;
     }
 
@@ -294,13 +365,13 @@ public sealed class CallerBinder
     // be silently ignored and admit the caller to EVERYTHING. A security allow-list fails
     // closed on a config error (M14a), at startup and on reload alike.
     private static readonly HashSet<string> CallerLevelKeys =
-        new(StringComparer.OrdinalIgnoreCase) { "Keys", "Operations", "Limits" };
+        new(StringComparer.OrdinalIgnoreCase) { "Keys", "Operations", "Limits", "TokenClientIds" };
 
     private static readonly HashSet<string> KeyEntryKeys =
         new(StringComparer.OrdinalIgnoreCase) { "KeyId", "KeyHash", "ExpiresAt" };
 
     private static readonly HashSet<string> OperationEntryKeys =
-        new(StringComparer.OrdinalIgnoreCase) { "Route", "Methods", "Paths" };
+        new(StringComparer.OrdinalIgnoreCase) { "Route", "Methods", "Paths", "Name" };
 
     // M15 (§3.7): a typo under Limits (e.g. "Permits" for "PermitsPerInterval") must fail
     // closed too — silently ignoring it would run the caller UNLIMITED, the exact

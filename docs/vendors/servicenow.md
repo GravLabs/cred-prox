@@ -4,7 +4,7 @@
 |---|---|
 | **Auth model** | Per-instance OAuth 2.0 provider. An **OAuth API client** (client-credentials grant) is registered in the instance's OAuth application registry; tokens are issued by that instance at `https://<instance>.service-now.com/oauth_token.do`. **Cited (2026-11-05):** the inbound client-credentials grant and that token-endpoint form are documented in the SailPoint ServiceNow connector docs (fetched 2026-11-05: <https://documentation.sailpoint.com/connectors/servicenow/identity_governance/help/integrating_snow_identity_governance_connector/oauth2.0_auth.html>) and ServiceNow's OAuth-Inbound docs (verified 2026-11-05: <https://www.servicenow.com/docs/r/hX5GtoLUEU58KgyL7CW5Ag/1E8_x~A4Gcv7fjPNqX8lKg>). Scope syntax and token lifetimes remain **UNVERIFIED**. |
 | **CredProx credential** | `OAuthClientCredentials` (no sample) |
-| **Sample** | None — the closest verified mechanics are [E2 `samples/OAuthKeycloak`](../../samples/OAuthKeycloak/README.md) (plain client credentials) and [E4](../../samples/Spotify/README.md)/[E5](../../samples/MicrosoftGraph/README.md) for header-vs-form client auth variants |
+| **Sample** | None — the closest verified mechanics are [E2 `samples/OAuthKeycloak`](../../samples/OAuthKeycloak/README.md) (plain client credentials) and [E5](../../samples/MicrosoftGraph/README.md) for the header client-auth variant |
 | **Verification** | The config block is CredProx-valid (CI binds and validates it through the real startup path); the grant type and token-endpoint form are cited; scope syntax and token lifetimes remain `UNVERIFIED`. |
 
 ## CredProx config

@@ -72,6 +72,15 @@ public sealed class HeaderHygieneFeature : IRequestFeature
             state.ProxyRequest.Headers.Remove(header);
         }
 
+        // M39 (ADR-0004): on the caller-TOKEN path the Authorization header IS the
+        // credential — the upstream must never see it. Credential attachment runs after
+        // this stage and puts the vendor's own value in its place. The key path never
+        // marks the request, so its header behaviour is byte-for-byte unchanged.
+        if (context.Features.Get<CallerTokenRequestMarker>() is not null)
+        {
+            state.ProxyRequest.Headers.Remove("Authorization");
+        }
+
         if (state.Destination is { Definition.StripHeader: true } destination
             && PartitionSpec.TryParse(destination.Definition.Partition, out var scheme, out var argument)
             && scheme.Equals("header", StringComparison.OrdinalIgnoreCase)

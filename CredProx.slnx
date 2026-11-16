@@ -8,6 +8,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/ADP/ADP.csproj" />
     <Project Path="samples/AgentEgress/AgentEgress.csproj" />
+    <Project Path="samples/AgentTokens/AgentTokens.csproj" />
     <Project Path="samples/AiGateway/AiGateway.csproj" />
     <Project Path="samples/AzureContainerApps/AzureContainerApps.csproj" />
     <Project Path="samples/CallerApiKey/CallerApiKey.csproj" />
@@ -22,7 +23,6 @@
     <Project Path="samples/PerCallerCredentials/PerCallerCredentials.csproj" />
     <Project Path="samples/QuickStart/QuickStart.csproj" />
     <Project Path="samples/SessionCookie/SessionCookie.csproj" />
-    <Project Path="samples/Spotify/Spotify.csproj" />
     <Project Path="samples/TokenExchange/TokenExchange.csproj" />
   </Folder>
   <Folder Name="/tests/">

@@ -20,7 +20,7 @@ public static class CredProxReverseProxyBuilderExtensions
     // these names and rejects everything else.
     private static readonly IReadOnlySet<string> CoreSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "Audit", "CallerAuth", "Callers", "Connections", "Credentials",
+        "Audit", "CallerAuth", "CallerToken", "Callers", "Connections", "Credentials",
         "Destinations", "Errors", "Health", "KillSwitch", "Presets", "Resilience", "Scrubbing", "Secrets", "Throttling",
     };
 

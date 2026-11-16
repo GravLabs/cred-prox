@@ -15,8 +15,8 @@ body:
       label: What happened
       description: The behaviour you saw, with the exact status code and `credprox.*` error code if there was one.
       placeholder: |
-        Request to /spotify/tracks returned 502 with body
-        {"error":"credprox.credential_failed","credential":"spotify"}.
+        Request to /payroll/workers returned 502 with body
+        {"error":"credprox.credential_failed","credential":"payroll"}.
     validations:
       required: true
   - type: textarea

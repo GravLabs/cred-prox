@@ -36,7 +36,7 @@ public sealed class PresetTests
     }
 
     // A host-defined OAuth preset under CredProx:Presets — the shape a community preset
-    // takes with no code. Mirrors what samples/Spotify now writes out in full.
+    // takes with no code. Mirrors what samples/OAuthKeycloak writes out in full.
     private static readonly (string Key, string? Value)[] AcmeOAuthPreset =
     [
         ("Presets:acme-oauth:Type", "OAuthClientCredentials"),
@@ -107,7 +107,7 @@ public sealed class PresetTests
     {
         // The six names 0.3 embedded; each must now fail startup pointing at the sample
         // whose explicit config replaces the preset.
-        { "spotify", "samples/Spotify" },
+        { "spotify", "samples/OAuthKeycloak" },
         { "microsoft-graph", "samples/MicrosoftGraph" },
         { "github-app", "samples/GitHubApp" },
         { "keycloak", "samples/OAuthKeycloak" },

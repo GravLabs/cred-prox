@@ -79,7 +79,7 @@ public sealed class CallerBinderSurvivorTests
         }).Bind());
 
         var failure = Assert.Single(ex.Failures);
-        Assert.Contains("Known keys at that level: Keys, Limits, Operations.", failure, StringComparison.Ordinal);
+        Assert.Contains("Known keys at that level: Keys, Limits, Operations, TokenClientIds.", failure, StringComparison.Ordinal);
         Assert.EndsWith(
             "silently weaken the caller's allow-list — fix the spelling or remove the key.",
             failure,

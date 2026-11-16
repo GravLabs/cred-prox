@@ -135,6 +135,9 @@ public sealed class CredProxAuditRecorder
             {
                 ["caller"] = identity?.CallerId,
                 ["keyId"] = identity?.KeyId,
+                // Caller tokens only (M39, ADR-0004): the application id the token was
+                // issued to. The token itself is never recorded, anywhere on this path.
+                ["client"] = identity?.ClientId,
                 ["route"] = route?.RouteId,
                 ["vendor"] = state?.Destination?.Name ?? vendor,
                 ["method"] = context.Request.Method,

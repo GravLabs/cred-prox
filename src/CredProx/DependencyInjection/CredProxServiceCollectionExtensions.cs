@@ -1,8 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
 using CredProx;
 using CredProx.Abstractions;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -245,10 +247,14 @@ public static class CredProxServiceCollectionExtensions
                 options => options.HeaderName = callerKeyOptions.HeaderName);
 
         // The policy for hosts that run UseAuthentication/UseAuthorization in front of the
-        // proxy; the built-in pipeline enforcement does not depend on it.
+        // proxy; the built-in pipeline enforcement does not depend on it. It names both
+        // caller schemes (M39/ADR-0004): a caller key or a caller token authenticates it.
+        // Authenticating an unregistered scheme is no-result, never a throw, so naming the
+        // token scheme here is safe when AddCredProxCallerTokenAuthentication never ran.
         services.AddAuthorization(options => options.AddPolicy(
             CredProxAuth.CallerPolicy,
             policy => policy
+                .AddAuthenticationSchemes(CredProxAuth.CallerKeyScheme, CredProxAuth.CallerTokenScheme)
                 .RequireAuthenticatedUser()
                 .RequireClaim(CallerIdentity.CallerClaimType)));
 
@@ -282,6 +288,181 @@ public static class CredProxServiceCollectionExtensions
         // changes a caller's limits replaces that caller's window (CallerBudgetRegistry).
         services.TryAddSingleton<CallerBudgetRegistry>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, CallerBudgetFeature>());
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the caller-token validation layer (ADR-0004): the stock ASP.NET Core JWT
+    /// bearer handler under <see cref="CredProxAuth.CallerTokenScheme"/>, configured from
+    /// <c>CredProx:CallerToken</c> (<c>Authority</c> and <c>Audience</c> required — like
+    /// <c>CredProx:CallerAuth</c>, unknown keys and a missing issuer or audience fail
+    /// registration). CredProx mints nothing: Entra — or any OIDC issuer — signs, and the
+    /// framework validates signature, issuer, audience and expiry. The caller policy
+    /// (<see cref="CredProxAuth.CallerPolicy"/>) accepts this scheme alongside the caller
+    /// API-key scheme; mapping a validated principal to a caller is the
+    /// <c>ICallerTokenMapper</c> layer. Swapping this scheme for another handler (multi-tenant
+    /// Entra, introspection) changes nothing above it: pass <paramref name="registerScheme"/>
+    /// and the host's handler replaces the stock one.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The application configuration root.</param>
+    /// <param name="registerScheme">
+    /// Optional swap point for the validation handler (ADR-0004). When supplied, this
+    /// extension calls it <b>instead of</b> adding the stock JWT bearer handler; the host
+    /// registers its own handler under <see cref="CredProxAuth.CallerTokenScheme"/>
+    /// (<c>Microsoft.Identity.Web</c>, another OIDC issuer, an introspection handler).
+    /// <c>Authority</c> and <c>Audience</c> are then the host's business: they are not
+    /// required and no JWT bearer configuration is bound. Everything else is unchanged in
+    /// both paths — the <see cref="CallerTokenOptions"/> registration, the mapper, the
+    /// startup guard, and the <c>MaxTokenAge</c> bound the caller-authentication stage
+    /// enforces from those options. The replacement handler must deliver the raw claim
+    /// names CredProx reads — <c>roles</c>/<c>scp</c>, <c>azp</c>/<c>appid</c>, and
+    /// <c>iat</c> — for example by setting <c>MapInboundClaims = false</c> on a JWT bearer
+    /// handler; otherwise configure <c>ScopeClaimNames</c> and <c>ClientClaimNames</c> to
+    /// the names it emits. A renamed <c>roles</c> claim fails closed: the token's roles
+    /// match no named rule, so every caller token gets a 403. A host that only wants to
+    /// adjust the stock handler passes nothing and uses standard
+    /// <c>services.PostConfigure&lt;JwtBearerOptions&gt;(CredProxAuth.CallerTokenScheme, …)</c>.
+    /// </param>
+    /// <returns>The same <paramref name="services"/>, for chaining.</returns>
+    public static IServiceCollection AddCredProxCallerTokenAuthentication(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        Action<AuthenticationBuilder>? registerScheme = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        services.AddOptions();
+
+        var callerTokenOptions = new CallerTokenOptions();
+        var callerTokenSection = configuration.GetSection("CredProx:CallerToken");
+        callerTokenSection.Bind(callerTokenOptions);
+
+        // Fail closed (the M14a CallerAuth rule): a typo here would silently validate
+        // against the wrong issuer or audience — every token in the tenant would pass.
+        // Array keys legitimately nest, so only unknown parents are rejected; a nested
+        // scalar (Authority:Foo) binds null and is caught by the required-value checks.
+        var knownKeys = new[]
+        {
+            nameof(CallerTokenOptions.Authority),
+            nameof(CallerTokenOptions.Audience),
+            nameof(CallerTokenOptions.MaxTokenAge),
+            nameof(CallerTokenOptions.ClientClaimNames),
+            nameof(CallerTokenOptions.ScopeClaimNames),
+        };
+        foreach (var child in callerTokenSection.GetChildren())
+        {
+            if (!knownKeys.Contains(child.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new OptionsValidationException(
+                    "CredProx:CallerToken",
+                    typeof(CallerTokenOptions),
+                    [$"The CallerToken section declares the unknown configuration key '{child.Key}'. "
+                        + $"Known keys: {string.Join(", ", knownKeys)}."]);
+            }
+        }
+
+        // Missing Authority or Audience is not a defaultable choice: without an authority
+        // nothing pins who signs, and without an audience a token minted for any other
+        // API passes. Refuse registration naming what is missing. These are checks on the
+        // DEFAULT handler only: with registerScheme the host validates, so pinning who
+        // signs and for which API is the host's own decision (M39, ADR-0004 swap point).
+        if (registerScheme is null)
+        {
+            if (string.IsNullOrWhiteSpace(callerTokenOptions.Authority))
+            {
+                throw new OptionsValidationException(
+                    "CredProx:CallerToken",
+                    typeof(CallerTokenOptions),
+                    [$"The CallerToken section requires '{nameof(CallerTokenOptions.Authority)}' — "
+                        + "the OIDC authority whose published keys validate caller tokens."]);
+            }
+
+            if (string.IsNullOrWhiteSpace(callerTokenOptions.Audience))
+            {
+                throw new OptionsValidationException(
+                    "CredProx:CallerToken",
+                    typeof(CallerTokenOptions),
+                    [$"The CallerToken section requires '{nameof(CallerTokenOptions.Audience)}' — "
+                        + "a caller token minted for any other API would otherwise pass."]);
+            }
+        }
+
+        // A MaxTokenAge the operator cannot have meant is worse than none: the config
+        // binder reads a bare "15" as 15 DAYS (~1440x the intended minutes), a zero or
+        // negative limit 401s every caller token forever behind a generic detail, and a
+        // day-scale limit is not the short-lived bound this knob exists to enforce
+        // (M39, ADR-0004). Refused at startup like the unknown-key family above.
+        if (callerTokenOptions.MaxTokenAge is { } maxAge
+            && (maxAge <= TimeSpan.Zero || maxAge >= TimeSpan.FromDays(1)))
+        {
+            throw new OptionsValidationException(
+                "CredProx:CallerToken",
+                typeof(CallerTokenOptions),
+                [$"The CallerToken section sets '{nameof(CallerTokenOptions.MaxTokenAge)}' to '{maxAge}', "
+                    + "which is not a usable maximum token age — it must be greater than zero and less than 24 h. "
+                    + "Write the value as d.HH:mm:ss; a bare number is read as days, so 15 minutes is '00:15:00'."]);
+        }
+
+        // AddSingleton, not TryAddSingleton: the config-bound options are what the token
+        // path fail-closes on (GetRequiredService), and the last registration wins — a
+        // host that registered its own CallerTokenOptions earlier must not silently drop
+        // the configured MaxTokenAge bound (M39).
+        services.AddSingleton(callerTokenOptions);
+
+        var callerTokenBuilder = services.AddAuthentication();
+        if (registerScheme is null)
+        {
+            // Validation is the framework handler: signature, issuer, audience, expiry
+            // and not-before, with OIDC discovery and key rollover from the authority's
+            // metadata.
+            callerTokenBuilder.AddJwtBearer(
+                CredProxAuth.CallerTokenScheme,
+                options =>
+                {
+                    options.Authority = callerTokenOptions.Authority;
+                    options.Audience = callerTokenOptions.Audience;
+
+                    // M39: no inbound claim renaming on this scheme. Entra's raw
+                    // claim names (roles, scp, azp, appid, uti) reach the mapper and the
+                    // host's HttpContext.User unchanged — "claim names are met by
+                    // configuration" (ADR-0004) is only true when nothing maps them, and
+                    // the stock rename would silently empty CallerTokenMapping.Scopes.
+                    options.MapInboundClaims = false;
+
+                    // With mapping off the handler's role claim type must name the raw
+                    // claim, or ClaimsPrincipal.IsInRole stops seeing app roles.
+                    options.TokenValidationParameters.RoleClaimType = "roles";
+                });
+        }
+        else
+        {
+            // The swap point (M39, ADR-0004): the host registers its own validation
+            // handler under the caller-token scheme — Microsoft.Identity.Web, another
+            // OIDC issuer, an introspection handler. Nothing above or below changes,
+            // and the stage still enforces MaxTokenAge from the options registered
+            // by this extension, so the bound survives the swap.
+            registerScheme(callerTokenBuilder);
+
+            // The swap was REQUESTED: mark it so the startup guard can warn when the
+            // callback registered no handler under the caller-token scheme (every token
+            // would then be refused, silently). A host that never called this extension
+            // has no marker, so the guard's scheme-absent path stays silent for it.
+            services.AddSingleton<CallerTokenSwapRequested>();
+        }
+
+        // The mapping layer only exists with this extension: without it the caller
+        // feature never attempts the token scheme at all. A host can replace it with a
+        // mapper for another claim layout or caller directory.
+        services.TryAddSingleton<ICallerTokenMapper, DefaultCallerTokenMapper>();
+
+        // M39: the scheme without caller authentication is a silent fail-open
+        // proxy (no feature runs, hygiene never strips). Evaluated at startup — the two
+        // extensions may be registered in any order — not here.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, CallerTokenStartupGuard>());
 
         return services;
     }

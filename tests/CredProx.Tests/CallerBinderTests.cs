@@ -504,7 +504,7 @@ public sealed class CallerBinderTests
         }).Bind());
 
         Assert.Contains(ex.Failures, f => f.Contains("unknown configuration key 'Bogus'", StringComparison.Ordinal));
-        Assert.Contains(ex.Failures, f => f.Contains("Known keys at that level: Keys, Limits, Operations.", StringComparison.Ordinal));
+        Assert.Contains(ex.Failures, f => f.Contains("Known keys at that level: Keys, Limits, Operations, TokenClientIds.", StringComparison.Ordinal));
     }
 
     private static CallerBinder Binder(Dictionary<string, string?> entries)

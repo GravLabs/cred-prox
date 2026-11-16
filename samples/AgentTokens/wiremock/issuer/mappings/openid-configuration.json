@@ -1,0 +1,19 @@
+{
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/.well-known/openid-configuration"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "issuer": "http://localhost:8085",
+      "jwks_uri": "http://localhost:8085/jwks",
+      "token_endpoint": "http://localhost:8085/token",
+      "id_token_signing_alg_values_supported": ["RS256"],
+      "subject_types_supported": ["pairwise"],
+      "response_modes_supported": ["query", "fragment"]
+    }
+  }
+}

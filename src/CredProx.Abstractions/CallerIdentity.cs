@@ -10,14 +10,23 @@ namespace CredProx.Abstractions;
 /// </summary>
 /// <param name="CallerId">The configured caller identifier.</param>
 /// <param name="KeyId">The identifier of the key that authenticated.</param>
+/// <param name="ClientId">For a caller token (M39, ADR-0004), the application (client)
+/// id the token was issued to — the <c>azp</c>/<c>appid</c> the mapper matched;
+/// <see langword="null"/> on the caller-key path. Part of record equality.</param>
 [Experimental("CREDPROX001")]
-public sealed record CallerIdentity(string CallerId, string KeyId)
+public sealed record CallerIdentity(string CallerId, string KeyId, string? ClientId = null)
 {
     /// <summary>The claim carrying the caller id on an authenticated principal.</summary>
     public const string CallerClaimType = "credprox.caller";
 
     /// <summary>The claim carrying the authenticating key id on an authenticated principal.</summary>
     public const string KeyIdClaimType = "credprox.keyid";
+
+    /// <summary>
+    /// The claim carrying the application (client) id of an authenticating caller token;
+    /// absent on the caller-key path.
+    /// </summary>
+    public const string ClientIdClaimType = "credprox.clientid";
 
     /// <summary>
     /// Reads the caller identity from an authenticated principal, or <see langword="null"/>
@@ -32,6 +41,9 @@ public sealed record CallerIdentity(string CallerId, string KeyId)
             return null;
         }
 
-        return new CallerIdentity(caller, principal!.FindFirst(KeyIdClaimType)?.Value ?? string.Empty);
+        return new CallerIdentity(
+            caller,
+            principal!.FindFirst(KeyIdClaimType)?.Value ?? string.Empty,
+            principal.FindFirst(ClientIdClaimType)?.Value);
     }
 }

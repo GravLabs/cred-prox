@@ -48,10 +48,20 @@ What CredProx itself does:
    must match an id listed on a defined caller in `CredProx:Callers`
    (`TokenClientIds: [<app or managed-identity client id>]`). An unlisted client is a `401`,
    even with a valid token: the CredProx configuration stays the allow-list of who may call.
+   The caller-token scheme maps no inbound claims (`MapInboundClaims = false`), so every
+   claim — `azp`/`appid`, `roles`/`scp`, `uti` — reaches the mapper and the host's
+   `HttpContext.User` under its raw Entra name; the handler's role claim type is pinned to
+   the raw `roles` so `ClaimsPrincipal.IsInRole` works for hosts.
 3. **Scope only narrows.**
    - A caller's operation rules may carry a `Name`, which equals an Entra app-role value.
    - The effective rules for a request are the caller's rules **intersected with** the token's
      `roles` claim (and `scp`, for delegated user tokens). It is never the union.
+   - Caller tokens require named rules: a token gets exactly the operations its roles name;
+     a caller without named rules admits no token. Concretely, an entry applies to a token
+     only if it carries a `Name` and that name is in the token's scope set; an unnamed entry
+     admits no token — it is a key-path-only rule — and a caller that declares no operations
+     is denied for tokens too (fail closed). Give an agent caller named rules that match its
+     Entra app roles.
    - A token with no matching role gets nothing; a role naming no rule grants nothing.
    - Everything downstream stays unchanged: the allow-list, per-caller credential mapping,
      budgets, the kill switch and audit. Audit records the caller id, the client id and the
@@ -60,6 +70,12 @@ What CredProx itself does:
    token older than the operator wants, measured from `iat`, even while Entra still considers
    it valid. Operators get a short window without depending on Entra's preview lifetime
    policies.
+   - The check runs in CredProx's caller-authentication stage, before any claim mapping:
+     a swapped mapper cannot drop it. The limit must be greater than zero and less than
+     24 h, written as `d.HH:mm:ss` (a bare number is read as days); anything else is
+     refused at startup. It is read at startup — changing it requires a restart, and it wins
+     over a `CallerTokenOptions` instance the host registered before adding the caller-token
+     layer (one registered after still wins).
 5. **Revocation.** Entra stops issuing new tokens (role removal, service principal disabled).
    An already-issued token stays valid until it expires or reaches `MaxTokenAge`. For
    immediate cut-off, the existing per-caller **kill switch** blocks a caller's tokens at once.
@@ -80,12 +96,19 @@ wrappers over the framework.
 
 | Layer | Default | Swap point |
 |---|---|---|
-| **Token validation** | ASP.NET Core JWT bearer handler, Entra `Authority` | An authentication scheme. Register another handler under the caller-token scheme: `Microsoft.Identity.Web` for multi-tenant Entra, another OIDC issuer, or an introspection handler. The policy accepts any scheme that yields a caller. |
+| **Token validation** | ASP.NET Core JWT bearer handler, Entra `Authority` | An authentication scheme. To replace validation, pass the optional `registerScheme` callback to `AddCredProxCallerTokenAuthentication`: your handler registers under the caller-token scheme (`Microsoft.Identity.Web` for multi-tenant Entra, another OIDC issuer, an introspection handler) instead of the stock one, `Authority`/`Audience` become the host's own calls, and `MaxTokenAge` still applies. The replacement must deliver the raw claim names CredProx reads (`roles`/`scp`, `azp`/`appid`, `iat`) — set `MapInboundClaims = false` on a JWT bearer handler, or point `ScopeClaimNames`/`ClientClaimNames` at the names it emits; a renamed `roles` claim fails closed with a 403 for every token. To tune the stock handler, use the standard `PostConfigure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, …)`. Either way the policy accepts any scheme that yields a caller. |
 | **Signing keys** | OIDC discovery (Entra JWKS) | Standard `TokenValidationParameters` / `IssuerSigningKeyResolver`. |
 | **Claims to caller** | `azp`/`appid` matched against `TokenClientIds` | `ICallerTokenMapper`: turns the validated `ClaimsPrincipal` into a `CallerIdentity` plus an optional scope set. Replace it for a different claim layout or a caller directory. |
 | **Caller directory** | The existing configured callers | The existing `ICallerStore` / caller registry. Tokens reuse it, with no second caller model. |
 | **Scope enforcement** | Caller rules ∩ `roles`/`scp` | The existing operation allow-list stage reads an optional per-request scope set from the request features. Any authentication layer that sets that feature narrows the same way. |
 | **Consumer side** | Azure.Identity | None needed: standard OAuth bearer tokens. Switching identity provider or client library changes nothing that calls CredProx. |
+
+Token validation has exactly two host paths. Tune the stock handler with the standard
+`services.PostConfigure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, o => …)` — no
+CredProx API involved. Replace it with
+`AddCredProxCallerTokenAuthentication(configuration, registerScheme: builder => builder.AddScheme<…>(CredProxAuth.CallerTokenScheme, …))`:
+the callback runs instead of the stock `AddJwtBearer`, and CredProx still registers the
+options, the mapper and the startup guard, so `MaxTokenAge` keeps applying either way.
 
 The rule for the build: no layer may reach past its neighbour. Validation knows nothing about
 caller rules, the mapper knows nothing about signing, and enforcement only reads the

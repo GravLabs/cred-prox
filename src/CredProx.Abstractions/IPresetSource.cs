@@ -13,7 +13,7 @@ namespace CredProx.Abstractions;
 public interface IPresetSource
 {
     /// <summary>
-    /// Looks up a preset by name, for example <c>spotify</c>.
+    /// Looks up a preset by name, for example <c>acme-oauth</c>.
     /// </summary>
     /// <param name="name">The preset name referenced from configuration.</param>
     /// <param name="preset">
