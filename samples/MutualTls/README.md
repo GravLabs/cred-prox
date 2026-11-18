@@ -1,4 +1,4 @@
-# E3 — MutualTls: a client certificate per cluster
+# MutualTls: a client certificate per cluster
 
 ## What it demonstrates
 
@@ -24,7 +24,7 @@ Plus a **certificate-rotation walkthrough** that swaps the live certificate with
 ```bash
 cd samples/MutualTls
 ./generate-certs.sh                      # sample CA, nginx cert, client cert CN=client-alpha
-docker compose up -d                     # nginx requiring a client cert, on :8443
+docker compose up -d                     # nginx requiring a client cert, on :8444
 SSL_CERT_FILE=$PWD/certs/ca.crt dotnet run
 ```
 
@@ -54,7 +54,7 @@ mkdir -p secrets.d
 curl -s https://badssl.com/certs/client.badssl.com.crt -o /tmp/badssl.crt
 curl -s https://badssl.com/certs/client.badssl.com.key -o /tmp/badssl.key
 cat /tmp/badssl.crt /tmp/badssl.key > secrets.d/CredProx__Secrets__client-cert
-dotnet run -- --variant badssl
+ASPNETCORE_ENVIRONMENT=Badssl dotnet run
 ```
 
 ```bash
@@ -82,7 +82,7 @@ connection, the secret reference and the route are identical.
   },
   "Clusters": {
     "upstream": {
-      "Destinations": { "upstream": { "Address": "https://localhost:8443/" } },
+      "Destinations": { "upstream": { "Address": "https://localhost:8444/" } },
       "Metadata": { "CredProx.Connection": "mtls" }   // this cluster presents the certificate
     }
   }
@@ -109,8 +109,14 @@ same CA) echoes the new subject.
 
 ## Verify it
 
+One cell, driving the real host over real sockets from `tests/CredProx.SampleSmokes`:
+it generates the PKI, starts nginx from `docker-compose.yml`, and checks that nginx
+echoes the subject of the client certificate the proxy presented.
+
 ```bash
-cd samples/MutualTls && ./smoke.sh   # Docker; what CI runs
+dotnet test tests/CredProx.SampleSmokes --filter Sample=MutualTls
+# or the one-line wrapper (what CI runs):
+cd samples/MutualTls && ./smoke.sh
 ```
 
 ## What just happened

@@ -4,7 +4,7 @@ namespace CredProx.Abstractions;
 
 /// <summary>
 /// Thrown by a credential provider that knows the end user has not yet authorized this
-/// application (see <c>docs/credprox-plan.md</c> §8.3). The core turns this into
+/// application. The core turns this into
 /// <c>401 credprox.consent_required</c> and does not forward the request: unlike the
 /// generic <c>credential_unavailable</c> 502 (the <em>credential</em> is broken), this is
 /// a real next step — the caller opens or relays <see cref="AuthorizeUrl"/>, the user

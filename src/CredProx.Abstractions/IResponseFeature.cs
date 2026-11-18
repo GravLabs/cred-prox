@@ -10,7 +10,7 @@ namespace CredProx.Abstractions;
 /// <remarks>
 /// <para>
 /// The core runs response features in <see cref="Stage"/> order (defaulting to
-/// <see cref="Stage.ShapeResponse"/>, M20) at the end of the outbound pipeline: after
+/// <see cref="Stage.ShapeResponse"/>) at the end of the outbound pipeline: after
 /// the upstream response has arrived (and any refresh-on-401 retry has settled on one
 /// response) and before the proxy has copied a single header or body byte to the
 /// caller. The upstream response — headers and body stream both — is reachable through

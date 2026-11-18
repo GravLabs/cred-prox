@@ -4,14 +4,12 @@ using CredProx.Testing;
 using Xunit;
 
 // What a plugin author puts in their own test project: describe the credential in
-// configuration, inherit the suite, and the §5.2 checks — acquire success, single-flight
+// configuration, inherit the suite, and its checks — acquire success, single-flight
 // under 100 concurrent acquires, refresh-after-invalidate, per-partition isolation,
 // no secret values in any log line, failure hygiene — run against the provider through
 // the real binder, secret scoping and cache wiring. The built-ins run these same suites
-// (tests/CredProx.ConformanceTests); there is no privileged path.
-//
-// Run them here without a test runner:  dotnet run -- --selftest
-// In your own repo they are plain xunit facts — `dotnet test` runs them as-is.
+// (tests/CredProx.ConformanceTests); there is no privileged path. They are plain xunit
+// facts — the sample smoke cells drive them without a separate runner step.
 public sealed class VendorSessionConformanceTests
     : CachingCredentialProviderConformanceTests<VendorSessionProvider, VendorSessionOptions>
 {
@@ -38,12 +36,12 @@ public sealed class VendorSessionConformanceTests
 
     protected override IReadOnlyList<string> SecretValues { get; } = [AppIdValue, SecretValue];
 
-    // ---- M19 consent signalling demo (§8.3) ----
+    // ---- consent signalling demo ----
 
     [Fact]
     public async Task LoginAnsweringConsentRequired_SurfacesTheTypedConsentSignal()
     {
-        // The plugin side of §8.3: a vendor answer that distinguishes "this user has not
+        // The plugin side: a vendor answer that distinguishes "this user has not
         // consented" from "the credential is broken" becomes the typed signal. The core's
         // half — 401 credprox.consent_required with the authorize URL, refresh-path
         // safety — is CredProxPipelineIntegrationTests' job, which every plugin inherits.

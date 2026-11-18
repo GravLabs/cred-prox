@@ -15,13 +15,13 @@ identity federation, and Entra app roles narrow what it may call. See
 [ADR-0004](docs/adr/0004-short-lived-scoped-caller-tokens.md).
 
 ```csharp
-builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-builder.Services.AddCredProxBuiltInCredentials();
-builder.Services.AddCredProxCredentials(builder.Configuration);
+// One call registers the core defaults: token cache, the configuration-backed secret
+// source, the built-in credential types, and the credentials and destinations below.
+builder.Services.AddCredProx(builder.Configuration);
+builder.Services.AddCredProxOAuth(); // add-on calls for what you need (this config uses an OAuth type)
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx(builder.Configuration); // the proxy pipeline, also from config
 ```
 
 ```json
@@ -61,14 +61,14 @@ an Entra access token that CredProx obtained, cached and refreshed.
 
 | If you want to… | Example |
 |---|---|
-| Give AI agents short-lived, scoped access with no stored secret (Entra) | [AgentTokens](samples/AgentTokens) (E19) |
-| Put an AI agent's tool calls behind per-agent allow-lists | [AgentEgress](samples/AgentEgress) (E15) |
-| Front an AI provider: caller keys in, provider key injected, streaming intact | [AiGateway](samples/AiGateway) (E13) |
-| Call Microsoft Graph or any Entra-protected API, with a secret or secretless | [MicrosoftGraph](samples/MicrosoftGraph) (E5) |
-| OAuth client credentials end to end (cache, single-flight, refresh) | [OAuthKeycloak](samples/OAuthKeycloak) (E2) |
-| OAuth plus a client certificate on every hop (ADP shape) | [ADP](samples/ADP) (E6) |
-| Exchange a user's token for a per-user downstream token | [TokenExchange](samples/TokenExchange) (E14) |
-| Authenticate callers with API keys kept as config | [CallerApiKey](samples/CallerApiKey) (E18) |
+| Give AI agents short-lived, scoped access with no stored secret (Entra) | [AgentTokens](samples/AgentTokens) |
+| Put an AI agent's tool calls behind per-agent allow-lists | [AgentEgress](samples/AgentEgress) |
+| Front an AI provider: caller keys in, provider key injected, streaming intact | [AiGateway](samples/AiGateway) |
+| Call Microsoft Graph or any Entra-protected API, with a secret or secretless | [MicrosoftGraph](samples/MicrosoftGraph) |
+| OAuth client credentials end to end (cache, single-flight, refresh) | [OAuthKeycloak](samples/OAuthKeycloak) |
+| OAuth plus a client certificate on every hop (ADP shape) | [ADP](samples/ADP) |
+| Exchange a user's token for a per-user downstream token | [TokenExchange](samples/TokenExchange) |
+| Authenticate callers with API keys kept as config | [CallerApiKey](samples/CallerApiKey) |
 
 Smallest possible host: [`samples/QuickStart`](samples/QuickStart). Every example, with
 what it needs and how it is verified, is listed in [samples/README.md](samples/README.md).
@@ -77,8 +77,11 @@ no built-in vendor presets.
 
 ## What's in the box
 
-- **Credential types**: `OAuthClientCredentials`, `LoginExchange`, `StaticKey`,
-  `TokenCredential`, `JwtAssertion`, `Hmac` — every vendor is plain config, and a
+- **Credential types**: built-in `StaticKey` (`TokenCredential` registers through the
+  `CredProx.AzureKeyVault` extension), plus `Hmac`, `LoginExchange` and the three OAuth
+  types (`OAuthClientCredentials`, `TokenExchange`, `JwtAssertion`) in their own
+  packages (`CredProx.Hmac`, `CredProx.LoginExchange`,
+  `CredProx.OAuth`) — every vendor is plain config, and a
   community **preset** (`CredProx:Presets` or a custom `IPresetSource`) can package the
   fixed facts of a vendor so a credential is a few lines.
 - **Token cache** with per-credential/per-partition scoping, single-flight refresh, early
@@ -90,8 +93,9 @@ no built-in vendor presets.
 - **Caller authentication**: short-lived Entra / OpenID Connect access tokens whose roles
   narrow the caller's rules, inbound API keys, per-caller vendor accounts, and fail-closed
   operation allow-lists.
-- **Operations**: throttling with `Retry-After`, per-cluster retries/circuit breakers,
-  credential health probes, audit log with redaction and pluggable sinks.
+- **Operations**: throttling with `Retry-After`, per-cluster retries/circuit breakers
+  and credential health probes (the `CredProx.Operations` add-on), audit log with
+  redaction and pluggable sinks.
 - **Safety nets**: a per-vendor and per-caller **kill switch** by configuration alone,
   `401 credprox.consent_required` when a user still has to grant consent, and **response
   scrubbing** that removes an echoed credential before the caller sees it.
@@ -109,14 +113,28 @@ Every block is bound and validated through the real
 fail-closed startup path by a CI test, so a snippet with a wrong or misspelled key
 fails the build, not your deploy. Facts are sample-traceable, cited to vendor docs,
 or explicitly marked unverified. These are docs, not built-ins — the library still
-ships no vendor presets (0.4).
+ships no vendor presets.
 
 ## Packages
 
-`CredProx`, `CredProx.Abstractions`, `CredProx.AzureKeyVault`, `CredProx.Testing` —
-published to the CredProx NuGet registry (the feed is machine-local; publishing
+| Package | What it does | You need it when… |
+|---|---|---|
+| `CredProx` | The core: proxy pipeline, token cache, `secret:` references, the built-in `StaticKey` type, caller policy plumbing, audit | Every host — it is the host |
+| `CredProx.Abstractions` | The public contracts (credential types, authenticators, secret sources, pipeline seams) | You write your own extension, or compile against the contract |
+| `CredProx.CallerKeys` | Inbound caller authentication against API keys kept in config as SHA-256 hashes | Callers authenticate with static keys |
+| `CredProx.CallerTokens` | Inbound caller authentication via short-lived Entra / OIDC access tokens, roles narrowing the caller's rules | Agents or other short-lived workers call you |
+| `CredProx.OAuth` | The `OAuthClientCredentials`, `TokenExchange` and `JwtAssertion` credential types | The vendor speaks OAuth |
+| `CredProx.Hmac` | The `Hmac` request-signing credential type | The vendor expects signed requests |
+| `CredProx.LoginExchange` | The `LoginExchange` credential type: a form login whose session is replayed and refreshed | The vendor authenticates through a login endpoint |
+| `CredProx.Operations` | Throttling with `Retry-After`, per-cluster retries and circuit breakers, credential health probes | You run real traffic through it |
+| `CredProx.AzureKeyVault` | The `TokenCredential` credential type: trades an Azure token credential (managed identity, service principal) for Entra tokens | The vendor expects Entra tokens obtained through Azure identity |
+| `CredProx.Testing` | Fakes and the conformance suites the built-ins themselves are tested with | You test a credential type or authenticator you wrote |
+
+Published to the CredProx NuGet registry (the feed is machine-local; publishing
 machines declare it in their user-level NuGet config — see PUBLISHING.md). Target
-framework: `net10.0`. See [CHANGELOG.md](CHANGELOG.md).
+framework: `net10.0`. Each package's own README carries its one registration call and
+the config it reads; the core's README is also the package map that ships inside the
+nupkg. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements and compatibility
 
@@ -148,8 +166,9 @@ points.
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md) — build, tests, coverage gates, and how to contribute
-presets and credential-type plugins.
+[CONTRIBUTING.md](CONTRIBUTING.md) — build, tests, coverage gates. To write your own
+credential type, authenticator or secret source, start with
+[docs/extending.md](docs/extending.md); presets and plugins are welcome.
 
 ## License
 

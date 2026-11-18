@@ -29,7 +29,7 @@
 # MECHANISM INSIDE ACA: wire capture (loopback MIC stub + the ACA identity-proxy
 # env contract, Azure.Identity 1.13.1) shows the SDK does NOT append that env
 # hint to the identity-proxy request here (it is honored only on the IMDS path).
-# samples/AzureContainerApps Program.cs RuntimeIdentity.Credential() reads the
+# tools/aca-live-harness Program.cs RuntimeIdentity.Credential() reads the
 # value and passes it as DefaultAzureCredentialOptions.ManagedIdentityClientId -
 # only that form reaches the wire as &client_id=... Value = the RUNTIME UAI's
 # CLIENT id (a public identifier, resolved live by the deploy script - never
@@ -38,7 +38,7 @@
 # proves).
 #   $CALLER_HASH vault secret CredProxTest--caller-key-hash ("sha256:<hex>") - the
 #                caller registry stores ONLY the hash; the key VALUE stays a
-#                vault secret the battery fetches (samples/AzureContainerApps
+#                vault secret the battery fetches (tools/aca-live-harness
 #                appsettings wiring: CredProx__Callers__battery__Keys__0__*)
 #   $CA_B64      vault secret CredProxTest--mtls-ca-b64 (base64 PEM of the test CA)
 #                - PUBLIC trust anchor: the entrypoint installs it into the

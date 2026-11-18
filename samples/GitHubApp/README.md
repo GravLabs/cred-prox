@@ -1,34 +1,76 @@
-# E8 — GitHub App installation tokens
+# GitHub App installation tokens, as configuration
 
-The `JwtAssertion` credential minting a GitHub App JWT and exchanging it for an
-installation token (plan §6 E8). No vendor-specific code and no presets: the generic
-JwtAssertion type in `BearerExchange` mode is exactly GitHub's flow, spelled out in full
-in `appsettings.json`.
+## What it demonstrates
 
-## What it shows
+GitHub's whole authentication shape in explicit config — no vendor-specific C#, no
+presets. The generic `JwtAssertion` credential in `BearerExchange` mode is exactly the
+GitHub App flow:
 
-- The whole GitHub shape is plain config: RS256, `Audience` = `https://api.github.com`,
-  9-minute `Lifetime`, `Exchange: BearerExchange` (the JWT goes out as
-  `Authorization: Bearer <jwt>`), and the response mapping GitHub needs —
-  `TokenField: token`, `ExpiresAtField: expires_at` (absolute expiry, no `expires_in`) —
-  plus the App's own two values: `Issuer` (the App id) and `TokenEndpoint` (the
-  installation's endpoint).
-- The exchanged installation token is cached per credential+partition until
-  `expires_at`; the app JWT is minted fresh at each exchange, never cached.
-- The route attaches the cached installation token to every forwarded request at
-  `Stage.AttachCredential` (`Authorization: Bearer ghs_…`).
+- CredProx mints an **RS256 app JWT** (iss = the App id, aud = `api.github.com`, a fresh
+  `jti` every time, 9-minute `Lifetime`) and presents it as `Authorization: Bearer` to
+  the **installation-access-tokens** endpoint (`Exchange: BearerExchange`).
+- The response mapping GitHub needs is config: `TokenField: token`,
+  `ExpiresAtField: expires_at` (absolute expiry — there is no `expires_in`). The
+  exchanged **installation token is cached** until `expires_at`; the app JWT is minted
+  fresh at each exchange, never cached.
+- Every forwarded request carries the cached installation token
+  (`Authorization: Bearer ghs_…`), attached at `Stage.AttachCredential` for the route.
 
-## Run the smoke (CI, no Docker, no GitHub account)
+## What you need
+
+Nothing for the offline check — `StubApi/` is a GitHub stand-in the cells run (it
+verifies the app JWT with an independent implementation: RS256 signature against the
+generated public key plus `iss`/`aud`/`exp`/`jti`, the same checks GitHub's verifier
+makes). A real GitHub App for the live run.
+
+## Run it
 
 ```bash
-dotnet run -- --smoke
+cd samples/GitHubApp
+export CredProx__Secrets__github-app-signing-key="$(cat /path/to/github-app-private-key.pem)"
+dotnet run
 ```
 
-A generated RSA key stands in for the App private key, and both GitHub endpoints are
-stubbed in-process. The token-endpoint stub verifies the app JWT with an independent
-implementation — RS256 signature against the generated public key plus `iss`/`aud`/`exp`/
-`jti` checks — then returns a fake installation token. The smoke asserts the proxied
-GitHub call carries `Bearer ghs_stub_installation`.
+Then call through the proxy — GitHub answers as the App installation:
+
+```bash
+curl -s http://localhost:5081/github/repos/octocat/hello-world
+```
+
+With no credential in and one out, the caller sees the installation token **only as a
+redaction marker** (the response scrubber): a reflecting upstream is scrubbed
+caller-side. The raw token still verifiably reaches the vendor — the stand-in's
+`/exact` endpoint answers `ok` only when the header that arrived is byte-exactly
+`Bearer <installation token>`, and never echoes it.
+
+## The exact config
+
+```jsonc
+"CredProx": {
+  "Destinations": { "github": { "Template": "https://api.github.com" } },
+  "Credentials": {
+    "github-app": {
+      "Type": "JwtAssertion",
+      "Algorithm": "RS256",
+      "SigningKey": "secret:github-app-signing-key", // the App's private key PEM
+      "Audience": "https://api.github.com",
+      "Lifetime": "00:09:00",
+      "Exchange": "BearerExchange",   // the JWT rides as Authorization: Bearer
+      "TokenField": "token",          // GitHub's response member names
+      "ExpiresAtField": "expires_at",
+      "Issuer": "<app-id>",
+      "TokenEndpoint": "https://api.github.com/app/installations/<installation-id>/access_tokens"
+    }
+  },
+  "Secrets": { "github-app-signing-key": "" }  // empty in the file; supply the PEM
+}
+// and on the route:  "Metadata": { "CredProx.Credential": "github-app" }
+```
+
+The committed `appsettings.json` is exactly this with placeholder `Issuer` /
+installation id. The private key never lives in the file: the empty
+`github-app-signing-key` is a placeholder for the env var (or any secret source) you
+set above.
 
 ## Point it at a real GitHub App
 
@@ -41,3 +83,23 @@ GitHub call carries `Bearer ghs_stub_installation`.
    `https://api.github.com/app/installations/<installation-id>/access_tokens`.
 4. Call `GET /github/repos/<owner>/<repo>` through the proxy — GitHub answers as the
    App installation.
+
+Until the key is set, the host starts but every request answers
+`credprox.credential_unavailable` — a cell pins that refusal (and that no key or token
+material leaks into the host's output). A key GitHub does not know is refused the same
+way: the stand-in's 401 on the token exchange surfaces as the static credential problem,
+never as the vendor's body.
+
+## Verify it
+
+```bash
+cd samples/GitHubApp && ./smoke.sh
+# or directly:
+dotnet test tests/CredProx.SampleSmokes --filter Sample=GitHubApp
+```
+
+Five cells drive the real host against the stand-in: the exchanged installation token
+arrives at the vendor byte-exactly, a reflecting JSON echo comes back redacted, the
+token is cached across requests (one exchange for many calls), the keyless host answers
+the credential problem without leaking values, and a foreign key is refused by the
+stand-in exactly as the real vendor would refuse it.

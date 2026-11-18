@@ -5,16 +5,15 @@ namespace CredProx;
 
 /// <summary>
 /// Places an obtained credential value on an outbound request, replacing any existing
-/// value instead of duplicating it (§5.2 "Static key" row: overwritten, not duplicated;
+/// value instead of duplicating it (overwritten, not duplicated;
 /// the same rule holds for every placement). Pure with respect to <see cref="HttpRequestMessage"/>
-/// state so the semantics are testable without the YARP pipeline (M4 wraps this in the
-/// request feature).
+/// state so the semantics are testable without the YARP pipeline.
 /// </summary>
 /// <remarks>
 /// The query rebuild normalizes pass-through parameters as a side effect: duplicate keys
 /// are merged comma-separated, a literal <c>+</c> becomes <c>%20</c>, and <c>?x</c>
 /// becomes <c>?x=</c>. The credential parameter itself is always replaced exactly once.
-/// If a vendor proves sensitive to pass-through normalization, M4 can switch to
+/// If a vendor proves sensitive to pass-through normalization, the query rebuild can switch to
 /// append-only surgery on the raw query string.
 /// </remarks>
 internal static class CredentialAttacher
@@ -141,7 +140,7 @@ internal static class CredentialAttacher
     /// <summary>
     /// A credential value placed in a cookie must not be able to end the pair or the
     /// header: <c>;</c> would inject a second cookie, and CR/LF would split the request
-    /// (§3.4 header hygiene). NUL is rejected likewise. Since M23 review note N2 the
+    /// (header hygiene). NUL is rejected likewise. The
     /// guard also refuses DEL and everything above ASCII: request headers travel as
     /// Latin-1 bytes, so a non-ASCII value cannot round-trip faithfully to the vendor —
     /// refusing it beats silently maiming it. The vendor's own <c>Set-Cookie</c> path

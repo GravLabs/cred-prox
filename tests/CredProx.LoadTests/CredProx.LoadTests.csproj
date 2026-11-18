@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
     <ProjectReference Include="..\..\src\CredProx.Abstractions\CredProx.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.Operations\CredProx.Operations.csproj" />
   </ItemGroup>
 
 </Project>

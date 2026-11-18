@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Sample smokes drive the built sample processes over real sockets against the
+         compose stubs: one class per sample, Trait Sample=<name> for the CI filter. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Builds the sample first; the fixture execs the produced dll as its own process,
+         so no assembly is referenced (the sample's entry point stays its own). -->
+    <ProjectReference Include="..\..\samples\AgentTokens\AgentTokens.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\QuickStart\QuickStart.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\OAuthKeycloak\OAuthKeycloak.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\MutualTls\MutualTls.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\LoginExchange\LoginExchange.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\TokenExchange\TokenExchange.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\HmacSigning\HmacSigning.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\CallerApiKey\CallerApiKey.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\PerCallerCredentials\PerCallerCredentials.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\Operations\Operations.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\MicrosoftGraph\MicrosoftGraph.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\ADP\ADP.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\GitHubApp\GitHubApp.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\GitHubApp\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <!-- The one referenced ASSEMBLY: the CustomPlugin cell drives the conformance suite
+         the plugin ships, so it needs the plugin's types, not just its build. -->
+    <ProjectReference Include="..\..\samples\CustomPlugin\CustomPlugin.csproj" />
+    <ProjectReference Include="..\..\samples\CustomPlugin\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\OAuthKeycloak\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\PerCallerCredentials\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\TokenExchange\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AiGateway\AiGateway.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AiGateway\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AgentEgress\AgentEgress.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AgentEgress\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\SessionCookie\SessionCookie.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\SessionCookie\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AzureContainerApps\AzureContainerApps.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AzureContainerApps\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace CredProx;
 
 /// <summary>
-/// The default in-memory <see cref="ITokenCache"/> (see <c>docs/credprox-plan.md</c> §3.3):
+/// The default in-memory <see cref="ITokenCache"/>:
 /// single-flight per <c>(credential, partition)</c> key, early refresh before expiry, and a
 /// short negative cache on failure. All state transitions for a key happen under that key's
 /// lock, and at most one fetch per key is in flight at a time.

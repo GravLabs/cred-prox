@@ -6,26 +6,24 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_PASSWORD: admin
     ports:
-      - "5091:8080"
+      - "5103:8080"
     volumes:
       - ./realm:/opt/keycloak/data/import:ro
 
   api:
-    image: credprox-e2-sample
+    image: credprox-oauthkeycloak-stubapi
     build:
       context: ../..
-      dockerfile: samples/OAuthKeycloak/Dockerfile
-    command: ["dotnet", "/app/OAuthKeycloak.dll", "--role", "api"]
+      dockerfile: samples/OAuthKeycloak/StubApi/Dockerfile
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
-      Api__Authority: http://keycloak:8080/realms/credprox
     depends_on:
       - keycloak
     ports:
       - "5082:8080"
 
   proxy:
-    image: credprox-e2-sample
+    image: credprox-oauthkeycloak-sample
     build:
       context: ../..
       dockerfile: samples/OAuthKeycloak/Dockerfile
@@ -35,4 +33,4 @@ services:
       - keycloak
       - api
     ports:
-      - "5081:8080"
+      - "5099:8080"

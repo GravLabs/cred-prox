@@ -23,6 +23,7 @@ public sealed class CredentialRegistryProviderTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(config);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
         services.AddCredProxCredentials(config);
         return (services.BuildServiceProvider().GetRequiredService<CredentialRegistryProvider>(),
             (ReloadableMemoryConfigurationProvider)config.Providers
@@ -102,6 +103,7 @@ public sealed class CredentialRegistryProviderTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(config);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
         services.AddCredProxCredentials(config);
         services.AddSingleton<Microsoft.Extensions.Logging.ILoggerFactory>(logs);
         _ = services.BuildServiceProvider().GetRequiredService<CredentialRegistryProvider>();

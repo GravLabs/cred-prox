@@ -10,10 +10,9 @@ using Xunit;
 namespace CredProx.Testing;
 
 /// <summary>
-/// The conformance suite every credential provider should pass (see
-/// <c>docs/credprox-plan.md</c> §5 "Testing kit"): inherit it from a test class, describe
-/// the credential in configuration, and the no-secret-in-logs and failure-hygiene checks
-/// from §5.2 run against your provider through the real binder, secret scoping and token
+/// The conformance suite every credential provider should pass: inherit it from a test
+/// class, describe the credential in configuration, and the no-secret-in-logs and
+/// failure-hygiene checks run against your provider through the real binder, secret scoping and token
 /// cache wiring — the same suites the built-ins run.
 /// </summary>
 /// <remarks>
@@ -61,7 +60,7 @@ public abstract class CredentialProviderConformanceTests<TProvider, TOptions>
 
     /// <summary>
     /// Builds the per-request context the suite acquires with. Override for delegated
-    /// credential types (<c>IRequiresInboundToken</c>, §3.6) to carry an inbound token.
+    /// credential types (<c>IRequiresInboundToken</c>) to carry an inbound token.
     /// </summary>
     /// <returns>The context every <see cref="ConformanceHost.Acquire"/> uses.</returns>
     protected virtual CredentialRequestContext CreateContext() => new()
@@ -188,7 +187,7 @@ public abstract class CredentialProviderConformanceTests<TProvider, TOptions>
         host.Logs.AssertNoSecretValues(SecretValues);
     }
 
-    /// <summary>§5.2 "Diagnostics": secret values never appear in logs at any level.</summary>
+    /// <summary>Diagnostics: secret values never appear in logs at any level.</summary>
     [Fact]
     public async Task SecretValues_NeverAppearInLogs()
     {
@@ -200,7 +199,7 @@ public abstract class CredentialProviderConformanceTests<TProvider, TOptions>
     }
 
     /// <summary>
-    /// §5.2 failure hygiene: when acquisition fails, neither the thrown message nor the
+    /// Failure hygiene: when acquisition fails, neither the thrown message nor the
     /// logs may contain a secret value. The default drives failure from the token server;
     /// providers that never touch HTTP override this with their own failure shape.
     /// </summary>

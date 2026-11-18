@@ -4,8 +4,7 @@ namespace CredProx.Abstractions;
 
 /// <summary>
 /// Thrown by a delegated credential provider when the caller's inbound token fails
-/// validation (signature, issuer, audience, lifetime — see
-/// <c>docs/credprox-plan.md</c> §3.6). The core turns this into
+/// validation (signature, issuer, audience, lifetime). The core turns this into
 /// <c>401 credprox.inbound_token_invalid</c> and does not forward the request: unlike the
 /// generic <c>credential_unavailable</c> 502 (the <em>proxy</em> failed upstream), here the
 /// <em>caller's</em> token is the problem.

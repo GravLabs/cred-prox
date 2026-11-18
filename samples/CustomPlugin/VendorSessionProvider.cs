@@ -97,10 +97,10 @@ public sealed class VendorSessionProvider : ICredentialProvider<VendorSessionOpt
             using var document = JsonDocument.Parse(await response.Content
                 .ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
 
-            // M19 (§8.3): the vendor can tell "this app user has not consented" apart
-            // from "the credential is broken". The typed signal makes the proxy answer
-            // 401 credprox.consent_required with the authorize URL for the caller to
-            // open — where a plain exception would only get the generic 502.
+            // The vendor can tell "this app user has not consented" apart from "the
+            // credential is broken". The typed signal makes the proxy answer 401
+            // credprox.consent_required with the authorize URL for the caller to open —
+            // where a plain exception would only get the generic 502.
             if (document.RootElement.TryGetProperty("error", out var error)
                 && error.ValueKind == JsonValueKind.String
                 && error.GetString() == "consent_required"
@@ -131,8 +131,8 @@ public sealed class VendorSessionProvider : ICredentialProvider<VendorSessionOpt
         return (sessionId, _time.GetUtcNow() + lifetime);
     }
 
-    // The scoped accessor (plan §3.5 rule 4) resolves only this credential's own
-    // secret: references; plain values pass through untouched.
+    // The scoped accessor resolves only this credential's own secret: references;
+    // plain values pass through untouched.
     private static async ValueTask<string?> ResolveAsync(
         string? value, ISecretAccessor secrets, CancellationToken cancellationToken) =>
         value is { Length: > 0 } && value.StartsWith("secret:", StringComparison.Ordinal)

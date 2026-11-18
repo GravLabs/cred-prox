@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using CredProx.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
@@ -7,30 +8,43 @@ namespace CredProx;
 
 /// <summary>
 /// Binds every <c>CredProx:Callers:&lt;id&gt;</c> section into a <see cref="CallerRegistry"/>
-/// (see <c>docs/credprox-plan.md</c> §4 Phase B): keys are validated and their hashes
-/// resolved at startup, so a malformed hash, an unresolvable <c>secret:</c> reference or a
-/// broken operation pattern fails startup with one
-/// <see cref="OptionsValidationException"/> naming the caller and key id — never a key
-/// value or hash. Unknown configuration keys under a caller are rejected too (M14a): a
-/// typo in an allow-list entry must fail closed, never silently widen the caller's access.
+/// : a broken operation pattern or budget
+/// fails startup with one <see cref="OptionsValidationException"/> naming the caller.
+/// Unknown configuration keys under a caller are rejected too (M14a): a typo in an
+/// allow-list entry must fail closed, never silently widen the caller's access.
 /// </summary>
 /// <remarks>
-/// A key hash is configured as <c>sha256:&lt;hex&gt;</c> or as a <c>secret:</c> reference
-/// whose resolved value has that shape — the hash itself may live in any secret source.
+/// The core reads the policy shape only. <c>Keys</c> is accepted but not read here — the
+/// <c>CredProx.CallerKeys</c> add-on owns its entries (its contributed rules validate them
+/// at startup and on every rebind). <c>TokenClientIds</c> likewise belongs to
+/// <c>CredProx.CallerTokens</c>. A 0.11.0 configuration binds unchanged.
 /// </remarks>
 [Experimental("CREDPROX001")]
 public sealed class CallerBinder
 {
     private readonly IConfiguration _configuration;
-    private readonly SecretAccessorFactory _accessorFactory;
+    private readonly IReadOnlyList<ICallerRegistryValidator> _validators;
 
     /// <summary>Creates the binder.</summary>
     /// <param name="configuration">The application configuration root.</param>
-    /// <param name="accessorFactory">Scopes each caller to its own secret references.</param>
-    public CallerBinder(IConfiguration configuration, SecretAccessorFactory accessorFactory)
+    /// <param name="accessorFactory">
+    /// Unused by the core since caller keys moved to <c>CredProx.CallerKeys</c>; kept for
+    /// the 0.11.0 constructor shape. Feature packages that read secret references build
+    /// their own accessors from the same factory.
+    /// </param>
+    /// <param name="validators">
+    /// Rules contributed by feature packages (see <see cref="ICallerRegistryValidator"/>).
+    /// Every one runs over the complete registry view on every bind and rebind — a refused
+    /// registry never takes effect.
+    /// </param>
+    public CallerBinder(
+        IConfiguration configuration,
+        SecretAccessorFactory accessorFactory,
+        IEnumerable<ICallerRegistryValidator> validators)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _accessorFactory = accessorFactory ?? throw new ArgumentNullException(nameof(accessorFactory));
+        ArgumentNullException.ThrowIfNull(accessorFactory);
+        _validators = [.. validators ?? throw new ArgumentNullException(nameof(validators))];
     }
 
     /// <summary>
@@ -87,37 +101,25 @@ public sealed class CallerBinder
     {
         var errors = new List<string>();
         var callers = new Dictionary<string, CallerDefinition>(StringComparer.OrdinalIgnoreCase);
+        var entries = new List<CallerRegistryEntry>();
 
         foreach (var section in _configuration.GetSection("CredProx:Callers").GetChildren())
         {
+            entries.Add(new CallerRegistryEntry(section.Key, section));
             if (TryBindOne(section, errors, out var definition))
             {
                 callers[section.Key] = definition;
             }
         }
 
-        // One client id may belong to exactly one caller (M39): the token mapper matches
-        // case-insensitively, so an "Agent-A"/"agent-a" pair would authenticate one
-        // Entra app as two different callers — which caller wins would be registry luck.
-        // Fail closed naming both owners.
-        var clientOwners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (callerId, definition) in callers)
+        // The contributed rules see the complete configured set in configuration order —
+        // cross-caller rules (one client id claimed by two callers) are why every entry
+        // arrives in a single call — and they see it on every rebind too: a live edit
+        // into a refused shape fails here, before any swap, so the provider keeps the
+        // previous registry serving.
+        foreach (var validator in _validators)
         {
-            foreach (var clientId in definition.TokenClientIds)
-            {
-                if (clientOwners.TryGetValue(clientId, out var owner))
-                {
-                    // M39: a case-variant pair inside ONE caller is its own
-                    // defect — the two-owner wording would name the same caller twice.
-                    errors.Add(string.Equals(owner, callerId, StringComparison.Ordinal)
-                        ? $"The client id '{clientId}' is listed twice by caller '{callerId}' (client ids collide case-insensitively within a caller)."
-                        : $"The client id '{clientId}' is listed by more than one caller ('{owner}' and '{callerId}').");
-                }
-                else
-                {
-                    clientOwners[clientId] = callerId;
-                }
-            }
+            errors.AddRange(validator.Validate(entries));
         }
 
         return (errors.Count == 0 ? new CallerRegistry(callers) : null, errors);
@@ -127,85 +129,10 @@ public sealed class CallerBinder
     {
         var callerId = section.Key;
         RejectUnknownKeys(section, callerId, errors);
-        var secrets = _accessorFactory.CreateAccessor(section);
-        var keys = new List<CallerKey>();
-        var keyIds = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var keySection in section.GetSection("Keys").GetChildren())
-        {
-            var keyId = keySection["KeyId"];
-            if (string.IsNullOrWhiteSpace(keyId))
-            {
-                errors.Add($"The caller '{callerId}' has a key with no KeyId.");
-                continue;
-            }
-
-            if (!keyIds.Add(keyId))
-            {
-                errors.Add($"The caller '{callerId}' declares the KeyId '{keyId}' twice.");
-                continue;
-            }
-
-            var hashDeclaration = keySection["KeyHash"];
-            if (string.IsNullOrWhiteSpace(hashDeclaration))
-            {
-                errors.Add($"The caller '{callerId}' key '{keyId}' has no KeyHash.");
-                continue;
-            }
-
-            var hash = ResolveHash(secrets, hashDeclaration, callerId, keyId, errors);
-            if (hash is null)
-            {
-                continue;
-            }
-
-            DateTimeOffset? expiresAt = null;
-            var expiry = keySection["ExpiresAt"];
-            if (!string.IsNullOrWhiteSpace(expiry))
-            {
-                if (!DateTimeOffset.TryParse(expiry, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-                {
-                    errors.Add($"The caller '{callerId}' key '{keyId}' has an ExpiresAt that is not a date-time.");
-                    continue;
-                }
-
-                expiresAt = parsed;
-            }
-
-            keys.Add(new CallerKey(keyId, hash, expiresAt));
-        }
-
-        // M39 (ADR-0004): token clients are the caller's second credential. A blank
-        // entry is a config error naming the caller — a silently-dropped "" would
-        // otherwise sit in TokenClientIds and match nothing (fail closed, M14a rule).
-        var tokenClientIds = new List<string>();
-        foreach (var clientSection in section.GetSection("TokenClientIds").GetChildren())
-        {
-            var clientId = clientSection.Value;
-            if (string.IsNullOrWhiteSpace(clientId))
-            {
-                errors.Add($"The caller '{callerId}' has an empty TokenClientIds entry.");
-                continue;
-            }
-
-            // M39: padded entries look bound in config but match nothing (the
-            // mapper compares verbatim), so they are refused, never silently trimmed.
-            if (!string.Equals(clientId, clientId.Trim(), StringComparison.Ordinal))
-            {
-                errors.Add(
-                    $"The caller '{callerId}' has a TokenClientIds entry with leading or trailing "
-                    + "whitespace — client ids are matched verbatim, so a padded entry admits nobody.");
-                continue;
-            }
-
-            tokenClientIds.Add(clientId);
-        }
-
-        if (keys.Count == 0 && tokenClientIds.Count == 0 && errors.Count == 0)
-        {
-            errors.Add($"The caller '{callerId}' declares no usable key under Keys.");
-        }
-
+        // Keys and TokenClientIds are accepted-but-unread configuration sections: each
+        // feature package validates its own entries through ICallerRegistryValidator, on
+        // this bind and on every rebind. The core binds the policy only.
         var operations = new List<CallerOperationRule>();
         foreach (var ruleSection in section.GetSection("Operations").GetChildren())
         {
@@ -223,12 +150,12 @@ public sealed class CallerBinder
         }
 
         definition = null!;
-        if (errors.Count > 0 || (keys.Count == 0 && tokenClientIds.Count == 0))
+        if (errors.Count > 0)
         {
             return false;
         }
 
-        definition = new CallerDefinition(callerId, keys, operations, limits, tokenClientIds);
+        definition = new CallerDefinition(callerId, operations, limits);
         return true;
     }
 
@@ -364,11 +291,12 @@ public sealed class CallerBinder
     // and a typo in an allow-list entry (e.g. "PathPatterns" for "Paths") would otherwise
     // be silently ignored and admit the caller to EVERYTHING. A security allow-list fails
     // closed on a config error (M14a), at startup and on reload alike.
+    // Keys and TokenClientIds are accepted but not read here: CredProx.CallerKeys and
+    // CredProx.CallerTokens own those sections' values (their contributed rules validate
+    // entries at startup and on every rebind); the core keeps both names so a 0.11.0
+    // config still binds.
     private static readonly HashSet<string> CallerLevelKeys =
         new(StringComparer.OrdinalIgnoreCase) { "Keys", "Operations", "Limits", "TokenClientIds" };
-
-    private static readonly HashSet<string> KeyEntryKeys =
-        new(StringComparer.OrdinalIgnoreCase) { "KeyId", "KeyHash", "ExpiresAt" };
 
     private static readonly HashSet<string> OperationEntryKeys =
         new(StringComparer.OrdinalIgnoreCase) { "Route", "Methods", "Paths", "Name" };
@@ -392,7 +320,6 @@ public sealed class CallerBinder
             }
         }
 
-        RejectUnknownEntryKeys(callerSection.GetSection("Keys"), "Keys", KeyEntryKeys, callerId, errors);
         RejectUnknownEntryKeys(callerSection.GetSection("Operations"), "Operations", OperationEntryKeys, callerId, errors);
 
         var limitsSection = callerSection.GetSection("Limits");
@@ -437,69 +364,4 @@ public sealed class CallerBinder
             + "silently weaken the caller's allow-list — fix the spelling or remove the key.");
     }
 
-    private byte[]? ResolveHash(
-        ScopedSecretAccessor secrets,
-        string declaration,
-        string callerId,
-        string keyId,
-        List<string> errors)
-    {
-        var value = declaration;
-        if (declaration.StartsWith(SecretReferences.Prefix, StringComparison.Ordinal))
-        {
-            var name = declaration[SecretReferences.Prefix.Length..];
-            try
-            {
-                value = secrets.GetSecretAsync(name, CancellationToken.None).AsTask().GetAwaiter().GetResult();
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                errors.Add($"The caller '{callerId}' key '{keyId}' could not resolve its KeyHash secret: {ex.Message}");
-                return null;
-            }
-
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                errors.Add($"The caller '{callerId}' key '{keyId}' resolved an empty KeyHash secret.");
-                return null;
-            }
-        }
-
-        if (!TryParseHash(value!, out var hash))
-        {
-            errors.Add($"The caller '{callerId}' key '{keyId}' has a KeyHash that is not 'sha256:<64 hex digits>'.");
-            return null;
-        }
-
-        return hash;
-    }
-
-    /// <summary>
-    /// Parses <c>sha256:&lt;hex&gt;</c> (case-insensitive hex). The hash — never the key —
-    /// is what configuration stores.
-    /// </summary>
-    internal static bool TryParseHash(string value, out byte[] hash)
-    {
-        hash = [];
-        const string prefix = "sha256:";
-        if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || value.Length != prefix.Length + 64)
-        {
-            return false;
-        }
-
-        var hex = value[prefix.Length..];
-        var bytes = new byte[32];
-        for (var i = 0; i < 32; i++)
-        {
-            if (!byte.TryParse(hex.AsSpan(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
-            {
-                return false;
-            }
-
-            bytes[i] = b;
-        }
-
-        hash = bytes;
-        return true;
-    }
 }

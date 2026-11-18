@@ -5,8 +5,8 @@ using Xunit;
 namespace CredProx.Testing;
 
 /// <summary>
-/// The conformance suite for <see cref="ITokenCache"/> implementations (see
-/// <c>docs/credprox-plan.md</c> §5.2 "Token cache"): single fetch under concurrency,
+/// The conformance suite for <see cref="ITokenCache"/> implementations:
+/// single fetch under concurrency,
 /// <c>Invalidate</c> forces a refetch, one key's failure does not affect other keys, and
 /// cancelling one waiter does not cancel the shared fetch. The built-in cache runs this
 /// same suite.

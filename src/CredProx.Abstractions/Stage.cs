@@ -4,8 +4,7 @@ namespace CredProx.Abstractions;
 
 /// <summary>
 /// The fixed request-processing stages of CredProx. Plugins declare the stage they run
-/// in; the core enforces the order regardless of registration order
-/// (see <c>docs/credprox-plan.md</c> §3.5 rule 3).
+/// in; the core enforces the order regardless of registration order.
 /// </summary>
 /// <remarks>
 /// Values are spaced by ten so that stages can be inserted between existing ones
@@ -18,7 +17,7 @@ public enum Stage
     AuthenticateCaller = 0,
 
     /// <summary>
-    /// Enforce the operational kill switch (M18, plan §8.4): a cluster or a caller taken
+    /// Enforce the operational kill switch: a cluster or a caller taken
     /// out of service by configuration answers <c>503</c> here. Runs after caller
     /// authentication — a disabled caller must still present a valid key, the switch is
     /// not an anonymous bypass — and before everything that could touch a partition
@@ -33,7 +32,7 @@ public enum Stage
     ResolveDestination = 20,
 
     /// <summary>
-    /// Apply the authenticated caller's request budget (M15, plan §3.7). Runs after the
+    /// Apply the authenticated caller's request budget. Runs after the
     /// destination is resolved (per-cluster overrides key on the resolved cluster) and
     /// before header shaping and credential attachment, so a budget-rejected request never
     /// touches a token endpoint or the upstream.
@@ -60,7 +59,7 @@ public enum Stage
 
     /// <summary>
     /// Inspect or modify the response received from upstream before the caller sees any
-    /// of it (M20, plan §8.2). The first built-in at this stage is response secret
+    /// of it. The first built-in at this stage is response secret
     /// scrubbing; plugins reach it by implementing <see cref="IResponseFeature"/>.
     /// </summary>
     ShapeResponse = 80,

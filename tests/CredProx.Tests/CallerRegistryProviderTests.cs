@@ -29,9 +29,15 @@ public sealed class CallerRegistryProviderTests
     {
         var source = new ReloadableMemoryConfigurationSource(entries);
         var config = new ConfigurationBuilder().Add(source).Build();
+        var secretSource = new ConfigurationSecretSource(config);
+        // The keys rules travel with a keys-consuming host as a registry validator;
+        // without them a caller losing its key would still rebind cleanly.
         var provider = new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config))),
-            new ConfigurationSecretSource(config),
+            new CallerBinder(
+                config,
+                new SecretAccessorFactory(secretSource),
+                [new CallerKeyRules()]),
+            secretSource,
             NullLogger<CallerRegistryProvider>.Instance);
         return (provider, (ReloadableMemoryConfigurationProvider)config.Providers
             .OfType<ReloadableMemoryConfigurationProvider>().Single());
@@ -51,7 +57,7 @@ public sealed class CallerRegistryProviderTests
     public void Ctor_NullSecretSource_Throws()
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(Entries()).Build();
-        var binder = new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)));
+        var binder = new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)), []);
 
         Assert.Throws<ArgumentNullException>(
             () => new CallerRegistryProvider(binder, null!, NullLogger<CallerRegistryProvider>.Instance));
@@ -61,7 +67,7 @@ public sealed class CallerRegistryProviderTests
     public void Ctor_NullLogger_Throws()
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(Entries()).Build();
-        var binder = new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)));
+        var binder = new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)), []);
 
         Assert.Throws<ArgumentNullException>(
             () => new CallerRegistryProvider(binder, new ConfigurationSecretSource(config), null!));
@@ -101,7 +107,6 @@ public sealed class CallerRegistryProviderTests
         reloadable.Reload();
 
         Assert.Same(before, provider.Current);
-        Assert.True(provider.Current.TryGet("app-a", out var caller));
-        Assert.Equal("k1", caller.Keys.Single().KeyId);
+        Assert.True(provider.Current.TryGet("app-a", out _));
     }
 }

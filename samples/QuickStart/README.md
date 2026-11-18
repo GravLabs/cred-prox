@@ -1,4 +1,4 @@
-# E1 — QuickStart: a static key, attached by the proxy
+# QuickStart: a static key, attached by the proxy
 
 ## What it demonstrates
 
@@ -70,8 +70,8 @@ Everything is in `appsettings.json` — no vendor-specific C#:
 }
 ```
 
-The five lines of C# in `Program.cs` are the standard CredProx service block — identical in
-every example.
+`Program.cs` is the standard CredProx host block — `AddCredProx` for the core defaults, plus
+the proxy loaded from the `ReverseProxy` section — identical in every example.
 
 ## Where secrets belong
 
@@ -84,20 +84,26 @@ names: bash `export` rejects them ("not a valid identifier"), so deliver them as
 
 ## Verify it without internet
 
-Two stand-ins for `postman-echo.com`, both showing the same thing:
+The offline stand-in for `postman-echo.com` is the WireMock container in
+`docker-compose.yml`. Running the host with `ASPNETCORE_ENVIRONMENT=Development` merges
+`appsettings.Development.json` over the base config, which repoints the destination at the
+stub — the same two keys you would otherwise pass as environment variables:
 
 ```bash
-# In-process stand-in — no Docker, no build order concerns:
-dotnet run --project samples/QuickStart -- --smoke
-
-# WireMock stand-in (what CI runs):
-cd samples/QuickStart && ./smoke.sh
+cd samples/QuickStart
+docker compose up -d
+ASPNETCORE_ENVIRONMENT=Development dotnet run
 ```
 
-`--smoke` swaps the destination for an in-process echo endpoint; `smoke.sh` starts the
-WireMock container from `docker-compose.yml` and repoints the destination at it purely with
-environment variables (`CredProx__Destinations__echo__Template=…`) — no config file changes.
-Both print `SMOKE OK` when the upstream saw the `X-API-Key` header.
+The offline check itself is one cell per behavior, driving the real host over real sockets
+from `tests/CredProx.SampleSmokes` (the stub's journal proves the key arrived; the caller's
+echo proves it is redacted):
+
+```bash
+dotnet test tests/CredProx.SampleSmokes --filter Sample=QuickStart
+# or the one-line wrapper:
+cd samples/QuickStart && ./smoke.sh
+```
 
 ## What just happened
 

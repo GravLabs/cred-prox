@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# E15 smoke (in-process, no Docker): the Salesforce token endpoint and data API are
-# stubbed in the same host. The stubs make the checks the real vendor makes (client
-# credentials on the token call, session bearer on the API), so 200s prove the egress
-# path; the session token must appear nowhere in what the agents receive or the logs.
+# Offline check: the sample's smoke cells live in the shared test project
+# (tests/CredProx.SampleSmokes, Trait Sample=AgentEgress) — this script is the
+# per-sample entry point CI keeps calling.
 set -euo pipefail
-cd "$(dirname "$0")"
-
-dotnet run -- --smoke
+cd "$(dirname "$0")/../.."
+dotnet test tests/CredProx.SampleSmokes --filter "Sample=AgentEgress|Sample=Stamp"

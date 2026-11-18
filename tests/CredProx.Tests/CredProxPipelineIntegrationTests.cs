@@ -130,6 +130,7 @@ public sealed class CredProxPipelineIntegrationTests : IAsyncLifetime
                 services.AddCredProxTokenCache();
                 services.AddCredProxConfigurationSecrets(context.Configuration);
                 services.AddCredProxBuiltInCredentials();
+                services.AddCredProxOAuth();
                 credentialTypes?.Invoke(services);
                 services.AddCredProxCredentials(context.Configuration);
                 services.AddRouting();

@@ -7,12 +7,12 @@ namespace CredProx;
 
 /// <summary>
 /// Binds every <c>CredProx:Connections:&lt;name&gt;</c> section at startup into a
-/// <see cref="ConnectionRegistry"/> (see <c>docs/credprox-plan.md</c> §3.2/§5.2): the
+/// <see cref="ConnectionRegistry"/>: the
 /// client certificate secret is resolved and loaded immediately, so a missing secret or a
 /// wrong password fails startup with one clear <see cref="OptionsValidationException"/>
 /// naming the connection and reference — never the value or the password. Keys other than
-/// <c>ClientCertificate</c> and <c>ClientCertificatePassword</c> are rejected too (M17,
-/// §3.3), at startup and on rebind.
+/// <c>ClientCertificate</c> and <c>ClientCertificatePassword</c> are rejected too,
+/// at startup and on rebind.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class ConnectionBinder
@@ -69,7 +69,7 @@ public sealed class ConnectionBinder
     }
 
     /// <summary>
-    /// Rebinds after a configuration change (the config-reload story, M5): new and changed
+    /// Rebinds after a configuration change: new and changed
     /// connections bind fresh (loaded eagerly, so a bad new certificate fails the rebind),
     /// removed ones drop out, and a connection whose <c>ClientCertificate</c> and
     /// <c>ClientCertificatePassword</c> references are unchanged keeps its existing object —

@@ -6,12 +6,11 @@ using Microsoft.Extensions.Logging;
 namespace CredProx;
 
 /// <summary>
-/// One <c>CredProx:Connections:&lt;name&gt;</c> entry (see <c>docs/credprox-plan.md</c>
-/// §3.2): a client certificate loaded from a secret, with rotation detection. The raw
+/// One <c>CredProx:Connections:&lt;name&gt;</c> entry: a client certificate loaded from a secret, with rotation detection. The raw
 /// secret value is compared on each refresh; when it changed, the certificate is reloaded
 /// and <see cref="Version"/> advances. <c>CredProxForwarderHttpClientFactory</c> adds that
 /// version to its <c>CanReuseOldClient</c> check, so a rotated certificate rebuilds the
-/// cluster's client on the next configuration reload (§3.3).
+/// cluster's client on the next configuration reload.
 /// </summary>
 /// <remarks>
 /// A reload that fails to load (a rotated value that is not valid certificate material, or
@@ -76,7 +75,7 @@ public sealed class ClientCertificateConnection
 
     /// <summary>
     /// Loads the certificate for the first time, letting failures surface — the startup
-    /// binder turns them into the validation error §5.2 requires.
+    /// binder turns them into a startup validation error.
     /// </summary>
     /// <param name="cancellationToken">Cancels the secret reads.</param>
     public ValueTask LoadAsync(CancellationToken cancellationToken) =>

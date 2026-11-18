@@ -6,8 +6,8 @@ namespace CredProx;
 /// <summary>
 /// The shared response-body eligibility rules of the outbound pipeline: which media
 /// types a body rewriter may touch without mangling it, and how the content encoding
-/// gates the rewrite. Extracted from the scrubber (M20/M22) so the scrubber and the
-/// error normaliser (M24) run one audited classifier, not two that can drift.
+/// gates the rewrite. Extracted from the scrubber so the scrubber and the
+/// error normaliser run one audited classifier, not two that can drift.
 /// </summary>
 internal static class ResponseBodies
 {
@@ -87,7 +87,7 @@ internal static class ResponseBodies
     /// <c>windows-*</c>, <c>utf-16</c>, …) is refused for callers that decode the body
     /// to text — reading those bytes as UTF-8 would replace them with U+FFFD or
     /// interleave NULs and destroy them. Byte-level rewriters do not need this gate:
-    /// their matcher is charset-indifferent. (F1, M24 review: the normaliser embeds the
+    /// their matcher is charset-indifferent. (The normaliser embeds the
     /// vendor's payload as text, so the "lossless" claim only holds within this set.)
     /// </summary>
     internal static bool IsCharsetUtf8OrAscii(MediaTypeHeaderValue? contentType)

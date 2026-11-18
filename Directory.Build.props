@@ -55,19 +55,12 @@
     </ItemGroup>
   </Target>
 
+  <!-- The single repo version lives in build/Version.props (imported here and by the
+       hermetic soak host, so both track one number). -->
+  <Import Project="$(MSBuildThisFileDirectory)build/Version.props" />
+
   <!-- NuGet package metadata. -->
   <PropertyGroup>
-    <!-- Single version for the whole repo; milestones bump it (plan §7). 0.11.0 ships
-         the M39 agent tokens: a caller presents a short-lived OIDC access token whose
-         Entra app roles admit exactly the named operation rules - a caller without
-         named rules admits no token - with a host-swappable validation handler,
-         MaxTokenAge enforced at the caller-authentication stage, raw Entra claim names
-         (MapInboundClaims is off on the caller-token scheme), and server-side refusal
-         diagnostics. Minor bump: the caller-token API is additive, and one Breaking
-         change (allowed pre-1.0) collapses the caller contract surface to single
-         constructors with optional parameters (CallerDefinition, CallerOperationRule,
-         CallerIdentity). -->
-    <Version>0.11.0</Version>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Authors>Hector Ramos</Authors>
     <Company>Hector Ramos</Company>
@@ -91,12 +84,16 @@
        ApiCompat only after .NET 10 — dotnet/sdk main ApiStabilityClassifier, absent
        from release/10.0 and from the 10.0.112 task assembly). ApiCompatExcludeAttributes-
        File is NOT the lever: it feeds attribute-data comparison only, and on newer SDKs
-       listing ExperimentalAttribute there would disable the native skip. Historical
-       suppressions (0.4.0 preset removal, 0.5.0 signature replacements, the 0.8.0 EntraObo
-       removal) are absorbed by the 0.8.0 baseline, so src/CredProx/
-       CompatibilitySuppressions.xml is deleted - a fresh-obj pack must show zero
-       diagnostics and zero unnecessary-suppression warnings; future intentional removals
-       regenerate it (dotnet pack /p:ApiCompatGenerateSuppressionFile=true). Pre-1.0 the whole public surface is
+       listing ExperimentalAttribute there would disable the native skip. Removals through
+       0.8.0 are absorbed by the baseline. Since 0.11.0 the suppressions files are back:
+       src/CredProx/ carries 39 entries and src/CredProx.Abstractions/ 4 — one per type
+       or member removal the CHANGELOG Breaking entries record since the 0.10.0 baseline
+       (the [0.11.0] caller contract collapse and the [Unreleased] add-on moves: Hmac,
+       LoginExchange, OAuth, CallerKeys and Operations); the files are removed at the
+       next baseline rotation, when those removals move into the baseline. A fresh-obj pack must show zero diagnostics beyond
+       the file entries and zero unnecessary-suppression warnings; future intentional
+       removals regenerate them
+       (dotnet pack /p:ApiCompatGenerateSuppressionFile=true). Pre-1.0 the whole public surface is
        experimental and may change; the guard bites on graduated surface. -->
   <!-- Condition is != 'false', not == 'true': IsPackable defaults to true in the SDK
        targets, which run after this file — projects that don't set it (the src
@@ -109,10 +106,10 @@
     <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
     <EnableSourceLink>true</EnableSourceLink>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.10.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.11.0</PackageValidationBaselineVersion>
     <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
          entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
-         $(MSBuildProjectName) equals $(PackageId) for all four packable projects. -->
+         $(MSBuildProjectName) equals $(PackageId) for all ten packable projects. -->
     <PackageValidationBaselinePath>$(MSBuildThisFileDirectory)build/baselines/$(MSBuildProjectName).$(PackageValidationBaselineVersion).nupkg</PackageValidationBaselinePath>
     <PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)/README.md')">README.md</PackageReadmeFile>
   </PropertyGroup>

@@ -5,7 +5,7 @@ namespace CredProx;
 /// <summary>
 /// Shared startup binding of a partition block (spec + allow-list) into a
 /// <see cref="PartitionSourceBinding"/>. Used by the destination binder and the credential
-/// binder so both sides of §3.2 enforce the same rules: a spec needs a registered factory,
+/// binder so both sides enforce the same rules: a spec needs a registered factory,
 /// and a partition that is gated needs a non-empty allow-list — an empty one would admit
 /// nothing and only look like a gate.
 /// </summary>

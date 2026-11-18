@@ -1,4 +1,5 @@
 using CredProx;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace CredProx.Tests;
@@ -11,7 +12,7 @@ namespace CredProx.Tests;
 public sealed class HeaderHygieneFeatureTests
 {
     private static HeaderHygieneFeature Feature(CredProxCoreOptions? options = null) =>
-        new(options ?? new CredProxCoreOptions(), []);
+        new(options ?? new CredProxCoreOptions(), new ConfigurationBuilder().Build());
 
     [Fact]
     public async Task InboundKeyHeader_IsRemovedFromOutboundRequest()

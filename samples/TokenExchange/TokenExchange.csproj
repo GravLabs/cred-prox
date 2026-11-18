@@ -10,8 +10,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- StubApi/ is its own project; keep its files out of this compilation. -->
+    <Compile Remove="StubApi/**" />
+    <Content Remove="StubApi/**" />
+    <None Remove="StubApi/**" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="CredProx" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="CredProx.CallerKeys" />
+    <PackageReference Include="CredProx.OAuth" />
   </ItemGroup>
 
 </Project>

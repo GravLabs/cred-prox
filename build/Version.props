@@ -1,0 +1,21 @@
+<Project>
+  <!-- Single version for the whole repo; milestones bump it (plan §7).
+       0.11.0 is RELEASED (its contents: CHANGELOG [0.11.0] - M39 agent tokens and
+       the caller-contract collapse). 0.12.0 is the release number set by the
+       0.12.0 prep — the M42 package splits that move OAuth, LoginExchange, Hmac,
+       Operations, caller keys and agent tokens out of the core into their own
+       packages (ADR-0005); publishing itself is the separate maintainer ceremony
+       (PUBLISHING.md). The -dev suffix used on development lines is load-bearing:
+       candidate packs carry a prerelease version, so they can never collide in the
+       machine-wide NuGet cache with a published version (slice-4b hazard F3). A
+       released number without -dev does collide by design: after this bump, the
+       exact-version cache must be evicted before any sample smoke trusts the
+       local feed, and the next milestone reopens the line as 0.13.0-dev.
+       Two importers, deliberately kept in sync by import: the root
+       Directory.Build.props (every library and the samples) and the hermetic
+       tools/m33-soak/SoakHost props — the soak host tracks this number without
+       inheriting the library's build policy. -->
+  <PropertyGroup>
+    <Version>0.12.0</Version>
+  </PropertyGroup>
+</Project>

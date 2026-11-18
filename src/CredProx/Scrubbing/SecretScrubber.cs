@@ -4,7 +4,7 @@ using System.Text;
 namespace CredProx;
 
 /// <summary>
-/// The one secret matcher the scrubbers share (M20, plan §8.2): compiled UTF-8 patterns
+/// The one secret matcher the scrubbers share: compiled UTF-8 patterns
 /// tried longest-first, and the batch builder that replaces every occurrence of a
 /// pattern in a pending buffer with <c>[redacted]</c> (<see cref="AuditRedactor.Masked"/>)
 /// up to an explicit emit boundary. <see cref="ScrubbingStream"/> (byte-stream framing)

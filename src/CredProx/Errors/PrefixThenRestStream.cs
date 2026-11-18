@@ -2,7 +2,7 @@ namespace CredProx;
 
 /// <summary>
 /// Replays a buffered prefix, then reads through the remainder of the underlying
-/// stream. The error normaliser (M24) buffers a vendor error body up to its cap; when
+/// stream. The error normaliser buffers a vendor error body up to its cap; when
 /// the body turns out larger than declared, the untouched bytes are handed to the
 /// caller through this stream so the "forward byte-identical" promise survives a
 /// partially-read response.

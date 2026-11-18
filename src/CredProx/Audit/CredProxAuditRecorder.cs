@@ -2,17 +2,17 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using CredProx.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Yarp.ReverseProxy.Model;
 
 namespace CredProx;
 
 /// <summary>
-/// Produces the audit record for every CredProx-processed request
-/// (<c>docs/credprox-plan.md</c> §4 "Audit log", §5.2 "Audit"). The core transform
+/// Produces the audit record for every CredProx-processed request. The core transform
 /// provider calls <see cref="Begin"/> before the pipeline runs, so requests rejected at
 /// any stage — 401, 403, 400, 502 — are recorded too (least-privilege policy is useless
-/// if its denials are invisible; E7 asserts the blocked POST's record). The record is
+/// if its denials are invisible). The record is
 /// written on response completion: status, latency and bytes are final then, and the
 /// completion seam covers both the short-circuit path and the forwarded path.
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class CredProxAuditRecorder
     /// <summary>Event name for a request the forwarder sent upstream.</summary>
     public const string ProxiedEvent = "credprox.proxied_call";
 
-    /// <summary>Event name for a request a CredProx feature short-circuited (§3.4).</summary>
+    /// <summary>Event name for a request a CredProx feature short-circuited.</summary>
     public const string RejectedEvent = "credprox.rejected_call";
 
     private readonly IReadOnlyList<IAuditSink> _sinks;
@@ -44,7 +44,7 @@ public sealed class CredProxAuditRecorder
         TimeProvider time,
         ILogger<CredProxAuditRecorder> logger,
         CredProxCoreOptions coreOptions,
-        CallerKeyOptions? callerKeyOptions)
+        IConfiguration? configuration)
     {
         ArgumentNullException.ThrowIfNull(sinks);
         ArgumentNullException.ThrowIfNull(options);
@@ -57,11 +57,19 @@ public sealed class CredProxAuditRecorder
         _time = time;
         _logger = logger;
 
-        // The configured caller-key header names are sensitive whatever the configuration
-        // says about redaction — the record must never carry a key value (§5.2:367).
+        // The caller-auth header name is sensitive whatever the configuration says about
+        // redaction — the record must never carry a key value (§5.2:367). The core reads
+        // the configured name (default X-CredProx-Key) from raw configuration; it knows
+        // no key type.
+        var callerAuthHeader = configuration?["CredProx:CallerAuth:HeaderName"];
+        if (string.IsNullOrEmpty(callerAuthHeader))
+        {
+            callerAuthHeader = "X-CredProx-Key";
+        }
+
         var headers = new HashSet<string>(AuditRedactor.DefaultRedactHeaders, StringComparer.OrdinalIgnoreCase);
         AddIfNotEmpty(headers, coreOptions.InboundKeyHeader);
-        AddIfNotEmpty(headers, callerKeyOptions?.HeaderName);
+        AddIfNotEmpty(headers, callerAuthHeader);
         foreach (var name in options.RedactHeaders)
         {
             AddIfNotEmpty(headers, name);

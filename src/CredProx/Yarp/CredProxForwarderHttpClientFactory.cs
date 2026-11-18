@@ -12,8 +12,7 @@ using Yarp.ReverseProxy.Forwarder;
 namespace CredProx;
 
 /// <summary>
-/// The CredProx <see cref="ForwarderHttpClientFactory"/> (see
-/// <c>docs/credprox-plan.md</c> §3.3): applies the cluster's client certificate
+/// The CredProx <see cref="ForwarderHttpClientFactory"/>: applies the cluster's client certificate
 /// (<c>CredProx.Connection</c> cluster metadata) and any registered
 /// <see cref="IConnectionFeature"/> in <c>ConfigureHandler</c>, and composes the outbound
 /// pipeline in <c>WrapHandler</c> — the refresh-on-401 handler innermost, then the
@@ -21,8 +20,8 @@ namespace CredProx;
 /// outermost).
 /// </summary>
 /// <remarks>
-/// Not sealed: subclassing this factory is the plan's extension point (§3.3 "client
-/// factory subclass") — override <c>ConfigureHandler</c>/<c>WrapHandler</c> around the
+/// Not sealed: subclassing this factory is the supported extension point — override
+/// <c>ConfigureHandler</c>/<c>WrapHandler</c> around the
 /// CredProx composition, or call <see cref="ComposePipeline"/> over a custom transport.
 /// </remarks>
 /// <remarks>
@@ -131,7 +130,7 @@ public class CredProxForwarderHttpClientFactory : ForwarderHttpClientFactory
     /// <summary>
     /// Composes the outbound handler chain for a cluster: the refresh-on-401 handler
     /// innermost (it acts on the real upstream response, below resilience), then the
-    /// response dispatcher (M20, plan §8.2 — features run on the settled upstream
+    /// response dispatcher (features run on the settled upstream
     /// response before YARP copies it), then the registered pipeline features in stage
     /// order, lowest stage outermost. Exposed for tests that compose over a stub
     /// transport.

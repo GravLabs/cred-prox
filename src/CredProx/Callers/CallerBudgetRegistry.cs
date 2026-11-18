@@ -4,13 +4,13 @@ using System.Threading.RateLimiting;
 namespace CredProx;
 
 /// <summary>
-/// Per-caller request-budget limiters (M15, plan §3.7): one fixed-window counter per
+/// Per-caller request-budget limiters: one fixed-window counter per
 /// (caller id × cluster) pair, created lazily from the caller's effective limits. Keys come
 /// from <em>configuration</em> (caller ids and cluster ids), never from request data — an
-/// attacker or a hostile IdP cannot grow this dictionary (§3.7).
+/// attacker or a hostile IdP cannot grow this dictionary.
 /// </summary>
 /// <remarks>
-/// Singleton like <see cref="ClusterThrottleRegistry"/>. Each key holds one immutable record
+/// Singleton like the CredProx.Operations throttle registry. Each key holds one immutable record
 /// pairing the limiter with the limits that produced it, so a first concurrent burst against
 /// a fresh key converges on a single limiter: <c>GetOrAdd</c> is atomic and the replace block
 /// is entered only when the configured limits genuinely differ (review F1 — the earlier

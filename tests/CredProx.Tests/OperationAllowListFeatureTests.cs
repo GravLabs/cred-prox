@@ -319,7 +319,7 @@ public sealed class OperationAllowListFeatureTests
 
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
         return new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config))),
+            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)), []),
             new ConfigurationSecretSource(config),
             NullLogger<CallerRegistryProvider>.Instance);
     }

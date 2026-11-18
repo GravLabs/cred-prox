@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# E16 smoke (in-process, no Docker): the session-cookie vendor — form login issuing
-# Set-Cookie and a cookie-guarded API — is stubbed in the same host. The stubs make the
-# checks the real vendor makes (form credentials on the login, the live session cookie on
-# the API), so 200s prove the egress path; the session value, the login passwords and the
-# caller's own cookies must appear nowhere the caller or the logs can see them.
+# Offline check: the sample's smoke cells live in the shared test project
+# (tests/CredProx.SampleSmokes, Trait Sample=SessionCookie) — this script is the
+# per-sample entry point CI keeps calling.
 set -euo pipefail
-cd "$(dirname "$0")"
-
-dotnet run -- --smoke
+cd "$(dirname "$0")/../.."
+dotnet test tests/CredProx.SampleSmokes --filter "Sample=SessionCookie|Sample=Stamp"

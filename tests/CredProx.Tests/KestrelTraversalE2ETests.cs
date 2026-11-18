@@ -80,6 +80,7 @@ public sealed class KestrelTraversalE2ETests : IAsyncLifetime
                 services.AddCredProxTokenCache();
                 services.AddCredProxConfigurationSecrets(context.Configuration);
                 services.AddCredProxBuiltInCredentials();
+                services.AddCredProxOAuth();
                 services.AddCredProxCredentials(context.Configuration);
                 services.AddCredProxCallerAuthentication(context.Configuration);
                 services.AddRouting();

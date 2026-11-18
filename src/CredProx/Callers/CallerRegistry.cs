@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// The bound set of callers (§4 Phase B), keyed by caller id case-insensitively — the
+/// The bound set of callers, keyed by caller id case-insensitively — the
 /// config key is the identity. Resolved per request through the live provider, so a
 /// reload that adds or revokes a caller takes effect without a restart.
 /// </summary>

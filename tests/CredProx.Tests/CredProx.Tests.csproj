@@ -23,6 +23,12 @@
     <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
     <ProjectReference Include="..\..\src\CredProx.Abstractions\CredProx.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\CredProx.AzureKeyVault\CredProx.AzureKeyVault.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.CallerKeys\CredProx.CallerKeys.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.CallerTokens\CredProx.CallerTokens.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.Hmac\CredProx.Hmac.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.LoginExchange\CredProx.LoginExchange.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.OAuth\CredProx.OAuth.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.Operations\CredProx.Operations.csproj" />
   </ItemGroup>
 
   <ItemGroup>

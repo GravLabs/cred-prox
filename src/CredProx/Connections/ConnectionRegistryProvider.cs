@@ -7,7 +7,7 @@ namespace CredProx;
 
 /// <summary>
 /// Holds the live <see cref="ConnectionRegistry"/> and rebinds it when the secret source's
-/// change token fires (the config-reload story, M5): a reload that adds a connection makes
+/// change token fires: a reload that adds a connection makes
 /// it resolvable without a restart, and one that removes a connection takes it out.
 /// Rebinding is incremental — a connection whose <c>ClientCertificate</c> and
 /// <c>ClientCertificatePassword</c> references are unchanged keeps its existing

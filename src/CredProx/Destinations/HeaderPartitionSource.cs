@@ -6,10 +6,10 @@ using Microsoft.Extensions.Primitives;
 namespace CredProx;
 
 /// <summary>
-/// The built-in <c>header:</c> partition source (see <c>docs/credprox-plan.md</c> §3.2):
+/// The built-in <c>header:</c> partition source:
 /// the partition is the value of one inbound request header, for example
 /// <c>"Partition": "header:X-API-Env"</c>. A missing or empty header resolves to
-/// <see langword="null"/> — the allow-list then rejects the request (§3.4).
+/// <see langword="null"/> — the allow-list then rejects the request.
 /// </summary>
 /// <remarks>
 /// The raw header value is returned untrimmed and unmatched: the

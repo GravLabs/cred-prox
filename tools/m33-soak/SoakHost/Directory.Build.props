@@ -1,5 +1,8 @@
 <Project>
-  <!-- Hermetic host: do not inherit the library's build (versioning, analyzers, packaging). -->
+  <!-- Hermetic host: do not inherit the library's build (analyzers, packaging, doc
+       policy). The one exception is the number: the repo version is the only thing
+       imported, so the soak host always consumes the bytes this tree packs. -->
+  <Import Project="../../../build/Version.props" />
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

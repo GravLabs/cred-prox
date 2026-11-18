@@ -1,4 +1,4 @@
-# E7 — PerCallerCredentials: one route, one credential, one vendor account per caller
+# PerCallerCredentials: one route, one credential, one vendor account per caller
 
 ## What it demonstrates
 
@@ -20,7 +20,7 @@ exist only for this example.
 
 ```bash
 cd samples/PerCallerCredentials
-docker compose up -d --build   # Keycloak (:5093), protected API (:5084), proxy (:5083)
+docker compose up -d --build   # Keycloak (:5093), protected API (:5084), proxy (:5100)
 ```
 
 The demo caller keys (high-entropy random values; see the note below):
@@ -34,7 +34,7 @@ KEY_RO=7b1d4e8a2c6f9035d7e1b8a4c2f60d93
 Caller app-a through the proxy:
 
 ```bash
-curl -s -H "X-CredProx-Key: $KEY_A" http://localhost:5083/
+curl -s -H "X-CredProx-Key: $KEY_A" http://localhost:5100/
 ```
 
 ```
@@ -44,7 +44,7 @@ credprox-app-a
 Caller app-b, same route, same credential config:
 
 ```bash
-curl -s -H "X-CredProx-Key: $KEY_B" http://localhost:5083/
+curl -s -H "X-CredProx-Key: $KEY_B" http://localhost:5100/
 ```
 
 ```
@@ -57,8 +57,8 @@ Two callers, two vendor accounts, zero code.
 The read-only caller: GET allowed, POST blocked by its allow-list:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -H "X-CredProx-Key: $KEY_RO" http://localhost:5083/
-curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-CredProx-Key: $KEY_RO" http://localhost:5083/
+curl -s -o /dev/null -w '%{http_code}\n' -H "X-CredProx-Key: $KEY_RO" http://localhost:5100/
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-CredProx-Key: $KEY_RO" http://localhost:5100/
 ```
 
 ```
@@ -69,7 +69,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-CredProx-Key: $KEY_RO" ht
 And with no key at all:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5083/
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5100/
 ```
 
 ```
@@ -135,17 +135,24 @@ themselves are unguessable; rotate by adding a second key entry and retiring the
 
 ## Verify it
 
+One cell per check, driving the real host over real sockets from
+`tests/CredProx.SampleSmokes` against the sample's own Keycloak (the offline cells run
+the proxy and its `StubApi/` vendor stand-in as host processes with
+`ASPNETCORE_ENVIRONMENT=Development`):
+
 ```bash
+dotnet test tests/CredProx.SampleSmokes --filter Sample=PerCallerCredentials
+# or the one-line wrapper:
 cd samples/PerCallerCredentials && ./smoke.sh
 ```
 
-Checks both callers hit their own Keycloak account, the read-only allow-list (200 GET /
-403 POST), keyless 401, and an audit record for each of the three callers in the proxy
-logs. Prints `SMOKE OK`.
+The cells: both callers hit their own Keycloak account; the read-only allow-list
+(200 GET / 403 POST); keyless → silent 401; and the proxy's own audit sink writes a
+proxied_call record for app-a and app-b and a rejected_call record for app-readonly.
 
 ## What just happened
 
-Tracing `curl -H "X-CredProx-Key: $KEY_A" http://localhost:5083/`:
+Tracing `curl -H "X-CredProx-Key: $KEY_A" http://localhost:5100/`:
 
 1. Caller auth hashes the key and resolves it to `app-a` (constant-time over the hash).
 2. The route's allow-list check passes (app-a has no restrictions; app-readonly's POST

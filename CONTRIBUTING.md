@@ -1,9 +1,9 @@
 # Contributing to CredProx
 
-CredProx is a credential-handling YARP extension: configuration-only vendor integration,
-token caching, caller authentication, and resilience. The design and the definition of
-"done" live in [`docs/credprox-plan.md`](docs/credprox-plan.md) — read the section your
-change touches before writing code.
+CredProx is a credential-handling YARP extension: configuration-only vendor
+integration, token caching, caller authentication, and resilience. Everything that
+counts as done is pinned by a test or a gate listed below — if the gate is green and
+the behavior is covered, the change is done.
 
 ## Getting set up
 
@@ -32,17 +32,27 @@ project's `CompatibilitySuppressions.xml` (auto-detected; regenerate with
 `/p:ApiCompatGenerateSuppressionFile=true`); a CP0001/CP0002 you did not intend is a real
 breaking change (PUBLISHING.md rule).
 
-## Running the tests
+## The gates a change must keep green
 
-| Suite | Command | Needs Docker |
+| Gate | Command | Needs Docker |
 |---|---|---|
 | Unit + integration | `dotnet test tests/CredProx.Tests` | no |
 | Security (property tests, secret-leak checks) | `dotnet test tests/CredProx.SecurityTests` | no |
 | Conformance (built-ins through `CredProx.Testing`) | `dotnet test tests/CredProx.ConformanceTests` | no |
 | E2E (Keycloak, nginx mTLS via Testcontainers) | `dotnet test tests/CredProx.E2ETests` | yes |
 | Load (throttling, breaker, cache under load) | `dotnet test tests/CredProx.LoadTests` | no |
+| Sample cells — every sample's offline behavior | `dotnet test tests/CredProx.SampleSmokes` | yes |
+| Coverage (floors below) | the three lines under it | no |
+| Pack + APICompat | the `dotnet pack` gate above | no |
+| Consumer-compat, plain default run | `scripts/consumer-compat.sh` | no |
 
-Coverage gates (plan §5.3) run from the repo root:
+Every sample also has a one-line `smoke.sh` that runs its own cells from the test
+project — CI runs each sample's cells as its own filtered process. Run the whole
+project once as well (`dotnet test tests/CredProx.SampleSmokes`): only a
+single-process run starts every fixture side by side, which catches a stack or host
+that one fixture leaves behind for the next.
+
+Coverage gates run from the repo root:
 
 ```bash
 rm -rf TestResults
@@ -53,14 +63,20 @@ python3 build/coverage-gate.py "TestResults/**/coverage.cobertura.xml"
 
 Floors: `CredProx` core ≥ 90% line / ≥ 80% branch; add-on packages ≥ 80% line;
 `CredProx.Abstractions` and `CredProx.Testing` ≥ 80% line. A PR that lowers coverage
-below a gate fails CI. Coverage is a floor, not the goal — the plan's §5.2 test list is
-the real definition of "tested".
+below a gate fails CI. Coverage is a floor, not the goal — the suites named above are
+the definition of "tested".
+
+## Versions
+
+`main` carries the next version with a `-dev` suffix (say `0.13.0-dev`). Release prep
+sets the real number at tag time; until then nothing on `main` is publishable. The
+public API is stable within a minor version (`0.x.*`); API still settling carries
+`[Experimental("CREDPROX001")]` until 1.0.
 
 ## Code rules that CI enforces
 
 - `Nullable` and `ImplicitUsings` on; **warnings are errors**; XML docs on every public
   member (missing docs are warnings, and warnings are errors).
-- Public API that is still settling carries `[Experimental("CREDPROX001")]` until 1.0.
 - **Error messages, logs and audit records must never contain secret values** — only
   names and references. This is tested (`tests/CredProx.SecurityTests`); new code paths
   that touch secrets need a matching leak check.
@@ -70,26 +86,40 @@ the real definition of "tested".
 ## Layout
 
 ```
-src/CredProx.Abstractions/   plugin contract (stages, providers, sources) — no dependencies
-src/CredProx/                core + built-in features
-src/CredProx.AzureKeyVault/  add-on: Key Vault secret source, TokenCredential
+src/CredProx.Abstractions/   public contracts (stages, providers, sources) — no dependencies
+src/CredProx/                the core host pieces: pipeline, cache, secret refs, StaticKey, audit
+src/CredProx.CallerKeys/     add-on: inbound caller authentication by API key
+src/CredProx.CallerTokens/   add-on: inbound caller authentication by short-lived Entra/OIDC tokens
+src/CredProx.OAuth/          add-on: the three OAuth credential types
+src/CredProx.Hmac/           add-on: the Hmac request-signing credential type
+src/CredProx.LoginExchange/  add-on: the LoginExchange credential type
+src/CredProx.Operations/     add-on: throttling, retries/circuit breakers, health probes
+src/CredProx.AzureKeyVault/  add-on: the TokenCredential credential type
 src/CredProx.Testing/        fakes + conformance suites for plugin authors
-tests/…                      see the table above
-samples/                     the examples (plan §6), the main documentation
+tests/CredProx.Tests/        unit + integration
+tests/CredProx.SecurityTests/ tests/CredProx.ConformanceTests/ tests/CredProx.E2ETests/
+tests/CredProx.LoadTests/    the suites named in the gate table
+tests/CredProx.SampleSmokes/ every sample's offline cells, one fixture per sample
+samples/                     production-shape hosts: short config-driven Program.cs, offline
+                             settings in appsettings, a StubApi/ stand-in project where the
+                             vendor is stood in locally, one smoke.sh wrapper per sample
+tools/aca-live-harness/      the live-verification harness against Azure Container Apps
+                             (four roles in one image, driven against the real tenant; not a sample)
+docs/                        guides; docs/vendors/ carries copy-paste vendor config blocks
 ```
 
 ## Adding a vendor
 
-The library ships **no built-in vendor presets** (0.4.0): every vendor lives in its own
-isolated sample — README, explicit config, WireMock stubs where it runs offline, smoke
-script. To add one:
+The library ships **no built-in vendor presets**: every vendor lives in its own
+isolated sample — README, explicit config, a StubApi stand-in (or WireMock) where it
+runs offline, and its cells in `tests/CredProx.SampleSmokes`. To add one:
 
-1. Create `samples/<Vendor>` modeled on the closest existing sample (E2 OAuthKeycloak is
-   the OAuth client-credentials shape with an offline smoke; E6 ADP adds a client
-   certificate; E12 LoginExchange shows partitions and the allow-list).
-   Write the credential block out in full — no preset references.
+1. Create `samples/<Vendor>` modeled on the closest existing sample (`OAuthKeycloak`
+   is the OAuth client-credentials shape with an offline stand-in; `ADP` adds a client
+   certificate; `LoginExchange` shows partitions and the allow-list). Write the
+   credential block out in full — no preset references.
 2. Add it to `CredProx.slnx` and the CI sample build loop
-   (`.github/workflows/ci.yml`), plus a smoke step if it runs offline.
+   (`.github/workflows/ci.yml`), plus its `smoke.sh` wrapper and its cells.
 3. A preset is a **distribution** choice for preset authors, not a library feature:
    package fixed vendor facts (token endpoint, client-auth style, response shape,
    conventional `secret:` name) as `CredProx:Presets` config or a custom `IPresetSource`
@@ -98,18 +128,13 @@ script. To add one:
    reference the host has to guess: name the conventional `secret:` reference and
    document the required host fields.
 
-## Writing a credential-type plugin
+## Writing a package
 
-The contract is `ICredentialProvider` in `CredProx.Abstractions`; registration is
-explicit (`AddCredProx` options), never convention-scanned.
-
-- **Template:** [`samples/CustomPlugin`](samples/CustomPlugin) — a complete custom
-  credential type in ~50 lines with its test suite.
-- Test it with the `CredProx.Testing` conformance suites (`FakeUpstream`,
-  `FakeTokenServer`, `CapturedLogSink`) so your plugin proves the same secret-hygiene and
-  refresh behaviour the built-ins do.
-- Keep secrets inside your provider: request them through `ISecretAccessor`, never log
-  them, and return failures as names/reasons only.
+Start with [docs/extending.md](docs/extending.md): the seams, the rules that make a
+package first-class (no `InternalsVisibleTo`, fail-closed registration, secret
+hygiene, conformance suites). The template is
+[`samples/CustomPlugin`](samples/CustomPlugin) — a complete custom credential type in
+~50 lines with its test suite.
 
 ## Pull requests
 
@@ -117,5 +142,5 @@ explicit (`AddCredProx` options), never convention-scanned.
 - CI runs build, all suites, coverage gates and the offline samples. Samples build against
   the **packed `.nupkg`**, so packaging mistakes fail CI too.
 - Security-sensitive changes (token cache, secret scoping, allow-lists, caller auth,
-  signing) get an explicit review pass against the boundaries listed in
+  signing) get an explicit security pass against the boundaries listed in
   [SECURITY.md](SECURITY.md).

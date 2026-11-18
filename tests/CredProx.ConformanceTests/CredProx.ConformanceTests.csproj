@@ -19,6 +19,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CredProx.Testing\CredProx.Testing.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.Hmac\CredProx.Hmac.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.LoginExchange\CredProx.LoginExchange.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.OAuth\CredProx.OAuth.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -130,7 +130,7 @@ public sealed class CallerTokenMaxTokenAgeTests : IAsyncLifetime
                 // Offline validation only: null the Authority, hand over the RSA key. The
                 // production claim-shape settings (MapInboundClaims, RoleClaimType) stay as
                 // the product set them — the mapper must see exactly what production sees.
-                services.Configure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, o =>
+                services.Configure<JwtBearerOptions>(CallerTokenOptions.Scheme, o =>
                 {
                     o.Authority = null;
                     o.RequireHttpsMetadata = false;

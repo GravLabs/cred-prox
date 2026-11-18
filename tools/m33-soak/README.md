@@ -1,6 +1,7 @@
 # M33 soak + failure-injection harness (plan §5.5)
 
-Runs the **published CredProx package** (not `src/`) under sustained load behind Toxiproxy,
+Runs the **repository's current CredProx** — the version this tree packs, from the local
+feed, not `src/` project references — under sustained load behind Toxiproxy,
 against WireMock stubs, inside the §5.5 machine budget: Σ container caps 6.0 CPU / 3.75 GiB,
 hourly `uptime` check with backoff at 5-min load > 40, and teardown on every exit path —
 no container outlives a scenario, clean or failed.
@@ -21,8 +22,10 @@ owner's OK.
 
 ## Before the first run
 
-1. `dotnet pack src/CredProx -c Release -o artifacts/packages` (feed for the host, same
-   flow as `samples/nuget.config`).
+1. `dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages && dotnet pack
+   src/CredProx -c Release -o artifacts/packages` (feed for the host — Abstractions is a
+   transitive package the feed must carry, or the restore fails NU1101 on it; same flow as
+   `samples/nuget.config`, and CI packs every package before building).
 2. Publish on the host, then build the runtime-only image (host NuGet cache carries the
    Azure KV provider closure; the image is a pinned aspnet copy of the publish output):
    `dotnet publish tools/m33-soak/SoakHost -c Release -o tools/m33-soak/build/publish`

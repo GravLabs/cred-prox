@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// Options for <c>CredProx:Errors</c> (M24, plan §8.5): vendor error normalisation.
+/// Options for <c>CredProx:Errors</c>: vendor error normalisation.
 /// Bound as a plain singleton, like the scrubbing options.
 /// </summary>
 [Experimental("CREDPROX001")]

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Primitives;
 namespace CredProx;
 
 /// <summary>
-/// Holds the live <see cref="KillSwitchRegistry"/> (M18, plan §8.4) and rebinds it when the
+/// Holds the live <see cref="KillSwitchRegistry"/> and rebinds it when the
 /// secret source's change token fires — the same config-reload story as the other
 /// registries, because flipping a switch is exactly a configuration change. A rebind that
 /// fails keeps the previous switch state and logs: a typo introduced by a reload must not

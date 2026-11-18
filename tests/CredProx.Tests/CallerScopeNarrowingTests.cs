@@ -392,7 +392,7 @@ public sealed class CallerScopeNarrowingTests
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(Entries(callers)).Build();
         return new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config))),
+            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)), []),
             new ConfigurationSecretSource(config),
             NullLogger<CallerRegistryProvider>.Instance);
     }
@@ -400,7 +400,7 @@ public sealed class CallerScopeNarrowingTests
     private static CallerBinder Binder(Dictionary<string, string?> entries)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
-        return new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)));
+        return new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)), []);
     }
 
     private static Dictionary<string, string?> Entries(

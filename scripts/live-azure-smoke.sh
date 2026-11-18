@@ -49,7 +49,7 @@ PROXY_SECRET=""   # when set, passed to the proxy via env (the config key
                   # valid bash identifier, so `export` silently fails on it;
                   # `env NAME=value cmd` is the one clean channel)
 PROXY_SECRET_KEY="CredProx__Secrets__graph-client-secret"   # the E5 sample's secret ref name
-start_proxy() { # $1 = extra dotnet-run args (e.g. "--variant identity")
+start_proxy() { # $1 = credential style environment (OAuth default, ManagedIdentity for the secretless run)
   if ! dotnet build "${PROXY_PROJECT:-samples/MicrosoftGraph}" -c Release -v q --nologo >/dev/null; then
     say "build FAILED"
     EVIDENCE+=("proxy build FAILED (see console)")
@@ -58,7 +58,8 @@ start_proxy() { # $1 = extra dotnet-run args (e.g. "--variant identity")
   fi
   local secret_env=()
   [[ -n "$PROXY_SECRET" ]] && secret_env=("$PROXY_SECRET_KEY=$PROXY_SECRET")
-  env "${secret_env[@]}" dotnet run --project "${PROXY_PROJECT:-samples/MicrosoftGraph}" -c Release --no-build -- ${1:-} &
+  env "${secret_env[@]}" ASPNETCORE_ENVIRONMENT="${1:-OAuth}" \
+    dotnet run --project "${PROXY_PROJECT:-samples/MicrosoftGraph}" -c Release --no-build &
   proxy_pid=$!
   for _ in $(seq 1 40); do
     if ! kill -0 "$proxy_pid" 2>/dev/null; then
@@ -91,7 +92,7 @@ phase1() {
   export CredProx__Destinations__graph__Template="$ARM"
   export ReverseProxy__Clusters__graph__Destinations__graph__Address="$ARM/"
   export CredProx__Credentials__graph__Scope="$ARM/.default"
-  start_proxy "--variant identity" || return 1
+  start_proxy ManagedIdentity || return 1
   local code
   code=$(probe_arm)
   local code2
@@ -420,7 +421,7 @@ phase6() {
   if r2_material_skip; then say "SKIP: caller key unavailable"; EVIDENCE+=("P6 SKIP: caller key absent"); return 0; fi
   local line; line=$(r2_line P6)
   if [[ "$line" == "P6 PASS"* ]]; then
-    EVIDENCE+=("P6 /jwt -> counterparty echo assertion-verified + aud-ok: vault secret:jwt-signing-key produced a cryptographically valid RS256 client_assertion (independent verifier, same bar as GitHubApp --smoke)")
+    EVIDENCE+=("P6 /jwt -> counterparty echo assertion-verified + aud-ok: vault secret:jwt-signing-key produced a cryptographically valid RS256 client_assertion (independent verifier, same bar as GitHubApp's stand-in)")
     say "PASS: vault PEM -> valid RS256 assertion end to end"
   else
     EVIDENCE+=("P6 battery line: ${line:-MISSING} (expected P6 PASS)")

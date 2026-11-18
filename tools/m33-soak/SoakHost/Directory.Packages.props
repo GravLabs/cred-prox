@@ -1,6 +1,7 @@
 <Project>
-  <!-- Stops the upward walk to the repo-root CPM file: the soak host pins the PUBLISHED
-       package version explicitly (it must test the release bytes, not the working tree). -->
+  <!-- Stops the upward walk to the repo-root CPM file: the soak host carries its own
+       explicit references, versioned to the repository's current $(Version) — it tests
+       the bytes this tree packs, the same local-feed route the samples take. -->
   <PropertyGroup>
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>

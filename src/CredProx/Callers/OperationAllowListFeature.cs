@@ -9,20 +9,20 @@ using Yarp.ReverseProxy.Model;
 namespace CredProx;
 
 /// <summary>
-/// The built-in <see cref="Stage.AuthorizeOperation"/> feature (§4 Phase B, §5.2
-/// "Operation allow-lists"): for an authenticated caller that declares an operation
+/// The built-in <see cref="Stage.AuthorizeOperation"/> feature: for an authenticated
+/// caller that declares an operation
 /// allow-list, the request's route, method and path must match at least one entry, or the
 /// request answers <c>403 credprox.operation_not_allowed</c> before destination resolution
 /// and credential attachment — nothing reaches the token endpoint or the upstream. When
 /// the request carries a <see cref="CallerRequestScopes"/> feature (the caller-token
-/// path, M39, ADR-0004) only entries NAMED in the token's scope set apply: a token gets
+/// path, ADR-0004) only entries NAMED in the token's scope set apply: a token gets
 /// exactly the operations its roles name, an unnamed entry admits no token, and a caller
 /// that declares no operations is denied for tokens too (fail closed). On the caller-key
 /// path the feature is absent: an empty allow-list is opt-out and matching is
 /// byte-for-byte as it has always been.
 /// </summary>
 /// <remarks>
-/// Path safety comes first (§5.2 traversal variants): a path carrying dot segments,
+/// Path safety comes first: a path carrying dot segments,
 /// backslashes, control characters, or percent-escapes of <c>/</c>, <c>\</c>, <c>.</c> or
 /// <c>%</c> in the raw target is refused before any pattern is consulted; matching on the
 /// decoded path is ordinal and case-sensitive.

@@ -68,7 +68,7 @@ real Azure REST call**, no secret anywhere.
 1. `az group create -n credprox-live-test -l <region>`
 2. `az identity create -n credprox-uai -g credprox-live-test`
 3. RBAC: Reader on that resource group for the UAI.
-4. Run E5 MicrosoftGraph `--variant identity` with env overrides: token scope
+4. Run E5 MicrosoftGraph with `ASPNETCORE_ENVIRONMENT=ManagedIdentity` and env overrides: token scope
    `https://management.azure.com/.default`, destination `management.azure.com`,
    then `GET …/subscriptions?api-version=2022-12-01` through the proxy →
    expect 200 and a subscription list; expect `401`/rejected on a forged or
@@ -252,7 +252,7 @@ re-check every line:
 | `secret:` is the only scheme; KV feeds it via stock config provider | yes (by design) | `Secrets/SecretReferences.cs:17`; `Secrets/ConfigurationSecretSource.cs` (only `ISecretSource`; doc comment: KV plugs in as a configuration provider); host-side shape already shipped: `samples/MicrosoftGraph/Program.cs:45` `AddAzureKeyVault(uri, DefaultAzureCredential())` + `:81` `AddCredProxConfigurationSecrets` — vault secret `CredProx--Secrets--<name>` answers `secret:<name>` |
 | JWT assertion signing **key** (PEM) | yes | `Credentials/JwtAssertionProvider.cs:190` `SigningKey` → `SecretValues.ResolveIfReferenceAsync`; `:324/:331` `ImportFromPem` (real newlines required — nothing in the path encodes/truncates them) |
 | JWT assertion signing **cert** (PFX) | yes, **passwordless** base64 PKCS#12 only | `JwtAssertionProvider.cs:192-193, 335-339` |
-| HMAC credential secret | yes | `Credentials/HmacProvider.cs:17` Type `"Hmac"`, `:36-37` resolves `secret:`; DI `DependencyInjection/CredProxServiceCollectionExtensions.cs:158` |
+| HMAC credential secret | yes | `src/CredProx.Hmac/Credentials/HmacProvider.cs:17` Type `"Hmac"`, `:36` resolves `secret:`; DI `src/CredProx.Hmac/DependencyInjection/CredProxHmacServiceCollectionExtensions.cs:39` `AddCredProxHmac()` |
 | mTLS client certificate (PEM bundle **or** base64 PFX, encrypted supported) | yes | `Connections/ClientCertificateLoader.cs:32-34,57-60`; `ClientCertificatePassword` read as ref too — exercises the password path the JWT type lacks |
 | Inbound caller key | inline config only (not vault-able) | `CallerKeysOptions` — honest caveat: the inbound edge key is a config string; acceptable for the test (it guards the internal edge), noted as a finding, **not changed** (src delta stays zero) |
 | Vault byte fidelity for multi-line PEM | **UNVERIFIED:** — `Azure.Extensions.AspNetCore.Configuration.Secrets` is outside this repo; confirm against vendor docs | provider JSON-parses only JSON content-types (documented behaviour; confirm) |
@@ -282,8 +282,9 @@ So the row's expectation holds: **zero `src/` delta**. No new design is needed
   property; it held for a user token — the UAI variant is re-proven, honestly).
 - **Counterparties — what proves what, without overclaim.** The vault→
   credential→wire correctness is proven by verifiers **we run** inside the app
-  (same bar as the shipped `GitHubApp --smoke` stub, `HmacSigning` verifier and
-  `NginxMTls` E2E): signature **correctness**, not vendor trust.
+  (same bar as the `GitHubApp` sample smoke (`samples/GitHubApp/smoke.sh`), the
+  `HmacSigning` verifier and the `NginxMTls` E2E): signature **correctness**, not
+  vendor trust.
   - JWT: counterparty cryptographically verifies the `client_assertion`
     (RS256) against the pinned public key + checks `aud`, mirrors
     `samples/GitHubApp/Program.cs:59,114`.
@@ -325,7 +326,7 @@ Each live phase = one maintainer go-ahead. "Offline" steps were executed while
 preparing this row (see evidence line in each). Resource names: RG
 `credprox-live-test` (same single blast radius), vault `credprox-m29-kv`, UAI
 `credprox-m29-uai`, ACR `credproxm29reg`, env `credprox-m29-env`, app
-`credprox-m29-app`, sample `samples/AzureContainerApps`, all Entra-side names
+`credprox-m29-app`, sample `tools/aca-live-harness`, all Entra-side names
 `credprox-*` — none exist today (clean slate re-verified read-only 2026-11-05).
 
 ### R2.1 — Infrastructure (Bicep) [live: apply]
@@ -387,7 +388,7 @@ every vault secret into every host's configuration — so foreign material under
 may use the `CredProx--` namespace.
 
 ### R2.3 — Host sample, image, deploy [live: push + create]
-`samples/AzureContainerApps` — **built (G1, 3383e61)**: one image, three
+`tools/aca-live-harness` — **built (G1, 3383e61)**: one image, three
 modes: `--mode proxy`
 (Operations-shaped minimal CredProx host + MicrosoftGraph-shaped KV/MI wiring:
 `AddAzureKeyVault` + `AddCredProxConfigurationSecrets` +
@@ -589,7 +590,7 @@ if a future az drops the group. No tenant mutation either way.)
 | 1 | `az group create -n credprox-live-test -l eastus` | empty RG (only remaining policy unknown is RG-scope; if refused, next `eastus2`, then `centralus`, `westus2`, `southcentralus`, `canadacentral` per §Region — same region for ALL later steps) | 10 |
 | 2 | `scripts/live-infra-apply-r2.sh [eastus]` | UAI, vault (SAME region — vault is a parameter now), ACR, CA env, 3 scoped role assignments (Bicep `credprox-live-r2.bicep`) | 8 |
 | 3 | `scripts/live-m29-material.sh create` | 11 vault secrets (test PKI incl. counterparty server cert; keys + hashes; values via `--file`, never argv/disk) | 7 (destroy); 8 (purge covers) |
-| 4 | `docker build samples/AzureContainerApps …` + `az acr login` + `docker push` | 1 image repo in ACR (local build; ACR is the only mutation) | 8 |
+| 4 | `docker build tools/aca-live-harness …` + `az acr login` + `docker push` | 1 image repo in ACR (local build; ACR is the only mutation) | 8 |
 | 5 | `scripts/live-m29-deploy-app.sh` | ACA app (2 containers, internal ingress, UAI) + battery job `credprox-m29-battery` (G2; same env/identity, Manual trigger) | 8 |
 | 6 | `scripts/live-azure-smoke.sh 5 6 7 8 9 10` | job executions only (starts `credprox-m29-battery`, reads its logs; P10 temporarily overwrites one vault secret and restores it, retargets job args around the witnesses and restores them; the P10 witness rides the RUNNING proxy's 30s vault reload - `ReloadInterval` set by the sample, vendor default never polls) | — |
 | 7 | `scripts/live-m29-material.sh destroy` | removes the 11 secrets | — (idempotent) |

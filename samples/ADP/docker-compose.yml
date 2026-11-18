@@ -2,14 +2,14 @@ services:
   wiremock:
     image: wiremock/wiremock:3.9.2
     ports:
-      - "8081:8080"
+      - "5104:8080"
     command: ["--global-response-templating"]
     volumes:
       - ./wiremock/mappings:/home/wiremock/mappings:ro
 
-  # Loopback Azure Key Vault stub for the offline rotation witness (--kv-smoke).
-  # The list mapping is static; the secret mapping is (re)installed at run time by
-  # rotate-kv-stub.sh from the generated PFX bundles.
+  # Loopback Azure Key Vault stub for the offline rotation witness (the KeyVaultOffline
+  # style). The list mapping is static; the secret mapping is (re)installed at run time
+  # by rotate-kv-stub.sh (by hand) or the smoke cells from the generated PFX bundles.
   wiremock-kv:
     image: wiremock/wiremock:3.9.2
     ports:

@@ -43,7 +43,7 @@ public sealed class SurvivorGuardTests
             TimeProvider.System,
             NullLogger<CredProxAuditRecorder>.Instance,
             new CredProxCoreOptions(),
-            callerKeyOptions: null));
+            configuration: null));
 
         Assert.Equal("sinks", error.ParamName);
     }
@@ -123,18 +123,18 @@ public sealed class SurvivorGuardTests
     }
 
     [Fact]
-    public void HeaderHygieneFeature_CtorNullSequences_Throws_NamingCallerKeyOptions()
+    public void HeaderHygieneFeature_CtorNullConfiguration_Throws_NamingConfiguration()
     {
         var error = Assert.Throws<ArgumentNullException>(
             () => new HeaderHygieneFeature(new CredProxCoreOptions(), null!));
 
-        Assert.Equal("callerKeyOptions", error.ParamName);
+        Assert.Equal("configuration", error.ParamName);
     }
 
     [Fact]
     public async Task HeaderHygieneFeature_Apply_NullContext_Throws_NamingContext()
     {
-        var feature = new HeaderHygieneFeature(new CredProxCoreOptions(), []);
+        var feature = new HeaderHygieneFeature(new CredProxCoreOptions(), new ConfigurationBuilder().Build());
 
         var error = await Assert.ThrowsAsync<ArgumentNullException>(
             () => feature.ApplyAsync(null!, default).AsTask());

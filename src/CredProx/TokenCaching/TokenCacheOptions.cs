@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// Options for <see cref="InMemoryTokenCache"/> (see <c>docs/credprox-plan.md</c> §3.3).
+/// Options for <see cref="InMemoryTokenCache"/>.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class TokenCacheOptions

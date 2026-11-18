@@ -9,12 +9,12 @@ namespace CredProx;
 /// The built-in <see cref="ISecretSource"/>: resolves <c>secret:&lt;name&gt;</c> references
 /// from the <c>CredProx:Secrets</c> configuration section, which covers environment variables
 /// (<c>CredProx__Secrets__&lt;name&gt;</c>), user-secrets and Key Vault pulled in through a
-/// configuration provider (see <c>docs/credprox-plan.md</c> §3.3). Values are read from
+/// configuration provider. Values are read from
 /// <see cref="IConfiguration"/> on every lookup, so a configuration reload updates resolved
 /// values; <see cref="GetChangeToken"/> fires on each reload.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class ConfigurationSecretSource : ISecretSource
+public sealed class ConfigurationSecretSource : ISecretSource, IConfigurationBackedSecretSource
 {
     /// <summary>The configuration section that holds secret values, keyed by reference name.</summary>
     public const string SecretsSection = "CredProx:Secrets";
@@ -51,6 +51,8 @@ public sealed class ConfigurationSecretSource : ISecretSource
     /// <inheritdoc />
     public IChangeToken GetChangeToken() => new CancellationChangeToken(Volatile.Read(ref _reloadCts).Token);
 
+    IConfiguration IConfigurationBackedSecretSource.Configuration => _configuration;
+
     private void RaiseChanged()
     {
         // The previous source is intentionally not disposed: a consumer may be constructing
@@ -58,4 +60,18 @@ public sealed class ConfigurationSecretSource : ISecretSource
         // a disposed source would throw. Reloads are rare, so the leak is bounded.
         Interlocked.Exchange(ref _reloadCts, new CancellationTokenSource()).Cancel();
     }
+}
+
+/// <summary>
+/// Internal marker for a secret source whose values come from a configuration root: the
+/// root's reload token already IS that source's change signal. A consumer that watches
+/// both the source and that same root must register only one watch, or every reload
+/// arrives twice. Deliberately internal — third-party sources keep the general shape of
+/// two independent signals, and see <c>CallerRegistryProvider</c> for how a host with one
+/// handles a reload that presents a fresh signal to the second watch.
+/// </summary>
+internal interface IConfigurationBackedSecretSource
+{
+    /// <summary>The root this source reads its values from.</summary>
+    IConfiguration Configuration { get; }
 }

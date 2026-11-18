@@ -2,6 +2,12 @@
 
 Status: Accepted (design; built in M39)
 Date: 2026-11-15 (revised the same day: Entra-first, no built-in issuer)
+Packaging (2026-11-16, ADR-0005): since M42, caller tokens ship in their own package,
+`CredProx.CallerTokens`, and plug into the core through the public caller-authenticator seam.
+The core keeps the admission policy this ADR describes: the operation allow-list, the strict
+named-rule intersection and the stripping of the presented credential. The token package
+keeps the validation, `MaxTokenAge` (checked before any mapper) and the claim mapping.
+Configuration keys are unchanged.
 
 ## Context
 

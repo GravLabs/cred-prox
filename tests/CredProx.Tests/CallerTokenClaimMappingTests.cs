@@ -104,9 +104,10 @@ public sealed class CallerTokenClaimMappingTests : IAsyncLifetime
 
     private sealed class CapturingCallerTokenMapper(
         CallerRegistryProvider registryProvider,
-        CallerTokenOptions options) : ICallerTokenMapper
+        CallerTokenOptions options,
+        IConfiguration configuration) : ICallerTokenMapper
     {
-        private readonly DefaultCallerTokenMapper _inner = new(registryProvider, options);
+        private readonly DefaultCallerTokenMapper _inner = new(registryProvider, options, configuration);
 
         public ClaimsPrincipal? Captured { get; private set; }
 
@@ -137,12 +138,13 @@ public sealed class CallerTokenClaimMappingTests : IAsyncLifetime
                 // and the extension's TryAddSingleton leaves both in place.
                 services.AddSingleton<ICallerTokenMapper>(sp => new CapturingCallerTokenMapper(
                     sp.GetRequiredService<CallerRegistryProvider>(),
-                    sp.GetRequiredService<CallerTokenOptions>()));
+                    sp.GetRequiredService<CallerTokenOptions>(),
+                    sp.GetRequiredService<IConfiguration>()));
 
                 // Offline validation only: null the Authority, hand over the RSA key. The
                 // production claim-shape settings (MapInboundClaims, RoleClaimType) stay as
                 // the product set them.
-                services.Configure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, o =>
+                services.Configure<JwtBearerOptions>(CallerTokenOptions.Scheme, o =>
                 {
                     o.Authority = null;
                     o.RequireHttpsMetadata = false;

@@ -440,6 +440,8 @@ public sealed class ConfigKeyValidationTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(config);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxHmac(); // the Hmac options type arrives with the add-on
+        services.AddCredProxLoginExchange(); // the LoginExchange options type arrives with its add-on
         services.AddCredProxCredentials(config);
 
         var ex = Assert.Throws<OptionsValidationException>(

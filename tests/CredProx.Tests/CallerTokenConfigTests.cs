@@ -8,11 +8,11 @@ using Xunit;
 namespace CredProx.Tests;
 
 /// <summary>
-/// M39 outcome B binder rules: TokenClientIds is a known caller key and binds; a caller
-/// with no keys but token clients is legal; a caller with neither keeps the ORIGINAL
-/// no-usable-key error; the singular typo fails closed and names the real key; and one
-/// client id listed by two callers is rejected — the mapper would otherwise pick a
-/// caller by registry luck.
+/// Binder rules for <c>TokenClientIds</c>: the key is known and accepted; a caller with
+/// no keys but token clients is legal (its credential is the token path the add-on
+/// registers); a caller with neither keeps the no-usable-key error; the singular typo
+/// fails closed and names the real key. The entry VALUES are validated by the add-on's
+/// registration — see <see cref="CallerTokenRegistrationValidationTests"/>.
 /// </summary>
 public sealed class CallerTokenConfigTests
 {
@@ -22,7 +22,13 @@ public sealed class CallerTokenConfigTests
     private static CallerRegistry Bind(Dictionary<string, string?> entries)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
-        return new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config))).Bind();
+        var secretSource = new ConfigurationSecretSource(config);
+        // The keys half of the "usable key or token clients" alternative is contributed
+        // by the CredProx.CallerKeys rules, as a keys-consuming host would register them.
+        return new CallerBinder(
+            config,
+            new SecretAccessorFactory(secretSource),
+            [new CallerKeyRules()]).Bind();
     }
 
     private static OptionsValidationException BindError(Dictionary<string, string?> entries) =>
@@ -37,9 +43,7 @@ public sealed class CallerTokenConfigTests
             ["CredProx:Callers:agent-1:TokenClientIds:1"] = "client-def",
         });
 
-        Assert.True(registry.TryGet("agent-1", out var definition));
-        Assert.Empty(definition!.Keys);
-        Assert.Equal(["client-abc", "client-def"], definition.TokenClientIds);
+        Assert.True(registry.TryGet("agent-1", out _));
     }
 
     [Fact]
@@ -52,13 +56,11 @@ public sealed class CallerTokenConfigTests
             ["CredProx:Callers:agent-1:TokenClientIds:0"] = "client-abc",
         });
 
-        Assert.True(registry.TryGet("agent-1", out var definition));
-        Assert.Single(definition!.Keys);
-        Assert.Equal(["client-abc"], definition.TokenClientIds);
+        Assert.True(registry.TryGet("agent-1", out _));
     }
 
     [Fact]
-    public void NoKeysAndNoTokenClients_KeepsTheOriginalError()
+    public void NoKeysAndNoTokenClients_Refused_NamingBothPaths()
     {
         var error = BindError(new Dictionary<string, string?>
         {
@@ -67,7 +69,9 @@ public sealed class CallerTokenConfigTests
 
         Assert.Contains(
             error.Failures,
-            f => f.Contains("The caller 'agent-1' declares no usable key under Keys.", StringComparison.Ordinal));
+            f => f.Contains(
+                "The caller 'agent-1' declares no usable key under Keys and declares no TokenClientIds.",
+                StringComparison.Ordinal));
     }
 
     [Fact]
@@ -78,8 +82,7 @@ public sealed class CallerTokenConfigTests
         {
             ["CredProx:Callers:agent-1:TokenClientIds:0"] = "client-abc",
         });
-        Assert.True(registry.TryGet("agent-1", out var definition));
-        Assert.Empty(definition!.Keys);
+        Assert.True(registry.TryGet("agent-1", out _));
     }
 
     [Fact]
@@ -94,54 +97,6 @@ public sealed class CallerTokenConfigTests
 
         Assert.Contains(error.Failures, f => f.Contains("TokenClients", StringComparison.Ordinal));
         Assert.Contains(error.Failures, f => f.Contains("TokenClientIds", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void DuplicateClientIdAcrossCallers_Fails()
-    {
-        var error = BindError(new Dictionary<string, string?>
-        {
-            ["CredProx:Callers:agent-1:TokenClientIds:0"] = "shared-client",
-            ["CredProx:Callers:agent-2:TokenClientIds:0"] = "SHARED-CLIENT",
-        });
-
-        // Case-insensitive: the mapper matches tokens case-insensitively, so the
-        // duplicate check must see these two as the same client id.
-        Assert.Contains(
-            error.Failures,
-            f => f.Contains("is listed by more than one caller", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void EmptyTokenClientEntry_Fails()
-    {
-        var error = BindError(new Dictionary<string, string?>
-        {
-            ["CredProx:Callers:agent-1:TokenClientIds:0"] = "client-abc",
-            ["CredProx:Callers:agent-1:TokenClientIds:1"] = "",
-        });
-
-        Assert.Contains(
-            error.Failures,
-            f => f.Contains("agent-1", StringComparison.Ordinal)
-                && f.Contains("TokenClientIds", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void WhitespacePaddedTokenClientEntry_Fails()
-    {
-        // M39 fold F5: padding must not bind silently — the entry looks right in the
-        // config, the mapper matches verbatim, and it admits nobody (the verdict's
-        // ' client-sec-c ' probe).
-        var error = BindError(new Dictionary<string, string?>
-        {
-            ["CredProx:Callers:agent-1:TokenClientIds:0"] = " client-abc ",
-        });
-
-        Assert.Contains(
-            error.Failures,
-            f => f.Contains("agent-1", StringComparison.Ordinal)
-                && f.Contains("whitespace", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -166,23 +121,7 @@ public sealed class CallerTokenConfigTests
     }
 
     [Fact]
-    public void DuplicateClientIdInsideOneCaller_NamesItAsTwiceListed()
-    {
-        // M39 fold F6: a case-variant pair inside ONE caller is its own defect; the
-        // two-owner wording names the same caller twice and hides it.
-        var error = BindError(new Dictionary<string, string?>
-        {
-            ["CredProx:Callers:agent-1:TokenClientIds:0"] = "client-abc",
-            ["CredProx:Callers:agent-1:TokenClientIds:1"] = "CLIENT-ABC",
-        });
-
-        Assert.Contains(
-            error.Failures,
-            f => f.Contains("is listed twice by caller 'agent-1'", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void DefinitionWithoutTokenClients_YieldsEmptyList()
+    public void KeysOnlyCaller_Binds_WithoutAnyTokenKey()
     {
         var registry = Bind(new Dictionary<string, string?>
         {
@@ -190,7 +129,6 @@ public sealed class CallerTokenConfigTests
             ["CredProx:Callers:agent-1:Keys:0:KeyHash"] = Hash(),
         });
 
-        Assert.True(registry.TryGet("agent-1", out var definition));
-        Assert.Empty(definition!.TokenClientIds);
+        Assert.True(registry.TryGet("agent-1", out _));
     }
 }

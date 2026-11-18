@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -130,7 +131,10 @@ public sealed class AuditRedactionProperties
             TimeProvider.System,
             NullLogger<CredProxAuditRecorder>.Instance,
             new CredProxCoreOptions(),
-            new CallerKeyOptions { HeaderName = "X-Caller-Key" });
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["CredProx:CallerAuth:HeaderName"] = "X-Caller-Key",
+            }).Build());
 
         using var host = new HostBuilder()
             .ConfigureWebHost(web =>

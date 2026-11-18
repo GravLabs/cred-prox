@@ -3,8 +3,8 @@ using Microsoft.Extensions.Configuration;
 namespace CredProx;
 
 /// <summary>
-/// Finds <c>secret:</c> references in configuration values. Two forms exist in
-/// <c>docs/credprox-plan.md</c> §3.2: a whole value that is a reference
+/// Finds <c>secret:</c> references in configuration values. Two forms exist:
+/// a whole value that is a reference
 /// (<c>"ClientId": "secret:adp-client-id"</c>) and a reference embedded in a template
 /// (<c>"...?tenant_id={secret:cayuse-{partition}-tenantid}"</c>). A reference name may itself
 /// contain <c>{placeholder}</c> segments, so the templated form is matched by brace depth,

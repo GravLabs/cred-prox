@@ -131,8 +131,11 @@ public sealed class CallerAuthenticationFeatureTests
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
         var secretSource = new ConfigurationSecretSource(config);
+        var accessorFactory = new SecretAccessorFactory(secretSource);
         var registryProvider = new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(secretSource)),
+            new CallerBinder(config, accessorFactory, []),
+            [new CallerKeyTableContributor(config, accessorFactory)],
+            config,
             secretSource,
             NullLogger<CallerRegistryProvider>.Instance);
 
@@ -143,6 +146,8 @@ public sealed class CallerAuthenticationFeatureTests
         services.AddAuthentication()
             .AddScheme<CallerKeyOptions, CallerKeyAuthenticationHandler>(
                 CredProxAuth.CallerKeyScheme, _ => { });
+        services.AddSingleton(registryProvider);
+        services.AddCredProxCallerAuthenticator<CallerKeyAuthenticator>(config);
         context.RequestServices = services.BuildServiceProvider();
         return context;
     }

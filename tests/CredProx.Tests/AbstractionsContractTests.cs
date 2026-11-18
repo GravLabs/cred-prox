@@ -30,8 +30,6 @@ public class AbstractionsContractTests
         typeof(IPresetSource),
         typeof(CredentialRequestContext),
         typeof(Stage),
-        typeof(ICallerStore),
-        typeof(CallerKeyMatch),
         typeof(CallerIdentity),
         typeof(PartitionRejection),
         typeof(CredProxHealthSeverity),
@@ -39,16 +37,22 @@ public class AbstractionsContractTests
         typeof(PipelineFeatureContext),
         typeof(InboundTokenRejectedException),
         typeof(ConsentRequiredException),
+        typeof(ICallerAuthenticator),
+        typeof(CallerAuthenticationOutcome),
+        typeof(CallerAuthenticationResult),
+        typeof(ICallerRegistryValidator),
+        typeof(CallerRegistryEntry),
     ];
 
     // Pure data holders allowed alongside the interfaces: no behavior, init-only state.
     private static readonly Type[] DataTypes =
     [
         typeof(CredentialRequestContext),
-        typeof(CallerKeyMatch),
         typeof(CallerIdentity),
         typeof(CredProxHealthResult),
         typeof(PipelineFeatureContext),
+        typeof(CallerAuthenticationResult),
+        typeof(CallerRegistryEntry),
     ];
 
     // Contract signal types: sealed exceptions a provider throws to signal a documented

@@ -3,8 +3,8 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// Path-pattern matching for caller operation allow-lists (§4 Phase B, §5.2 "Operation
-/// allow-lists"). Two rules make the traversal variants of §5.2 fail closed:
+/// Path-pattern matching for caller operation allow-lists.
+/// Two rules make the traversal variants fail closed:
 /// <list type="bullet">
 /// <item><see cref="IsSafePath"/> rejects any path carrying traversal or encoding tricks
 /// — dot segments, empty segments, backslashes, control characters, or percent-escapes of

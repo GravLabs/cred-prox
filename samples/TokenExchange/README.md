@@ -1,8 +1,8 @@
-# E14 — TokenExchange: the caller's user token, exchanged per user for a downstream token
+# TokenExchange: the caller's user token, exchanged per user for a downstream token
 
 ## What it demonstrates
 
-The `TokenExchange` credential type (plan §3.6) in `Rfc8693` mode against a **real
+The `TokenExchange` credential type in `Rfc8693` mode against a **real
 Keycloak**: a caller presents a user token minted for the proxy (`aud credprox-proxy`),
 CredProx **validates it** (signature, issuer, audience, lifetime) through the realm JWKS,
 exchanges it at the IdP for a token minted for the downstream (`aud credprox-downstream`),
@@ -33,7 +33,7 @@ only for this example.
 
 ```bash
 cd samples/TokenExchange
-docker compose up -d --build   # Keycloak (:5094), protected API (:5088), proxy (:5092)
+docker compose up -d --build   # Keycloak (:5094), protected API (:5102), proxy (:5092)
 ```
 
 Get a user token from Keycloak (direct grant — stands in for whatever your frontend does):
@@ -76,7 +76,7 @@ bob|credprox-proxy
 The inbound token is useless at the downstream directly — its audience is the proxy:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ALICE" http://localhost:5088/
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ALICE" http://localhost:5102/
 ```
 
 ```
@@ -150,14 +150,23 @@ that user's entry.
 
 ## Verify it
 
+One cell per check, driving the real proxy over real sockets from
+`tests/CredProx.SampleSmokes`. Keycloak and the protected API run as containers from
+`docker-compose.yml` — the API must resolve the realm's advertised issuer URLs, which
+only the compose network provides; the proxy runs as a host process with
+`ASPNETCORE_ENVIRONMENT=Development`, whose `appsettings.Development.json` points it at
+the exposed ports while the stable `KC_HOSTNAME` issuer keeps its value:
+
 ```bash
+dotnet test tests/CredProx.SampleSmokes --filter Sample=TokenExchange
+# or the one-line wrapper:
 cd samples/TokenExchange && ./smoke.sh
 ```
 
-Checks alice and bob each get their own exchanged downstream token, a forged (HS256,
-attacker-secret) inbound token gets `401 credprox.inbound_token_invalid` with no exchange
-attempted, a keyless request gets 401, and the inbound token is refused by the downstream
-audience check. Prints `SMOKE OK`.
+The cells check that alice and bob each get their own exchanged downstream token, that a
+forged (HS256, attacker-secret) inbound token gets `401 credprox.inbound_token_invalid`
+with no exchange attempted (401 not 502), that a keyless request gets 401, and that the
+inbound token is refused by the downstream audience check.
 
 ## What just happened
 

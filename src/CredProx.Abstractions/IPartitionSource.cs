@@ -21,8 +21,8 @@ public interface IPartitionSource
     ValueTask<string?> GetPartitionAsync(HttpContext context, CancellationToken cancellationToken);
 
     /// <summary>
-    /// How a value this source produces is rejected when it misses the allow-list
-    /// (§3.4). Defaults to <see cref="Abstractions.PartitionRejection.BadRequest"/> — the
+    /// How a value this source produces is rejected when it misses the allow-list.
+    /// Defaults to <see cref="Abstractions.PartitionRejection.BadRequest"/> — the
     /// value was requested and refused. Sources that derive the partition from the
     /// caller's identity (the <c>caller:</c> scheme) override this to
     /// <see cref="Abstractions.PartitionRejection.Forbidden"/>: an unmapped caller is not

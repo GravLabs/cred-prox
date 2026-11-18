@@ -1,7 +1,7 @@
 namespace CredProx;
 
 /// <summary>
-/// Parses a partition spec (<c>docs/credprox-plan.md</c> §3.2: <c>header:X-API-Env</c>)
+/// Parses a partition spec such as <c>header:X-API-Env</c>
 /// into its scheme and argument at the first <c>:</c>. The scheme selects the
 /// <see cref="Abstractions.IPartitionSourceFactory"/>; the argument is handed to it.
 /// </summary>

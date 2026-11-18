@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Add-on for CredProx: HMAC request signing (ADR-0005). The Hmac credential type, the canonical-string signer and the signing stage move out of the core; the host adds a package reference and calls AddCredProxHmac. Same configuration keys (CredProx:Credentials:&lt;id&gt; with Type: Hmac), same signature guarantees — measured body cap, 413 only on a measured overrun, signing over the final outbound form; the core carries the pipeline and the measured body hand-off.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CredProx\CredProx.csproj" />
+    <ProjectReference Include="..\CredProx.Abstractions\CredProx.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CredProx.Tests" />
+    <InternalsVisibleTo Include="CredProx.Fuzz" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- The add-on dogfoods the experimental plugin contract (plan §3.5 rule 2). -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+    <!-- New package: no published baseline exists yet, so baseline validation is skipped;
+         its rotation starts at 0.12.0 (ADR-0001). -->
+    <EnablePackageValidation>false</EnablePackageValidation>
+  </PropertyGroup>
+
+</Project>

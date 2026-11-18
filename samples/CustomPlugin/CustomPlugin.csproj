@@ -10,9 +10,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- StubApi/ is its own project; keep its files out of this compilation. -->
+    <Compile Remove="StubApi/**" />
+    <Content Remove="StubApi/**" />
+    <None Remove="StubApi/**" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="CredProx" />
-    <!-- The plugin author's testing kit (plan §5 "Testing kit"): the conformance class
-         below is ordinary sample code — a plugin ships the same in its own test project. -->
+    <!-- The plugin author's testing kit: the conformance class in this folder is
+         ordinary sample code — a plugin ships the same in its own test project. -->
     <PackageReference Include="CredProx.Testing" />
     <PackageReference Include="xunit" />
   </ItemGroup>

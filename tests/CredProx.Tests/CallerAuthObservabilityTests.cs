@@ -73,7 +73,7 @@ public sealed class CallerAuthObservabilityTests
             .Build();
         var secretSource = new ConfigurationSecretSource(config);
         var provider = new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(secretSource)),
+            new CallerBinder(config, new SecretAccessorFactory(secretSource), []),
             secretSource,
             logs.CreateLogger<CallerRegistryProvider>());
         var reloadable = (ReloadableMemoryConfigurationProvider)config.Providers
@@ -104,8 +104,11 @@ public sealed class CallerAuthObservabilityTests
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
         var secretSource = new ConfigurationSecretSource(config);
+        var accessorFactory = new SecretAccessorFactory(secretSource);
         var registryProvider = new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(secretSource)),
+            new CallerBinder(config, accessorFactory, []),
+            [new CallerKeyTableContributor(config, accessorFactory)],
+            config,
             secretSource,
             logs.CreateLogger<CallerRegistryProvider>());
 
@@ -117,6 +120,8 @@ public sealed class CallerAuthObservabilityTests
         services.AddAuthentication()
             .AddScheme<CallerKeyOptions, CallerKeyAuthenticationHandler>(
                 CredProxAuth.CallerKeyScheme, _ => { });
+        services.AddSingleton(registryProvider);
+        services.AddCredProxCallerAuthenticator<CallerKeyAuthenticator>(config);
         context.RequestServices = services.BuildServiceProvider();
         return context;
     }
@@ -240,7 +245,7 @@ public sealed class CallerAuthObservabilityTests
             claims.Add(new Claim("iat", iat.ToString(CultureInfo.InvariantCulture)));
         }
 
-        var identity = new ClaimsIdentity(claims, authenticationType: CredProxAuth.CallerTokenScheme);
+        var identity = new ClaimsIdentity(claims, authenticationType: CallerTokenOptions.Scheme);
         return new ClaimsPrincipal(identity);
     }
 
@@ -258,16 +263,19 @@ public sealed class CallerAuthObservabilityTests
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
         var secretSource = new ConfigurationSecretSource(config);
+        var accessorFactory = new SecretAccessorFactory(secretSource);
         var registryProvider = new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(secretSource)),
+            new CallerBinder(config, accessorFactory, []),
+            [new CallerKeyTableContributor(config, accessorFactory)],
+            config,
             secretSource,
             NullLogger<CallerRegistryProvider>.Instance);
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<ILoggerFactory>(logs);
         services.AddOptions();
-        // The stage authenticates the caller-key scheme first; its handler activates
-        // through DI, so the store must resolve even on a pure token request.
+        // The caller-key store and scheme stay registered: they are the inputs this harness
+        // was built with, and the key scheme resolves through DI below.
         services.AddSingleton<ICallerStore>(new ConfigCallerStore(registryProvider, TimeProvider.System));
         if (options is not null)
         {
@@ -279,7 +287,9 @@ public sealed class CallerAuthObservabilityTests
         services.AddAuthentication()
             .AddScheme<CallerKeyOptions, CallerKeyAuthenticationHandler>(CredProxAuth.CallerKeyScheme, _ => { })
             .AddScheme<AuthenticationSchemeOptions, StubTokenAuthenticationHandler>(
-                CredProxAuth.CallerTokenScheme, _ => { });
+                CallerTokenOptions.Scheme, _ => { });
+        services.AddSingleton(registryProvider);
+        services.AddCredProxCallerAuthenticator<CallerTokenAuthenticator>(config);
         context.RequestServices = services.BuildServiceProvider();
         return context;
     }
@@ -312,7 +322,7 @@ public sealed class CallerAuthObservabilityTests
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
         var secretSource = new ConfigurationSecretSource(config);
         var registryProvider = new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(secretSource)),
+            new CallerBinder(config, new SecretAccessorFactory(secretSource), []),
             secretSource,
             NullLogger<CallerRegistryProvider>.Instance);
 

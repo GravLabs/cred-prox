@@ -5,13 +5,13 @@ using Yarp.ReverseProxy.Configuration;
 namespace CredProx;
 
 /// <summary>
-/// The CredProx <see cref="IConfigValidator"/> (the config-reload story, M5, note N1):
+/// The CredProx <see cref="IConfigValidator"/>:
 /// YARP runs every registered validator when it loads the proxy configuration — at startup
 /// and on every reload — and rejects a load whose validation fails, keeping the previously
 /// applied configuration serving. This closes the gap where the startup gate was one-shot:
 /// a reload introducing an unknown <c>CredProx.Credential</c>, <c>CredProx.Destination</c>
 /// or <c>CredProx.Connection</c> reference is refused with the same clear messages as
-/// startup (§5.2 "Validation"), instead of failing per request afterwards.
+/// startup, instead of failing per request afterwards.
 /// </summary>
 /// <remarks>
 /// <para>

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Yarp.ReverseProxy.Transforms;
@@ -8,19 +9,19 @@ namespace CredProx;
 
 /// <summary>
 /// The single YARP transform adapter for the CredProx request pipeline
-/// (see <c>docs/credprox-plan.md</c> §3.1: <see cref="Abstractions.IRequestFeature"/>
-/// "maps to a YARP request transform"). One transform is added per route: it publishes
+/// <see cref="Abstractions.IRequestFeature"/> implementations map to a YARP request
+/// transform. One transform is added per route: it publishes
 /// the <see cref="CredProxRequestState"/>, runs the stage-ordered pipeline against it,
 /// and — unless a feature short-circuited — applies the resolved destination override.
 /// </summary>
 /// <remarks>
 /// Short-circuiting relies on YARP's documented behavior that a transform which sets the
-/// response makes the forwarder skip the proxy call (the plan §3.4 flagged this for a
-/// test; the M4 integration tests assert it against YARP 2.3: no forward, no token call).
+/// response makes the forwarder skip the proxy call, asserted against YARP 2.3: no
+/// forward, no token call.
 /// The response direction is deliberately not a YARP response transform: by the time
 /// those run, YARP has already copied the upstream headers to the caller. The state this
 /// transform publishes travels on the outbound message so the response dispatcher in
-/// <see cref="CredProxForwarderHttpClientFactory"/> runs the features pre-copy (M20, §8.2).
+/// <see cref="CredProxForwarderHttpClientFactory"/> runs the features pre-copy.
 /// </remarks>
 [Experimental("CREDPROX001")]
 public sealed class CredProxTransformProvider : ITransformProvider
@@ -34,7 +35,7 @@ public sealed class CredProxTransformProvider : ITransformProvider
     /// <param name="logger">Logs unexpected feature failures.</param>
     /// <param name="audit">
     /// The audit recorder; started before the pipeline so every processed request —
-    /// including one a feature short-circuits — gets its record (M7, §4 "Audit log").
+    /// including one a feature short-circuits — gets its record.
     /// </param>
     public CredProxTransformProvider(
         CredProxPipeline pipeline,
@@ -67,7 +68,10 @@ public sealed class CredProxTransformProvider : ITransformProvider
         context.AddRequestTransform(async transformContext =>
         {
             var httpContext = transformContext.HttpContext;
-            var state = new CredProxRequestState(httpContext, transformContext.ProxyRequest);
+            var state = new CredProxRequestState(
+                httpContext,
+                transformContext.ProxyRequest,
+                outgoingBody => RewriteForwarderRequestBody(httpContext, transformContext.ProxyRequest, outgoingBody));
             httpContext.Features.Set(state);
 
             // The response direction runs at the end of the outbound pipeline (M20,
@@ -117,5 +121,21 @@ public sealed class CredProxTransformProvider : ITransformProvider
                 transformContext.DestinationPrefix = prefix;
             }
         });
+    }
+
+    // The forwarder refuses a replaced request content after the transforms and pumps
+    // the inbound request body at send time, so the measured copy configures the
+    // request itself: the exact hashed bytes flow to the upstream, and the measured
+    // length goes on the forwarder's own content, which then travels as the outbound
+    // Content-Length. Framing headers live on the message, not the content — the
+    // forwarder already owns them. The content reference stays the forwarder's, so its
+    // guard holds.
+    private static void RewriteForwarderRequestBody(HttpContext httpContext, HttpRequestMessage proxyRequest, byte[] body)
+    {
+        httpContext.Request.Body = new MemoryStream(body);
+        if (proxyRequest.Content is { } content)
+        {
+            content.Headers.ContentLength = body.LongLength;
+        }
     }
 }

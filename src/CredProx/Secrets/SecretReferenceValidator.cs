@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace CredProx;
 
 /// <summary>
-/// Startup validation for secret references (see <c>docs/credprox-plan.md</c> §3.3):
+/// Startup validation for secret references:
 /// every <c>secret:</c> reference used under the <c>CredProx</c> configuration section must
 /// resolve through the registered <see cref="ISecretSource"/>. A reference that does not
 /// resolve produces one <see cref="OptionsValidationException"/> naming the references —
@@ -55,7 +55,22 @@ public sealed class SecretReferenceValidator
                 continue;
             }
 
-            var value = await _source.GetSecretAsync(name, cancellationToken).ConfigureAwait(false);
+            string? value;
+            try
+            {
+                value = await _source.GetSecretAsync(name, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A source that throws for this reference is a reference that does not
+                // resolve — one aggregated error naming it, not a raw source exception
+                // escaping startup (and the aggregate's message must name references and
+                // the source exception's type, never values and never the source's own
+                // message text).
+                errors.Add($"The secret reference '{SecretReferences.Prefix}{name}' could not be resolved (source exception {ex.GetType().Name}).");
+                continue;
+            }
+
             if (value is null)
             {
                 errors.Add($"The secret reference '{SecretReferences.Prefix}{name}' does not resolve.");

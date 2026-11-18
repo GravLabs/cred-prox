@@ -1,6 +1,6 @@
-# E9 — HMAC request signing
+# HMAC request signing
 
-The `Hmac` credential against a local signature-verifying stub (plan §6 E9). Nothing
+The `Hmac` credential against a local signature-verifying stub. Nothing
 external is needed: the stub vendor lives in the same process and verifies with an
 independent implementation of the documented canonical-string layout — the way a real
 vendor's verifier does.
@@ -16,14 +16,19 @@ vendor's verifier does.
 - Signing runs at `Stage.Sign` — after header shaping and credential attachment — so
   the signature covers exactly what the vendor receives.
 
-## Run the smoke (CI, no Docker)
+## Run the check (CI, no Docker)
+
+One cell per behavior, driving the host over real sockets from
+`tests/CredProx.SampleSmokes`:
 
 ```bash
-dotnet run -- --smoke
+dotnet test tests/CredProx.SampleSmokes --filter Sample=HmacSigning
+# or the one-line wrapper:
+cd samples/HmacSigning && ./smoke.sh
 ```
 
-Posts a signed body to the stub (verifier answers `signature valid`), then a body over
-the cap (answers 413 with the code).
+The cells post a signed body to the stub (the independent verifier answers
+`signature valid`), then a body over the cap (413 with the documented code).
 
 ## Point it at a real vendor
 

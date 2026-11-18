@@ -35,7 +35,7 @@ public sealed class AuditRecorderGuardTests
             TimeProvider.System,
             NullLogger<CredProxAuditRecorder>.Instance,
             new CredProxCoreOptions(),
-            callerKeyOptions: null);
+            configuration: null);
 
     [Fact]
     public async Task DoubleBegin_WrapsOnceAndCountsBytesOnce()
@@ -105,7 +105,7 @@ public sealed class AuditRecorderGuardTests
             TimeProvider.System,
             NullLogger<CredProxAuditRecorder>.Instance,
             new CredProxCoreOptions(),
-            callerKeyOptions: null));
+            configuration: null));
         Assert.Equal("sinks", error.ParamName);
     }
 }

@@ -38,7 +38,7 @@ public sealed class CredentialBinding
     /// The credential's bound partition source with its allow-list, or
     /// <see langword="null"/> when the credential declares no <c>Partition</c> block. The
     /// attach step resolves through it, so the token-endpoint template, secret-name
-    /// expansion and the cache key only ever see an admitted value (§3.4).
+    /// expansion and the cache key only ever see an admitted value.
     /// </summary>
     public PartitionSourceBinding? PartitionSource { get; init; }
 

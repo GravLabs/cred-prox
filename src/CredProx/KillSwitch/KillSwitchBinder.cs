@@ -4,9 +4,9 @@ using Microsoft.Extensions.Options;
 namespace CredProx;
 
 /// <summary>
-/// Binds <c>CredProx:KillSwitch</c> (M18, plan §8.4) into a <see cref="KillSwitchRegistry"/>.
+/// Binds <c>CredProx:KillSwitch</c> into a <see cref="KillSwitchRegistry"/>.
 /// The section takes exactly two list keys — <c>Clusters</c> and <c>Callers</c>, each a list
-/// of ids — and the M17 walker guards it: a misspelled key (<c>Cluster</c>), a map-shaped
+/// of ids — and the unknown-key walker guards it: a misspelled key (<c>Cluster</c>), a map-shaped
 /// entry (<code>Clusters:acme = true</code>) or a single value instead of a list all refuse
 /// startup and reload. The switch that protects against a silent configuration mistake must
 /// not itself be silent about one — an unarmed kill switch reads exactly like a vendor that

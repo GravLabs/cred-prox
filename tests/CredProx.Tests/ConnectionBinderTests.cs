@@ -2,6 +2,7 @@ using System.Security.Cryptography.X509Certificates;
 using CredProx;
 using CredProx.Abstractions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -137,6 +138,36 @@ public sealed class ConnectionBinderTests
 
         Assert.Equal(1, connection.Version);
         Assert.Equal(_first.Thumbprint, connection.Certificate.Thumbprint);
+    }
+
+    [Fact]
+    public void VanishedCertificateSecret_KeepsServing_AndLogsTheReReadFailure()
+    {
+        // The other keep-serving shape: the reference stops resolving (a secret-store
+        // outage), so the failure happens before any bytes are parsed. The refresh keeps
+        // the live certificate and says so at error level, naming the connection —
+        // distinct from a rotated value that parses to nothing.
+        var (config, reloadable) = ConfigWith(PfxConnection());
+        var loggerFactory = new CapturingLoggerFactory();
+        var connection = new ConnectionBinder(
+            config,
+            new SecretAccessorFactory(new ConfigurationSecretSource(config)),
+            loggerFactory)
+            .Bind()
+            .Get("contoso");
+
+        reloadable.Set("CredProx:Secrets:contoso-cert", null); // the reference stops resolving
+        reloadable.Reload();
+        connection.Refresh();
+
+        Assert.Equal(1, connection.Version);
+        Assert.Equal(_first.Thumbprint, connection.Certificate.Thumbprint);
+
+        var (_, level, message) = Assert.Single(loggerFactory.Entries,
+            static e => e.Message.Contains("could not re-read", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Error, level);
+        Assert.Contains("'contoso'", message, StringComparison.Ordinal);
+        Assert.Contains("keeping the current certificate", message, StringComparison.Ordinal);
     }
 
     [Fact]

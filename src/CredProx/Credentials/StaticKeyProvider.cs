@@ -4,7 +4,7 @@ using CredProx.Abstractions;
 namespace CredProx;
 
 /// <summary>
-/// The built-in <c>StaticKey</c> provider (see <c>docs/credprox-plan.md</c> §4): resolves the
+/// The built-in <c>StaticKey</c> provider: resolves the
 /// configured key reference through the credential's scoped accessor. No caching is needed —
 /// resolution is a dictionary read; placement (header or query, overwrite semantics) is
 /// declared by <see cref="StaticKeyOptions"/> and applied by the attach step.

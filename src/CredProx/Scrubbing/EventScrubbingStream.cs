@@ -3,12 +3,12 @@ using System.Buffers;
 namespace CredProx;
 
 /// <summary>
-/// The <c>text/event-stream</c> framing of response scrubbing (M22, plan §8.2): bytes
+/// The <c>text/event-stream</c> framing of response scrubbing: bytes
 /// flow out as each complete SSE event (<c>␊␊</c> / <c>␍␊␍␊</c> and the other
 /// spec line-terminator spellings) is available, with every registered secret inside
 /// the event replaced by <c>[redacted]</c>. This keeps streaming latency — the matcher
 /// never holds an event back waiting for bytes that will only arrive with the next one
-/// (the E13 SSE timing guarantee) — while still removing credentials an upstream
+/// (the SSE timing guarantee) — while still removing credentials an upstream
 /// reflects inside an event.
 /// </summary>
 /// <remarks>

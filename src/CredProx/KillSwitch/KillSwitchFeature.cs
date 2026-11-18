@@ -5,10 +5,10 @@ using Yarp.ReverseProxy.Model;
 namespace CredProx;
 
 /// <summary>
-/// The built-in <see cref="Stage.ApplyKillSwitch"/> feature (M18, plan §8.4): a cluster or
+/// The built-in <see cref="Stage.ApplyKillSwitch"/> feature: a cluster or
 /// a caller listed under <c>CredProx:KillSwitch</c> is out of service — the request answers
 /// <c>503 credprox.vendor_disabled</c> or <c>503 credprox.caller_disabled</c> and is never
-/// forwarded, no partition is resolved and no token endpoint is called (§3.4). The flip
+/// forwarded, no partition is resolved and no token endpoint is called. The flip
 /// lives in configuration and takes effect on reload, so taking a vendor out of service is
 /// a config push, not a redeploy.
 /// </summary>

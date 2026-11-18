@@ -4,12 +4,12 @@ namespace CredProx;
 
 /// <summary>
 /// The per-request record of credential values the pipeline placed on the outbound
-/// request (M20, plan §8.2). The attach feature registers the value it attaches; the
+/// request. The attach feature registers the value it attaches; the
 /// refresh-on-401 path registers the replacement value, so a reflecting response is
 /// scrubbed of every token that actually went out, old and new. The URL-encoded form
 /// is registered alongside the raw value: a query-placement credential reflects in its
 /// encoded shape. Values stay inside this per-request object and are never logged
-/// (the value-free log discipline, §3.5).
+/// (the value-free log discipline).
 /// </summary>
 internal sealed class CredProxInjectedSecrets
 {

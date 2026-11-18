@@ -414,7 +414,7 @@ public sealed class YarpDispatchSurvivorTests
                 TimeProvider.System,
                 NullLogger<CredProxAuditRecorder>.Instance,
                 new CredProxCoreOptions(),
-                callerKeyOptions: null));
+                configuration: null));
 
     private static RequestTransform BuildTransform(CredProxTransformProvider provider)
     {

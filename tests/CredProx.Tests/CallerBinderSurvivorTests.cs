@@ -17,7 +17,13 @@ public sealed class CallerBinderSurvivorTests
     private static CallerBinder Binder(Dictionary<string, string?> entries)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
-        return new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)));
+        var secretSource = new ConfigurationSecretSource(config);
+        // Key validation reaches the binder the way a keys-consuming host wires it:
+        // as the package's registry validator.
+        return new CallerBinder(
+            config,
+            new SecretAccessorFactory(secretSource),
+            [new CallerKeyRules()]);
     }
 
     private static string Hash(string keyValue) =>

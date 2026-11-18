@@ -6,19 +6,20 @@ CredProx attaches the right credential, enforces per-caller policy, and forwards
 request. Everything a vendor integration needs is **configuration** — no vendor-specific C#.
 
 This is the core package: credential providers, token cache, secret sources, destinations
-and connections (mTLS), caller authentication, throttling and resilience, presets, audit
-and health.
+and connections (mTLS), the caller-policy plumbing, presets, audit, and the pipeline
+seams. Throttling, resilience and credential health probes are the `CredProx.Operations`
+add-on; caller authentication types (`CallerKeys`, `CallerTokens`) are their own add-ons.
 
 ## Quick start
 
 ```csharp
-builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-builder.Services.AddCredProxBuiltInCredentials();
-builder.Services.AddCredProxCredentials(builder.Configuration);
+// One call registers the core defaults: token cache, the configuration-backed secret
+// source, the built-in credential types, and the credentials and destinations below.
+builder.Services.AddCredProx(builder.Configuration);
+builder.Services.AddCredProxOAuth(); // add-on calls for what you need (this config uses an OAuth type)
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx(builder.Configuration); // the proxy pipeline, also from config
 ```
 
 ```json
@@ -52,8 +53,11 @@ builder.Services.AddReverseProxy()
 ```
 
 A caller then calls `/graph/v1.0/users` with no `Authorization` header; Microsoft Graph receives
-an Entra access token. Built-in credential types: `OAuthClientCredentials`, `LoginExchange`,
-`StaticKey`, `TokenCredential`, `JwtAssertion`, `Hmac`. The library ships no built-in
+an Entra access token. Built-in credential types: `StaticKey` (`TokenCredential`
+registers through the `CredProx.AzureKeyVault` extension); the `Hmac`, `LoginExchange`
+and OAuth-based types — `OAuthClientCredentials`, `TokenExchange`, `JwtAssertion` — ship
+in their own packages: `CredProx.Hmac`, `CredProx.LoginExchange` and `CredProx.OAuth`,
+where you reference the package and call its registration. The library ships no built-in
 vendor presets — every vendor is shown as explicit config in its own
 [sample](https://github.com/GravLabs/cred-prox/tree/main/samples); a community preset
 under `CredProx:Presets` (or a custom `IPresetSource`) can package a vendor's fixed facts
@@ -63,14 +67,42 @@ so a credential is a few lines.
 
 | Package | Purpose |
 |---|---|
-| `CredProx` | this one — the core |
-| `CredProx.Abstractions` | the plugin contract (implement to write credential-type plugins) |
-| `CredProx.AzureKeyVault` | Key Vault secret source + `TokenCredential` |
-| `CredProx.Testing` | fakes + conformance suites for plugin authors |
+| `CredProx` | this one — the core host pieces every add-on plugs into |
+| `CredProx.Abstractions` | the public contracts (credential types, authenticators, secret sources, pipeline seams) |
+| `CredProx.AzureKeyVault` | the `TokenCredential` credential type (Entra tokens via `Azure.Identity`, no stored secret) |
+| `CredProx.CallerKeys` | inbound caller authentication against API keys kept in config as SHA-256 hashes |
+| `CredProx.CallerTokens` | inbound caller authentication via short-lived Entra / OIDC access tokens, roles narrowing the caller's rules |
+| `CredProx.Hmac` | the `Hmac` request-signing credential type + the signing stage |
+| `CredProx.LoginExchange` | the `LoginExchange` credential type: a form login whose session is replayed and refreshed |
+| `CredProx.OAuth` | the `OAuthClientCredentials`, `TokenExchange` and `JwtAssertion` credential types |
+| `CredProx.Operations` | throttling with `Retry-After`, per-cluster retries and circuit breakers, credential health probes |
+| `CredProx.Testing` | fakes + the conformance suites the built-ins themselves are tested with |
 
 Samples live in [`samples/`](https://github.com/GravLabs/cred-prox/tree/main/samples)
-in the repository; the design and failure semantics are in
-[`docs/credprox-plan.md`](https://github.com/GravLabs/cred-prox/blob/main/docs/credprox-plan.md).
+in the repository.
+
+## Extension points
+
+Everything the built-ins use is open to your package — the contracts ship in
+`CredProx.Abstractions`, the registration calls live in `CredProx`, and
+[`docs/extending.md`](https://github.com/GravLabs/cred-prox/blob/main/docs/extending.md)
+is the full guide:
+
+- **Caller authenticator** (`ICallerAuthenticator`, `AddCredProxCallerAuthenticator<T>`):
+  turns inbound request material into an authenticated caller; registering one brings
+  the caller policy pipeline with it.
+- **Registry validator** (`ICallerRegistryValidator`, `AddCredProxCallerRegistryValidator<T>`):
+  a fail-closed startup check over the built caller registry.
+- **Registry contributor** (`ICallerRegistryContributor`): builds part of the caller
+  registry from your own source, generation-tracked like the built-in one.
+- **Credential type** (`ICredentialProvider<TOptions>`, `AddCredProxCredentialType<TProvider, TOptions>`):
+  a way to obtain and attach a credential for a named config entry.
+- **Secret source and secret-reference resolution** (`ISecretSource`, `ISecretAccessor`):
+  resolves `secret:` references; unresolvable references refuse startup.
+- **Pipeline feature and stage order** (`IPipelineFeature` and the request/connection/response
+  flavours): cross-cutting behavior per proxied request, executed in a fixed stage order.
+- **The body hand-off** (`CredProxRequestState`): the measured-body seam for features
+  that need the whole outbound body, with a byte cap — how the signing stage gets its bytes.
 
 ## Status
 

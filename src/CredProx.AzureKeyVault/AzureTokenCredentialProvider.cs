@@ -5,7 +5,7 @@ using CredProx.Abstractions;
 namespace CredProx;
 
 /// <summary>
-/// The add-on <c>TokenCredential</c> provider (see <c>docs/credprox-plan.md</c> §4): wraps an
+/// The add-on <c>TokenCredential</c> provider: wraps an
 /// <c>Azure.Core.TokenCredential</c> — a managed identity, workload identity, or anything
 /// else implementing the Azure.Core abstraction. The token is cached per
 /// <c>(credential, partition)</c> through <see cref="ITokenCache"/> until its

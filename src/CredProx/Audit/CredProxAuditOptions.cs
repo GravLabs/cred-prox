@@ -3,8 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// Audit options bound from <c>CredProx:Audit</c> (see <c>docs/credprox-plan.md</c>
-/// §4 "Audit log", §5.2 "Audit"). Redaction happens in the core before any sink sees the
+/// Audit options bound from <c>CredProx:Audit</c>. Redaction happens in the core before any sink sees the
 /// record, so a sink — built-in or plugin — never receives a value the configuration
 /// marks as sensitive.
 /// </summary>
@@ -22,7 +21,7 @@ public sealed class CredProxAuditOptions
     /// <summary>
     /// How long a single sink write may hold the completed request before the core gives
     /// up on it (logged, never surfaced to the caller). Default 5 seconds; must be
-    /// positive. This is the §5.2 bound: a hung sink delays nothing the caller waits on
+    /// positive. The bound is firm: a hung sink delays nothing the caller waits on
     /// (the record is written after the response is on the wire) and never fails it.
     /// </summary>
     public TimeSpan SinkTimeout

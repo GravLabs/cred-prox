@@ -1,26 +1,27 @@
 using System.Diagnostics.CodeAnalysis;
 using CredProx.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 
 namespace CredProx;
 
 /// <summary>
-/// Options bound from the <c>CredProx</c> section root (§3.2).
+/// Options bound from the <c>CredProx</c> section root.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class CredProxCoreOptions
 {
     /// <summary>
     /// The inbound caller-key header. Always stripped from the outbound request before
-    /// forwarding, whatever the route (§3.2); <see cref="Abstractions.Stage.ShapeHeaders"/>
+    /// forwarding, whatever the route; <see cref="Abstractions.Stage.ShapeHeaders"/>
     /// hygiene. Set empty to disable stripping.
     /// </summary>
     public string InboundKeyHeader { get; set; } = "X-API-Key";
 }
 
 /// <summary>
-/// The built-in <see cref="Stage.ShapeHeaders"/> feature implementing the §5.2
-/// "Header hygiene" row: the inbound key header never reaches the upstream, and the
+/// The built-in <see cref="Stage.ShapeHeaders"/> feature implementing
+/// header hygiene: the inbound key header never reaches the upstream, and the
 /// partition header is removed when the resolved destination declares
 /// <c>StripHeader: true</c>. Runs after destination resolution (which reads the partition
 /// header) and before credential attachment (which must not be shadowed by caller
@@ -30,23 +31,23 @@ public sealed class CredProxCoreOptions
 public sealed class HeaderHygieneFeature : IRequestFeature
 {
     private readonly CredProxCoreOptions _options;
-    private readonly IReadOnlyList<string> _callerKeyHeaders;
+    private readonly string? _callerAuthHeader;
 
     /// <summary>Creates the feature.</summary>
     /// <param name="options">The core options carrying the inbound key header name.</param>
-    /// <param name="callerKeyOptions">
-    /// The caller-auth options when caller authentication is registered; its header name is
-    /// stripped from the outbound request too (§5.2 "Header hygiene"). Empty otherwise.
+    /// <param name="configuration">
+    /// The application configuration root. <c>CredProx:CallerAuth:HeaderName</c> (default
+    /// <c>X-CredProx-Key</c>) names the header the caller-auth add-on authenticates with;
+    /// it is stripped from the outbound request too, whether or
+    /// not any add-on is registered — a key presented to a host without caller auth must
+    /// not ride upstream either. The core reads the configured name, never a key type.
     /// </param>
-    public HeaderHygieneFeature(CredProxCoreOptions options, IEnumerable<CallerKeyOptions> callerKeyOptions)
+    public HeaderHygieneFeature(CredProxCoreOptions options, IConfiguration configuration)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        ArgumentNullException.ThrowIfNull(callerKeyOptions);
-        _callerKeyHeaders = callerKeyOptions
-            .Select(o => o.HeaderName)
-            .Where(h => !string.IsNullOrEmpty(h))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        ArgumentNullException.ThrowIfNull(configuration);
+        var header = configuration["CredProx:CallerAuth:HeaderName"];
+        _callerAuthHeader = string.IsNullOrEmpty(header) ? "X-CredProx-Key" : header;
     }
 
     /// <inheritdoc />
@@ -67,18 +68,19 @@ public sealed class HeaderHygieneFeature : IRequestFeature
             state.ProxyRequest.Headers.Remove(_options.InboundKeyHeader);
         }
 
-        foreach (var header in _callerKeyHeaders)
+        if (_callerAuthHeader is not null)
         {
-            state.ProxyRequest.Headers.Remove(header);
+            state.ProxyRequest.Headers.Remove(_callerAuthHeader);
         }
 
-        // M39 (ADR-0004): on the caller-TOKEN path the Authorization header IS the
-        // credential — the upstream must never see it. Credential attachment runs after
-        // this stage and puts the vendor's own value in its place. The key path never
-        // marks the request, so its header behaviour is byte-for-byte unchanged.
-        if (context.Features.Get<CallerTokenRequestMarker>() is not null)
+        // M39 (ADR-0004), seam view (ADR-0005): when the winning credential arrived in a
+        // request header, that header IS the credential — the upstream must never see it.
+        // Credential attachment runs after this stage and puts the vendor's own value in
+        // its place. Paths whose credential is not a header value set no marker, so their
+        // header behaviour is byte-for-byte unchanged.
+        if (context.Features.Get<PresentedCredential>() is { } presented)
         {
-            state.ProxyRequest.Headers.Remove("Authorization");
+            state.ProxyRequest.Headers.Remove(presented.HeaderName);
         }
 
         if (state.Destination is { Definition.StripHeader: true } destination

@@ -6,8 +6,7 @@ using CredProx.Abstractions;
 namespace CredProx;
 
 /// <summary>
-/// Refresh-on-401 as an outbound <see cref="DelegatingHandler"/> (see
-/// <c>docs/credprox-plan.md</c> §3.4): on a 401 the cached token is invalidated, a fresh one
+/// Refresh-on-401 as an outbound <see cref="DelegatingHandler"/>: on a 401 the cached token is invalidated, a fresh one
 /// is obtained, and the request is sent once more. A second 401 is returned to the caller —
 /// never a loop. Idempotent methods retry by default; non-idempotent ones only when
 /// <see cref="RefreshOn401Options.RetryNonIdempotent"/> is enabled and the body fits the

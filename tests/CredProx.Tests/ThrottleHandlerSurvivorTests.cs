@@ -139,10 +139,13 @@ public sealed class ThrottleHandlerSurvivorTests
     }
 
     [Fact]
-    public async Task PauseExtendedWhileWaiting_RejectedWithTheRemainingPause()
+    public async Task PauseExtendedWhileWaitingWithinTheBound_IsWaitedOut()
     {
-        // The post-delay re-check must see a pause extended mid-wait and reject with the
-        // remaining duration (a skipped re-check or a negated bound proceeds upstream).
+        // A pause extended mid-wait is still a pause: within the queue-wait bound the
+        // request waits the extended pause out (the re-check that ignores the extension,
+        // or rejects on any positive remaining, fails here; the past-the-bound reject is
+        // pinned by ThrottlePauseDeadlineTests). The first wait's timer is scheduled
+        // before GetAsync returns, so the extension always lands mid-wait.
         var time = new FakeTimeProvider();
         var (handler, registry) = MakeHandler(Rate(1, maxQueueWait: "00:00:05"), new StubHandler(_ => Ok()), time);
         var state = registry.GetOrCreate("cluster-a");
@@ -151,11 +154,18 @@ public sealed class ThrottleHandlerSurvivorTests
 
         var request = client.GetAsync("https://vendor.example/api");
         state.PauseUntil(time.GetUtcNow() + TimeSpan.FromSeconds(3)); // extended while the wait runs
-        time.Advance(TimeSpan.FromSeconds(1)); // the original wait elapses
+        time.Advance(TimeSpan.FromSeconds(1)); // the original wait elapses; the extension does not
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!request.IsCompleted)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "the held request never finished waiting the extended pause out.");
+            time.Advance(TimeSpan.FromMilliseconds(50));
+            await Task.Yield();
+        }
 
         using var response = await request;
-        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
-        Assert.Equal(TimeSpan.FromSeconds(2), response.Headers.RetryAfter?.Delta);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     // ---- the timeout catch must not swallow the caller's own cancellation ----

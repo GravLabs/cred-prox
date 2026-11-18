@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# E11 shortened load script (plan §6: "load script shortened"). The nightly NBomber
-# suite (tests/CredProx.LoadTests) holds the rigorous rate assertions; this script
-# drives the three operational behaviors against a running host + WireMock and asserts
-# each one visibly. Run via ./smoke.sh, or by hand with both processes up.
+# Shortened load script: the nightly NBomber suite (tests/CredProx.LoadTests) holds the
+# rigorous rate assertions; this drives the three operational behaviors against a running
+# host + WireMock and asserts each one visibly. Run it by hand with both processes up.
 set -uo pipefail
 
 BASE=${BASE:-http://localhost:5091}

@@ -52,6 +52,7 @@ public sealed class HealthSurvivorTests
         services.AddCredProxTokenCache(o => o.NegativeCacheTtl = TimeSpan.Zero);
         services.AddCredProxConfigurationSecrets(config);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
         services.AddCredProxCredentials(config);
         services.AddCredProxCallerAuthentication(config);
         services.AddHttpClient(CredProxHttpClientNames.TokenClient)

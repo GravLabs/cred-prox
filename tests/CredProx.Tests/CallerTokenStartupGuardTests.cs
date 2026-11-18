@@ -97,18 +97,19 @@ public sealed class CallerTokenStartupGuardTests
             });
 
     [Fact]
-    public async Task TokenExtOnlyHost_RefusesStartup_NamingBothExtensions()
+    public async Task TokenExtOnlyHost_EmptyCallerRegistry_RefusesStartup()
     {
         // The verdict's fail-open probe host: token scheme registered, caller
-        // authentication never ran. Today it starts and forwards; it must refuse.
+        // authentication never ran. It must refuse — today by the binder's own
+        // "no caller configured" check, eager at startup now that registering the
+        // token authenticator brings the core caller policy with it.
         using var host = ProxyHost(TokenOnlyEntries())
             .ConfigureServices((context, services) =>
                 services.AddCredProxCallerTokenAuthentication(context.Configuration))
             .Build();
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync(default));
-        Assert.Contains(nameof(CredProxServiceCollectionExtensions.AddCredProxCallerTokenAuthentication), ex.Message);
-        Assert.Contains(nameof(CredProxServiceCollectionExtensions.AddCredProxCallerAuthentication), ex.Message);
+        var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(default));
+        Assert.Contains("no caller is configured", string.Join("; ", ex.Failures));
         await host.StopAsync();
     }
 
@@ -339,7 +340,7 @@ public sealed class CallerTokenStartupGuardTests
             entries,
             upstream.GetTestServer().CreateHandler(),
             builder => builder.AddScheme<AuthenticationSchemeOptions, StubCallerTokenHandler>(
-                CredProxAuth.CallerTokenScheme, displayName: null, configureOptions: null));
+                CallerTokenOptions.Scheme, displayName: null, configureOptions: null));
 
         Assert.Equal(0, SwapNoHandlerWarnings(logs));
         await host.StopAsync();

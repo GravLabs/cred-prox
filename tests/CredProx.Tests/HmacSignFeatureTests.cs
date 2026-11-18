@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using CredProx;
 using CredProx.Abstractions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -35,6 +36,7 @@ public sealed class HmacSignFeatureTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxHmac();
         services.AddCredProxCredentials(configuration);
         var provider = services.BuildServiceProvider();
 
@@ -198,6 +200,34 @@ public sealed class HmacSignFeatureTests
     }
 
     [Fact]
+    public async Task BodyHash_UnknownLengthBody_StillFlowsAfterHashing()
+    {
+        // Same upstream-forwarding guarantee as the known-length theory above, for the
+        // branch where the size can only be learned by reading: whatever the signing
+        // stage does to count the bytes, the body must remain fully readable after it.
+        var body = "small body";
+        var (_, feature) = Build(HmacConfig(
+            ("Credentials:signer:Components:0", "bodyHash"),
+            ("Credentials:signer:BufferBody", "true")));
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        var content = new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(body)));
+        content.Headers.ContentLength = null; // unknown length: the counted read is the only path
+        proxyRequest.Content = content;
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.Equal(
+            ReferenceHmac(ReferenceSha256Hex(Encoding.UTF8.GetBytes(body)), KeyValue),
+            GetHeader(proxyRequest, "X-Signature"));
+
+        // The counted body still flows to the upstream after hashing.
+        Assert.Equal(body, await proxyRequest.Content!.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task BodyHash_CorrectForMaxSizeBody()
     {
         var body = new string('x', 64);
@@ -343,6 +373,7 @@ public sealed class HmacSignFeatureTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxHmac();
         services.AddCredProxCredentials(configuration);
         var logger = new CapturingLogger();
         var feature = new HmacSignFeature(
@@ -371,6 +402,253 @@ public sealed class HmacSignFeatureTests
         Assert.Equal(LogLevel.Warning, entry.Level);
         Assert.Contains("signer", entry.Message, StringComparison.Ordinal);
         Assert.Contains("could not be obtained", entry.Message, StringComparison.Ordinal);
+    }
+
+    // ---- defensive feature guards, unreachable through a validated config -------------
+    //
+    // The options validator rejects these combinations at startup, so the feature's own
+    // fail-closed branches cannot be driven by configuration. The live registry of a
+    // correctly built provider is swapped to the state each guard protects, and the
+    // feature must refuse to sign rather than emit a signature no verifier can reproduce.
+
+    private static CredentialRegistry HandRolledHmacRegistry(HmacOptions options) =>
+        new(new Dictionary<string, CredentialBinding>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["signer"] = new CredentialBinding
+            {
+                Name = "signer",
+                TypeName = "Hmac",
+                Options = options,
+                GetCredential = static (_, _) => ValueTask.FromResult(KeyValue),
+            },
+        });
+
+    private static void SwapInRegistry(ServiceProvider services, CredentialRegistry registry)
+    {
+        var provider = services.GetRequiredService<CredentialRegistryProvider>();
+        typeof(CredentialRegistryProvider)
+            .GetField("_current", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(provider, registry);
+    }
+
+    private static HmacSignFeature BuildFeature(ServiceProvider services, CapturingLogger logger) =>
+        new(
+            services.GetRequiredService<CredentialRegistryProvider>(),
+            new FakeTimeProvider(T0),
+            logger);
+
+    private static (int StatusCode, string Code, string Title) ProblemEnvelope(HttpContext context)
+    {
+        using var document = JsonDocument.Parse(M4Contexts.ResponseBody(context));
+        return (
+            document.RootElement.GetProperty("status").GetInt32(),
+            document.RootElement.GetProperty("extensions").GetProperty("code").GetString()!,
+            document.RootElement.GetProperty("title").GetString()!);
+    }
+
+    [Fact]
+    public async Task UnparseableComponent_FailsClosedSigningRefused()
+    {
+        var (services, _) = Build(HmacConfig(("Credentials:signer:Components:0", "method")));
+        var registry = HandRolledHmacRegistry(new HmacOptions
+        {
+            Secret = "secret:hmac-key",
+            SignatureHeader = "X-Signature",
+            Components = ["method", "components"], // the second token is no recipe the verifier could rebuild
+        });
+        SwapInRegistry(services, registry);
+        var logger = new CapturingLogger();
+        var feature = BuildFeature(services, logger);
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        await feature.ApplyAsync(context, default);
+
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.True(state.IsAborted);
+        Assert.Equal(502, context.Response.StatusCode);
+        var (status, code, title) = ProblemEnvelope(context);
+        Assert.Equal(502, status);
+        Assert.Equal("credprox.credential_unavailable", code);
+        Assert.Equal("The outbound credential could not be obtained.", title);
+        Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("signer", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("components", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BodyHashWithoutBufferBody_FailsClosedBeforeHashing()
+    {
+        var (services, _) = Build(HmacConfig(("Credentials:signer:Components:0", "method")));
+        var registry = HandRolledHmacRegistry(new HmacOptions
+        {
+            Secret = "secret:hmac-key",
+            SignatureHeader = "X-Signature",
+            Components = ["bodyHash"],
+            BufferBody = false, // the validator rejects this pair; the feature must also refuse
+            MaxBodyBytes = 1024,
+        });
+        SwapInRegistry(services, registry);
+        var logger = new CapturingLogger();
+        var feature = BuildFeature(services, logger);
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        proxyRequest.Content = new StringContent("payload-body");
+
+        await feature.ApplyAsync(context, default);
+
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.True(state.IsAborted);
+        Assert.Equal(502, context.Response.StatusCode);
+        Assert.Equal("credprox.credential_unavailable", ProblemEnvelope(context).Code);
+        Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("BufferBody", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnknownLengthBodyOverCap_Answers413WithCode()
+    {
+        // No Content-Length: the size cap is caught mid-buffer by the signing stage
+        // itself, not from the header — the request must be refused, not signed blind.
+        var (_, feature) = Build(HmacConfig(
+            ("Credentials:signer:Components:0", "bodyHash"),
+            ("Credentials:signer:BufferBody", "true"),
+            ("Credentials:signer:MaxBodyBytes", "8")));
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        var content = new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(new string('x', 200))));
+        content.Headers.ContentLength = null; // unknown length
+        proxyRequest.Content = content;
+
+        await feature.ApplyAsync(context, default);
+
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.True(state.IsAborted);
+        Assert.Equal(413, context.Response.StatusCode);
+        using var document = JsonDocument.Parse(M4Contexts.ResponseBody(context));
+        Assert.Equal(
+            "credprox.body_too_large_to_sign",
+            document.RootElement.GetProperty("extensions").GetProperty("code").GetString());
+        Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+    }
+
+    [Fact]
+    public async Task ForwarderShapeBody_SignsAndFlows_WhenContentRefusesStreamShortcut()
+    {
+        // The real forwarder hands this stage YARP's StreamCopyHttpContent, whose
+        // CreateContentReadStreamAsync throws NotImplementedException — a read path that
+        // takes that shortcut fails the whole request. The body must still be counted,
+        // hashed and forwarded through a read path every HttpContent supports.
+        var body = "forwarded-through-the-forwarder-body";
+        var (_, feature) = Build(HmacConfig(
+            ("Credentials:signer:Components:0", "bodyHash"),
+            ("Credentials:signer:BufferBody", "true")));
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        proxyRequest.Content = new ForwarderShapeContent(Encoding.UTF8.GetBytes(body));
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(context.Features.Get<CredProxRequestState>()!.IsAborted);
+        Assert.Equal(
+            ReferenceHmac(ReferenceSha256Hex(Encoding.UTF8.GetBytes(body)), KeyValue),
+            GetHeader(proxyRequest, "X-Signature"));
+
+        // The counted body still flows to the upstream after hashing, with its measured length.
+        Assert.Equal(body, await proxyRequest.Content!.ReadAsStringAsync());
+        Assert.Equal(Encoding.UTF8.GetByteCount(body), proxyRequest.Content!.Headers.ContentLength);
+    }
+
+    [Fact]
+    public async Task ForwarderShapeBodyOverCap_Answers413WithCode()
+    {
+        // The measured-overrun refusal must hold for the forwarder's content shape too:
+        // the cap is counted byte-by-byte during the copy, not learned from a shortcut.
+        var (_, feature) = Build(HmacConfig(
+            ("Credentials:signer:Components:0", "bodyHash"),
+            ("Credentials:signer:BufferBody", "true"),
+            ("Credentials:signer:MaxBodyBytes", "8")));
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        proxyRequest.Content = new ForwarderShapeContent(Encoding.UTF8.GetBytes(new string('x', 200)));
+
+        await feature.ApplyAsync(context, default);
+
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.True(state.IsAborted);
+        Assert.Equal(413, context.Response.StatusCode);
+        using var document = JsonDocument.Parse(M4Contexts.ResponseBody(context));
+        Assert.Equal(
+            "credprox.body_too_large_to_sign",
+            document.RootElement.GetProperty("extensions").GetProperty("code").GetString());
+        Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+    }
+
+    private sealed class ForwarderShapeContent(byte[] body) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context) =>
+            new MemoryStream(body, writable: false).CopyToAsync(stream);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false; // the forwarder's copy carries no length until it is read
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync() =>
+            throw new NotImplementedException(); // exactly what YARP's StreamCopyHttpContent does
+    }
+
+    [Fact]
+    public async Task UnknownLengthBodyWithFailingContent_KeepsItsCause_AndIsNotRefusedAsTooLarge()
+    {
+        // A content that fails for a reason unrelated to size must not be answered as a
+        // body-size refusal: the failure travels with its own cause so the host pipeline
+        // can log and map it. The cap is a number this stage measures itself, never a
+        // guess from an exception that merely happens to arrive during buffering.
+        var (_, feature) = Build(HmacConfig(
+            ("Credentials:signer:Components:0", "bodyHash"),
+            ("Credentials:signer:BufferBody", "true"),
+            ("Credentials:signer:MaxBodyBytes", "1048576")));
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        proxyRequest.Content = new ThrowingContent(); // no Content-Length; serialization always fails
+
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(
+            () => feature.ApplyAsync(context, default).AsTask());
+
+        Assert.Contains("simulated content serialization failure", failure.Message, StringComparison.Ordinal);
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.False(state.IsAborted);
+        Assert.Equal(200, context.Response.StatusCode);
+        Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+    }
+
+    private sealed class ThrowingContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context) =>
+            throw new HttpRequestException("simulated content serialization failure");
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false; // unknown length: nothing in the headers answers the size
+        }
     }
 
     private sealed class CapturingLogger : ILogger<HmacSignFeature>

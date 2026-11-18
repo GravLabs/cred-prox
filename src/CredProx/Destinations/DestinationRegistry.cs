@@ -3,8 +3,8 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// One <c>CredProx:Destinations:&lt;name&gt;</c> entry, bound at startup
-/// (see <c>docs/credprox-plan.md</c> §3.2): the address template, the bound partition
+/// One <c>CredProx:Destinations:&lt;name&gt;</c> entry, bound at startup:
+/// the address template, the bound partition
 /// source with its allow-list, and whether the partition header is stripped before
 /// forwarding.
 /// </summary>

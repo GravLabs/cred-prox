@@ -16,20 +16,19 @@ services:
       - ./realm:/opt/keycloak/data/import:ro
 
   api:
-    image: credprox-e14-sample
+    image: credprox-tokenexchange-stubapi
     build:
       context: ../..
-      dockerfile: samples/TokenExchange/Dockerfile
-    command: ["dotnet", "/app/TokenExchange.dll", "--role", "api"]
+      dockerfile: samples/TokenExchange/StubApi/Dockerfile
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
     depends_on:
       - keycloak
     ports:
-      - "5088:8080"
+      - "5102:8080"
 
   proxy:
-    image: credprox-e14-sample
+    image: credprox-tokenexchange-sample
     build:
       context: ../..
       dockerfile: samples/TokenExchange/Dockerfile

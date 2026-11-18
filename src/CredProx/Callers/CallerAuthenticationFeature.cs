@@ -1,32 +1,39 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.Security.Claims;
 using CredProx.Abstractions;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace CredProx;
 
 /// <summary>
-/// The built-in <see cref="Stage.AuthenticateCaller"/> feature (§3.5 rule 3, §4 Phase B):
+/// The built-in <see cref="Stage.AuthenticateCaller"/> feature:
 /// once caller authentication is registered, every proxied route requires an authenticated
 /// caller unless the route opts out with <c>"Metadata": { "CredProx.Caller": "anonymous" }</c>.
-/// A missing, unknown, expired or revoked key answers
-/// <c>401 credprox.caller_unauthenticated</c> before destination resolution, header shaping
-/// and credential attachment run — so a rejected request never reaches a token endpoint or
-/// the upstream (§3.4). Where the caller-token layer is registered (M39, ADR-0004) a
-/// validated caller token whose client id a caller declares is admitted the same way, after
-/// the key check. Before any <see cref="ICallerTokenMapper"/> runs this stage enforces
-/// <c>CredProx:CallerToken:MaxTokenAge</c> against the raw <c>iat</c> (M39, ADR-0004) — the
-/// bound cannot be dropped by a replaced mapper, and it is read once at startup, so
-/// changing it requires a restart. A refused token is logged server-side with its reason
-/// (stale / unlisted), never in the response body. On success the caller identity is published as an
-/// <see cref="HttpContext"/> feature (for the operation allow-list and the <c>caller:</c>
-/// partition source) and as <see cref="HttpContext.User"/> (for hosts that also enforce
-/// the <see cref="CredProxAuth.CallerPolicy"/> through middleware).
+/// A missing or refused credential answers <c>401 credprox.caller_unauthenticated</c> before
+/// destination resolution, header shaping and credential attachment run — so a rejected
+/// request never reaches a token endpoint or the upstream.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The stage consults every registered <see cref="ICallerAuthenticator"/> in registration
+/// order (ADR-0005); the first <see cref="CallerAuthenticationOutcome.Authenticated"/> or
+/// <see cref="CallerAuthenticationOutcome.Refused"/> outcome wins, and when all answer
+/// <see cref="CallerAuthenticationOutcome.NoCredential"/> the request ends unauthenticated.
+/// What the credential is — an API key, a caller token, anything a host registers — is the
+/// authenticators' business; the stage names no credential type. Its 401 detail is composed
+/// from their <see cref="ICallerAuthenticator.CredentialRequirementHint"/> values.
+/// </para>
+/// <para>
+/// On success the stage publishes the winner's identity exactly once, in one shape: as an
+/// <see cref="HttpContext"/> feature (for the operation allow-list and the <c>caller:</c>
+/// partition source) and as <see cref="HttpContext.User"/> (for hosts that also enforce the
+/// <see cref="CredProxAuth.CallerPolicy"/> through middleware) — plus the scope set and the
+/// presented-credential marker when the winner reported them. An identity that the
+/// configured caller registry does not know never gets published: it answers the same 401
+/// an unknown credential holder does.
+/// </para>
+/// </remarks>
 [Experimental("CREDPROX001")]
 public sealed class CallerAuthenticationFeature : IRequestFeature
 {
@@ -54,144 +61,118 @@ public sealed class CallerAuthenticationFeature : IRequestFeature
             return; // route opted out
         }
 
-        var result = await context.AuthenticateAsync(CredProxAuth.CallerKeyScheme).ConfigureAwait(false);
-        if (result.Succeeded && result.Principal is { } keyPrincipal)
+        // Registration order decides which authenticator sees the request first; the first
+        // authenticated-or-refused outcome wins (ADR-0005). Exceptions from an
+        // authenticator propagate untouched — a broken authenticator is a host bug, not
+        // an unauthenticated request.
+        CallerAuthenticationResult? won = null;
+        foreach (var authenticator in context.RequestServices.GetServices<ICallerAuthenticator>())
         {
-            if (CallerIdentity.FromPrincipal(keyPrincipal) is not { } identity)
+            var outcome = await authenticator
+                .AuthenticateAsync(context, cancellationToken)
+                .ConfigureAwait(false);
+            if (outcome.Outcome != CallerAuthenticationOutcome.NoCredential)
             {
-                // A principal from this scheme without the caller claim is a contract break;
-                // fail closed rather than serve an unidentified caller.
+                won = outcome;
+                break;
+            }
+        }
+
+        if (won is { Outcome: CallerAuthenticationOutcome.Authenticated, Identity: { } identity })
+        {
+            // Fail closed on the identity itself: an authenticated caller the configured
+            // registry does not know answers the same generic 401 an unknown key holder
+            // gets — no authenticator can mint callers the configuration never declared.
+            // (ADR-0004/ADR-0005: registering an authenticator brings the caller policy.)
+            if (context.RequestServices.GetService<CallerRegistryProvider>() is { } registryProvider
+                && !registryProvider.Current.TryGet(identity.CallerId, out _))
+            {
                 await state
                     .AbortAsync(StatusCodes.Status401Unauthorized, "credprox.caller_unauthenticated",
-                        "A valid caller API key is required.")
+                        RequirementText(context))
                     .ConfigureAwait(false);
                 return;
             }
 
-            context.User = keyPrincipal;
+            // Publish the caller identity in one shape whichever authenticator won, so the
+            // allow-list, the caller: partition and the policy all read the same record: a
+            // fresh principal carrying exactly the caller claims (the winning credential
+            // itself stays out of it — see PresentedCredentialHeader), the identity feature,
+            // the scope set when the credential type carries one, and the presented-header
+            // marker when the credential arrived in a request header.
+            if (won.Principal is { } carried)
+            {
+                // The credential's own principal stays visible so host middleware keeps
+                // seeing its raw claims (M39); the caller identity is added as one more
+                // identity, in the same shape the synthesized principal uses.
+                carried.AddIdentity(BuildCallerIdentity(identity));
+                context.User = carried;
+            }
+            else
+            {
+                context.User = new ClaimsPrincipal(BuildCallerIdentity(identity));
+            }
             context.Features.Set(identity);
+            if (won.Scopes is { } scopes)
+            {
+                // Set even when empty: a credential carrying no scopes locks out the
+                // caller's named rules (ADR-0004 clause 3, fail closed).
+                context.Features.Set(new CallerRequestScopes(scopes));
+            }
+
+            if (won.PresentedCredentialHeader is { } header)
+            {
+                context.Features.Set(new PresentedCredential(header));
+            }
+
             return;
         }
 
-        // No key (or the key failed): a caller token is admitted wherever the token
-        // SCHEME is registered and a mapper can turn the principal into a caller (M39,
-        // ADR-0004). The scheme registration — not the mapper — is what makes a
-        // token admissible: authenticating a scheme nobody registered throws inside the
-        // feature, and a mapper without the scheme could never authenticate anything.
-        // A validated principal that maps to no configured caller is a failed
-        // authentication, not a 500.
-        var schemes = context.RequestServices.GetService<IAuthenticationSchemeProvider>();
-        var tokenSchemeRegistered = schemes is not null
-            && await schemes.GetSchemeAsync(CredProxAuth.CallerTokenScheme).ConfigureAwait(false) is not null;
-        var mapper = tokenSchemeRegistered
-            ? context.RequestServices.GetService<ICallerTokenMapper>()
-            : null;
-        if (mapper is not null)
-        {
-            var tokenResult = await context.AuthenticateAsync(CredProxAuth.CallerTokenScheme)
-                .ConfigureAwait(false);
-            if (tokenResult.Succeeded && tokenResult.Principal is { } tokenPrincipal)
-            {
-                // M39 (ADR-0004): MaxTokenAge is CredProx's bound, not the mapper's —
-                // this stage is not replaceable and the check runs before any mapper,
-                // so a host-registered ICallerTokenMapper cannot drop it. The limit
-                // comes from the CredProx-side options singleton (the scheme's
-                // AddJwtBearer copy receives only Authority/Audience) and is read at
-                // startup; changing it requires a restart.
-                // Fail closed: AddCredProx always registers these options when the token
-                // path is on, so a missing registration is a broken container — it must
-                // abort the request, not admit tokens with no age bound (M39).
-                var options = context.RequestServices.GetRequiredService<CallerTokenOptions>();
-                var refusal = options.MaxTokenAge is { } maxAge && !IsFresh(tokenPrincipal, maxAge)
-                    ? "stale"
-                    : null;
-                var mapping = refusal is null ? mapper.MapToken(tokenPrincipal) : null;
-                if (refusal is null && mapping is null)
-                {
-                    refusal = "unlisted";
-                }
-                if (mapping is not null)
-                {
-                    // Publish the caller identity exactly like the key handler does, so
-                    // the allow-list, the caller: partition and the policy all read one
-                    // shape whichever scheme won — plus, M39 (ADR-0004), the client id
-                    // (for audit) and the per-request scope set the allow-list stage
-                    // intersects with. The scope set is set even when empty: a token
-                    // carrying no roles locks out the caller's named rules, which is the
-                    // fail-closed reading of "scope only narrows".
-                    var clientId = mapping.Identity.ClientId;
-                    tokenPrincipal.AddIdentity(new ClaimsIdentity(
-                        [
-                            new Claim(CallerIdentity.CallerClaimType, mapping.Identity.CallerId),
-                            new Claim(CallerIdentity.KeyIdClaimType, mapping.Identity.KeyId),
-                            .. clientId is not null
-                                ? new[] { new Claim(CallerIdentity.ClientIdClaimType, clientId) }
-                                : [],
-                        ],
-                        authenticationType: CredProxAuth.CallerTokenScheme,
-                        nameType: CallerIdentity.CallerClaimType,
-                        roleType: null));
-                    context.User = tokenPrincipal;
-                    context.Features.Set(mapping.Identity);
-                    context.Features.Set(new CallerRequestScopes(mapping.Scopes));
-                    context.Features.Set(new CallerTokenRequestMarker());
-                    return;
-                }
-                // Diagnosability (M39): name the refusal server-side; the problem+json
-                // body stays the generic 401 detail.
-                context.RequestServices
-                    .GetService<ILogger<CallerAuthenticationFeature>>()?
-                    .LogWarning(
-                        "Caller token refused ({Reason}); client id '{ClientId}'.",
-                        refusal,
-                        FirstClaimValue(tokenPrincipal, options.ClientClaimNames));
-            }
-        }
-
+        // Refused, or every authenticator saw no credential: the generic 401 (a refusal's
+        // reason is logged server-side by its authenticator, never in the response body).
         await state
             .AbortAsync(StatusCodes.Status401Unauthorized, "credprox.caller_unauthenticated",
-                tokenSchemeRegistered
-                    ? "A valid caller API key or caller token is required."
-                    : "A valid caller API key is required.")
+                RequirementText(context))
             .ConfigureAwait(false);
     }
 
-    private const string IssuedAtClaim = "iat";
-
-    // The JWT bearer handler's own default ClockSkew: rejecting a token this check
-    // still considers fresh while the handler accepts it would be its own surprise (M39/D).
-    private static readonly TimeSpan JwtBearerDefaultClockSkew = TimeSpan.FromMinutes(5);
-
-    // Raw "iat" in whole seconds — the caller-token scheme turns inbound claim mapping
-    // off, so the name and the value arrive exactly as the issuer wrote them. No parsable
-    // iat is no established freshness: fail closed while a limit is configured.
-    private static bool IsFresh(ClaimsPrincipal principal, TimeSpan maxAge)
+    // The caller-claims identity, published in one shape whichever authenticator won, so
+    // the caller policy's RequireClaim and the caller-name binding hold for every path.
+    // Its authentication type says CredProx authenticated this caller — which credential
+    // type won is the authenticators' business, not host middleware's.
+    private static ClaimsIdentity BuildCallerIdentity(CallerIdentity identity)
     {
-        var raw = principal.FindFirst(IssuedAtClaim)?.Value;
-        if (raw is null
-            || !long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var issuedAtSeconds))
-        {
-            return false;
-        }
-
-        var age = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(issuedAtSeconds);
-        // M39 (ADR-0004): a future iat is not freshness either — a negative age is inside
-        // every upper bound, so the skew gates both directions of the clock.
-        return age >= -JwtBearerDefaultClockSkew && age <= maxAge + JwtBearerDefaultClockSkew;
+        var clientId = identity.ClientId;
+        return new ClaimsIdentity(
+            [
+                new Claim(CallerIdentity.CallerClaimType, identity.CallerId),
+                new Claim(CallerIdentity.KeyIdClaimType, identity.KeyId),
+                .. clientId is not null
+                    ? new[] { new Claim(CallerIdentity.ClientIdClaimType, clientId) }
+                    : [],
+            ],
+            authenticationType: CredProxCallerAuthenticationType,
+            nameType: CallerIdentity.CallerClaimType,
+            roleType: null);
     }
 
-    // Client ids are log-safe (audit records them); the token itself is never read here.
-    private static string? FirstClaimValue(ClaimsPrincipal principal, IReadOnlyList<string> claimNames)
+    private const string CredProxCallerAuthenticationType = "CredProxCaller";
+
+    // "A valid caller API key or caller token is required." — composed over every
+    // registered authenticator's hint, in registration order, so the stage names what the
+    // host accepts without naming any credential type itself (ADR-0005).
+    private static string RequirementText(HttpContext context)
     {
-        foreach (var name in claimNames)
+        string? composed = null;
+        foreach (var authenticator in context.RequestServices.GetServices<ICallerAuthenticator>())
         {
-            var value = principal.FindFirst(name)?.Value;
-            if (!string.IsNullOrEmpty(value))
-            {
-                return value;
-            }
+            composed = composed is null
+                ? authenticator.CredentialRequirementHint
+                : composed + " or " + authenticator.CredentialRequirementHint;
         }
 
-        return null;
+        return composed is null
+            ? "A valid caller credential is required."
+            : "A valid " + composed + " is required.";
     }
 }

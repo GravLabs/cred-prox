@@ -21,7 +21,7 @@ internal static class CredProxRequestOptions
     /// <summary>
     /// The per-request <see cref="CredProxRequestState"/>, stashed by the transform
     /// provider so the response dispatcher at the end of the outbound pipeline reaches
-    /// this request's features (M20, plan §8.2).
+    /// this request's features.
     /// </summary>
     public static readonly HttpRequestOptionsKey<CredProxRequestState> RequestState =
         new("CredProx.RequestState");
@@ -29,7 +29,7 @@ internal static class CredProxRequestOptions
 
 /// <summary>
 /// The built-in <see cref="Stage.AttachCredential"/> feature
-/// (see <c>docs/credprox-plan.md</c> §3.2/§3.4): resolves the route's
+/// : resolves the route's
 /// <c>CredProx.Credential</c> binding, admits the partition (the credential's own
 /// allow-list gates its endpoint, secrets and cache key; otherwise the destination's
 /// admitted value is reused), obtains the value through the token cache, and attaches it
@@ -260,7 +260,7 @@ public sealed class CredentialAttachFeature : IRequestFeature
     }
 
     /// <summary>
-    /// M19 URL hygiene (§8.3): a provider-supplied authorize URL is surfaced to the caller
+    /// URL hygiene: a provider-supplied authorize URL is surfaced to the caller
     /// only as an absolute http(s) URL without embedded credentials — a browser-safe entry
     /// point for the consent flow. Anything else (relative references, <c>javascript:</c>
     /// or other non-browser schemes, userinfo such as <c>https://user:***@idp/</c>) is
@@ -277,7 +277,7 @@ public sealed class CredentialAttachFeature : IRequestFeature
     /// <summary>
     /// Reads the inbound bearer token (scheme stripped). A present-but-non-Bearer
     /// <c>Authorization</c> header counts as no token: delegated routes take bearer
-    /// credentials and nothing else (§3.6).
+    /// credentials and nothing else.
     /// </summary>
     private static string? TryReadBearerToken(HttpContext context)
     {

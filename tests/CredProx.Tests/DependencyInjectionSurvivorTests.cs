@@ -1,3 +1,4 @@
+using System.Net.Http;
 using CredProx;
 using CredProx.Abstractions;
 using Microsoft.AspNetCore.Authorization;
@@ -52,7 +53,7 @@ public sealed class DependencyInjectionSurvivorTests
         AssertGuard(
             () => CredProxServiceCollectionExtensions.AddCredProxBuiltInCredentials(null!), "services");
         AssertGuard(
-            () => CredProxServiceCollectionExtensions.AddCredProxCallerAuthentication(null!, config), "services");
+            () => CredProxCallerKeyServiceCollectionExtensions.AddCredProxCallerAuthentication(null!, config), "services");
         AssertGuard(
             () => services.AddCredProxCallerAuthentication(null!), "configuration");
         AssertGuard(
@@ -60,15 +61,15 @@ public sealed class DependencyInjectionSurvivorTests
         AssertGuard(
             () => services.AddCredProxAudit(null!), "configuration");
         AssertGuard(
-            () => CredProxServiceCollectionExtensions.AddCredProxHealthProbes(null!, config), "services");
+            () => CredProxOperationsServiceCollectionExtensions.AddCredProxHealthProbes(null!, config), "services");
         AssertGuard(
             () => services.AddCredProxHealthProbes(null!), "configuration");
         AssertGuard(
-            () => CredProxServiceCollectionExtensions.AddCredProxThrottling(null!, config), "services");
+            () => CredProxOperationsServiceCollectionExtensions.AddCredProxThrottling(null!, config), "services");
         AssertGuard(
             () => services.AddCredProxThrottling(null!), "configuration");
         AssertGuard(
-            () => CredProxServiceCollectionExtensions.AddCredProxResilience(null!, config), "services");
+            () => CredProxOperationsServiceCollectionExtensions.AddCredProxResilience(null!, config), "services");
         AssertGuard(
             () => services.AddCredProxResilience(null!), "configuration");
     }
@@ -97,6 +98,9 @@ public sealed class DependencyInjectionSurvivorTests
     {
         var services = new ServiceCollection();
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxHmac(); // the Hmac validator rides the add-on's registration
+        services.AddCredProxLoginExchange(); // the LoginExchange validator rides its add-on's registration
+        services.AddCredProxOAuth(); // the OAuth validators ride the add-on's registration
         using var provider = services.BuildServiceProvider();
 
         Assert.NotNull(provider.GetService<IValidateOptions<OAuthClientCredentialsOptions>>());
@@ -105,6 +109,36 @@ public sealed class DependencyInjectionSurvivorTests
         Assert.NotNull(provider.GetService<IValidateOptions<JwtAssertionOptions>>());
         Assert.NotNull(provider.GetService<IValidateOptions<HmacOptions>>());
         Assert.NotNull(provider.GetService<IValidateOptions<TokenExchangeOptions>>());
+    }
+
+    // ---- add-on self-sufficiency (slice-4 finding F-1) ----
+
+    [Fact]
+    public void LoginExchangeRegistration_OwnsItsTokenClient()
+    {
+        // The provider creates its token clients through IHttpClientFactory, and this add-on
+        // must register that factory itself. This stack deliberately contains no
+        // AddReverseProxy, no AddCredProxOAuth and no explicit AddHttpClient call: deleting
+        // AddCredProxLoginExchange's own AddHttpClient(CredProxHttpClientNames.TokenClient)
+        // line reddens this cell at the registry resolution with "Unable to resolve service
+        // for type 'IHttpClientFactory'", not just the slow consumer cell.
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["CredProx:Credentials:le:Type"] = "LoginExchange",
+                ["CredProx:Credentials:le:LoginEndpoint"] = "https://vendor.example/login",
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(config);
+        services.AddCredProxLoginExchange();
+        services.AddCredProxCredentials(config);
+        using var provider = services.BuildServiceProvider();
+
+        Assert.NotNull(provider.GetRequiredService<CredentialRegistry>());
+        Assert.NotNull(provider.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(CredProxHttpClientNames.TokenClient));
     }
 
     // ---- caller authentication wiring ----

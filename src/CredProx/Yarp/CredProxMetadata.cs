@@ -5,11 +5,11 @@ using Yarp.ReverseProxy.Model;
 namespace CredProx;
 
 /// <summary>
-/// The YARP metadata keys that reference CredProx configuration by name
-/// (see <c>docs/credprox-plan.md</c> §3.2): route metadata <c>CredProx.Credential</c> and
+/// The YARP metadata keys that reference CredProx configuration by name:
+/// route metadata <c>CredProx.Credential</c> and
 /// <c>CredProx.Destination</c>, cluster metadata <c>CredProx.Connection</c>. Metadata is
 /// flat, so it only references the structured <c>CredProx</c> sections; every reference
-/// must resolve at startup (§3.3).
+/// must resolve at startup.
 /// </summary>
 [Experimental("CREDPROX001")]
 public static class CredProxMetadata
@@ -32,7 +32,7 @@ public static class CredProxMetadata
     public const string Caller = "CredProx.Caller";
 
     /// <summary>
-    /// Route metadata opting the route out of vendor error normalisation (M24, §8.5):
+    /// Route metadata opting the route out of vendor error normalisation:
     /// with the value <c>"off"</c> (case-insensitive) the route's vendor error bodies
     /// flow to the caller byte-identical, exactly as the vendor writes them. Any other
     /// value — including a misspelling — normalises like every other route; check the

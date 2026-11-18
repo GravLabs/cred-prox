@@ -3,15 +3,15 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx.Abstractions;
 
 /// <summary>
-/// Creates <see cref="IPartitionSource"/> instances for one partition-spec scheme
-/// (see <c>docs/credprox-plan.md</c> §3.2: <c>"Partition": "header:X-API-Env"</c>).
+/// Creates <see cref="IPartitionSource"/> instances for one partition-spec scheme,
+/// for example <c>"Partition": "header:X-API-Env"</c>.
 /// The core binds a destination's or credential's <c>Partition</c> value by splitting it
 /// at the first <c>:</c> into a scheme and an argument, then asks the factory registered
-/// for that scheme to create the source. Built-ins in 0.3: <c>header:</c> (M4);
-/// <c>claim:</c>, <c>caller:</c> and <c>route:</c> arrive with caller identity (M6).
+/// for that scheme to create the source. Built-ins: <c>header:</c>,
+/// <c>claim:</c>, <c>caller:</c> and <c>route:</c> (the last three with caller identity).
 /// </summary>
 /// <remarks>
-/// Factories are registered explicitly in DI (§3.5 rule 6). A configuration value naming
+/// Factories are registered explicitly in DI. A configuration value naming
 /// an unregistered scheme fails startup — there is no fallback source.
 /// </remarks>
 [Experimental("CREDPROX001")]

@@ -7,23 +7,23 @@ namespace CredProx;
 
 /// <summary>
 /// The <see cref="ISecretAccessor"/> a plugin receives: it resolves only the <c>secret:</c>
-/// references named in that plugin's own configuration, never anything else
-/// (see <c>docs/credprox-plan.md</c> §3.5 rule 4). Error messages name the reference, never
+/// references named in that plugin's own configuration, never anything else.
+/// Error messages name the reference, never
 /// a secret value.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A declared name may itself contain <c>{placeholder}</c> segments — the plan's cayuse
-/// example declares <c>secret:cayuse-{partition}-user</c> (§3.2). Such a declaration admits
+/// A declared name may itself contain <c>{placeholder}</c> segments — for example
+/// <c>secret:cayuse-{partition}-user</c>. Such a declaration admits
 /// any name matching the declared shape, where each placeholder matches any brace-free
 /// text; the plugin's scope is the shape it declares, so placeholders should stay narrow
 /// (a declaration of <c>secret:{partition}</c> would admit every name). Caller-controlled
-/// partition values are additionally bounded by the destination partition allow-list
-/// (§3.4), so the effective set stays config-bounded.
+/// partition values are additionally bounded by the destination partition allow-list,
+/// so the effective set stays config-bounded.
 /// </para>
 /// <para>
 /// The allow-list is a snapshot taken at construction: a configuration reload that adds a
-/// reference to the plugin's section takes effect when the accessor is recreated — the M4
+/// reference to the plugin's section takes effect when the accessor is recreated — the
 /// plugin wiring recreates accessors on the secret source's change token. Secret values
 /// themselves are read live and reload immediately.
 /// </para>

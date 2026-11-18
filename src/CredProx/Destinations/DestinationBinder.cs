@@ -7,11 +7,11 @@ namespace CredProx;
 
 /// <summary>
 /// Binds every <c>CredProx:Destinations:&lt;name&gt;</c> section at startup into a
-/// <see cref="DestinationRegistry"/> (see <c>docs/credprox-plan.md</c> §3.2/§3.3): the
+/// <see cref="DestinationRegistry"/>: the
 /// template must be an absolute HTTP(S) address, and a destination that resolves a
 /// partition must declare a registered partition source and a non-empty allow-list —
 /// each problem is one clear <see cref="OptionsValidationException"/>, never a value.
-/// Unknown keys under a destination are rejected too (M17, §3.3): the same rule at
+/// Unknown keys under a destination are rejected too: the same rule at
 /// startup and on rebind, where a failed rebind keeps the previous registry.
 /// </summary>
 [Experimental("CREDPROX001")]

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# E10 in stub mode (plan §6): the conformance suite the plugin ships, then the full
-# proxy path against in-process vendor stubs — no Docker, no vendor account.
+# Offline check: the sample's smoke cells live in the shared test project
+# (tests/CredProx.SampleSmokes, Trait Sample=CustomPlugin) — this script is the
+# per-sample entry point CI keeps calling.
 set -euo pipefail
-cd "$(dirname "$0")"
-
-dotnet run -- --selftest
-dotnet run -- --smoke
+cd "$(dirname "$0")/../.."
+dotnet test tests/CredProx.SampleSmokes --filter "Sample=CustomPlugin|Sample=Stamp"

@@ -8,7 +8,7 @@
 # anywhere near the scratch tree. Isolated NUGET_PACKAGES; http-cache cleared.
 #
 # Usage:  consumer-compat.sh [cell ...]      (no args = all cells)
-# Cells:  web webapi auth container net8 net9 drift testing
+# Cells:  web webapi auth container net8 net9 drift testing keys keytokens hmac loginexchange oauth operations
 # Results append to $M32_SCRATCH/results.tsv:  cell<TAB>PASS|FAIL<TAB>detail
 #
 # NO pipefail (early-exit grep would SIGPIPE the recorder); PASS/FAIL is recorded per
@@ -16,15 +16,37 @@
 set -u
 
 FEED=${M32_FEED:-credprox}
-VERSION=${M32_VERSION:-0.8.2}
-SCRATCH=${M32_SCRATCH:-/tmp/m32-consumer-scratch}
-RESULTS=$SCRATCH/results.tsv
+# Default version is the repo's own — the cells add packages that must exist in the
+# built feed; a stale hard-coded pin makes every dotnet package add fail with NU1102.
+VERSION=${M32_VERSION:-$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' "$(dirname "$0")/../build/Version.props" | head -1)}
 REPO=${M32_REPO:-$(cd "$(dirname "$0")/.." && pwd)}
+# Default scratch lives in the checkout (artifacts/ is gitignored), never on tmpfs:
+# a tmpfs quota can fabricate FAILs on disk-hungry cells. It is a dedicated
+# subdirectory because each cell wipes and recreates its own dir under SCRATCH.
+SCRATCH=${M32_SCRATCH:-$REPO/artifacts/consumer-compat}
+RESULTS=$SCRATCH/results.tsv
 WIREMOCK_IMAGE=wiremock/wiremock:3.9.2   # same stand-in as samples/QuickStart
 export NUGET_PACKAGES=$SCRATCH/pkg
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 mkdir -p "$SCRATCH"
+# Scratch is its own central-package-management boundary. Without this file a cell dir
+# inside the checkout discovers the repo-root Directory.Packages.props: dotnet package
+# add then rewrites THAT file (stripping its final newline) and cell restores inherit
+# the repo's pins. Cells that want CPM (drift) carry their own closer props file.
+cat > "$SCRATCH/Directory.Packages.props" << 'EOF'
+<Project>
+  <PropertyGroup><ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally></PropertyGroup>
+</Project>
+EOF
+# Same boundary for Directory.Build.props: without this closer a default (in-checkout)
+# scratch inherits the repo's library policy — TreatWarningsAsErrors + GenerateDocumentationFile
+# hit the scaffold with CS1591, and the TargetFrameworks leak makes a net8/net9 cell restore
+# against net10.0 so its NU1202 pin never evaluates. This file must stay an empty <Project />:
+# it only stops the walk-up.
+cat > "$SCRATCH/Directory.Build.props" << 'EOF'
+<Project />
+EOF
 : > "$RESULTS"
 dotnet nuget locals http-cache --clear >/dev/null 2>&1 || true
 
@@ -51,11 +73,53 @@ stop_wiremock() { docker rm -f m32-wm >/dev/null 2>&1 || true; }
 
 # --- consumer app templates ----------------------------------------------------
 
+# Pin every scaffolded consumer to the repo's built feed: <clear /> drops the machine's
+# inherited package sources — a configured `credprox` feed carrying RELEASED CredProx
+# packages wins version ties against the locally built feed and silently tests released
+# bytes instead of these packages.
+write_local_feed_config() { # dir [extra-xml-inside-configuration]
+  local dir=$1 extra=${2:-}
+  {
+    printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<configuration>'
+    cat << EOF
+  <packageSources>
+    <clear />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+    <add key="credprox-build" value="$REPO/artifacts/packages" />
+  </packageSources>
+EOF
+    # The scaffold declares its own mapping so it stays self-consistent in any folder:
+    # a scratch inside the checkout inherits the repo-root NuGet.Config mapping (CPM's
+    # NU1507 guard), and its CredProx* -> credprox-local pattern references a source
+    # this cleared config does not define, which would NU1100 every dotnet package add
+    # (source lookup stops at this file; the mapping does not). Mapping CredProx* to
+    # credprox-build is the slice 3 cold-cache rule anyway: the built feed, never the
+    # released bytes. A caller passing its own mapping (the drift cell) opts out.
+    case "$extra" in
+      *packageSourceMapping*) ;;
+      *) cat << 'EOF'
+  <packageSourceMapping>
+    <packageSource key="nuget.org">
+      <package pattern="*" />
+    </packageSource>
+    <packageSource key="credprox-build">
+      <package pattern="CredProx*" />
+    </packageSource>
+  </packageSourceMapping>
+EOF
+        ;;
+    esac
+    [ -n "$extra" ] && printf '%s\n' "$extra"
+    printf '%s\n' '</configuration>'
+  } > "$dir/NuGet.config"
+}
+
 # The minimal-API host shape from samples/QuickStart (plan 6 E1), rebuilt here from
 # packages only: static key credential, secret from configuration, /echo route.
 scaffold_web() { # dir [extra-csproj-lines]
   local dir=$1 extra=${2:-}
   rm -rf "$dir" && mkdir -p "$dir"
+  write_local_feed_config "$dir"
   cat > "$dir/app.csproj" << 'EOF'
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
@@ -118,8 +182,14 @@ add_credprox_pkg() { # dir pkg...
   # without it fails restore and the cell records FAIL honestly. The URL never
   # appears in this file either way.
   local dir=$1; shift
+  local p out code
   for p in "$@"; do
-    (cd "$dir" && dotnet package add "$p" --version "$VERSION" >/dev/null) || return 1
+    # Keep the add output: a swallowed NU* error makes a FAIL cell undiagnosable.
+    # Same shape as the net8/net9 cells' add.log capture.
+    out=$(cd "$dir" && dotnet package add "$p" --version "$VERSION" 2>&1)
+    code=$?
+    printf '%s\n' "$out" > "$dir/add-$p.log"
+    if [ $code -ne 0 ]; then return 1; fi
   done
 }
 
@@ -178,6 +248,7 @@ cell_webapi() {
   local d=$SCRATCH/webapi
   rm -rf "$d" && mkdir -p "$d"
   (cd "$d" && dotnet new webapi --no-openapi -o . >/dev/null 2>&1) || { record webapi FAIL "template"; return; }
+  write_local_feed_config "$d"
   add_credprox_pkg "$d" CredProx || { record webapi FAIL "package add"; return; }
   # controllers stay; CredProx routes join them
   python3 - "$d/Program.cs" << 'PYEOF'
@@ -274,21 +345,19 @@ cell_drift() {
 </Project>
 EOF
   sed -i "s/VERSION/$VERSION/g" "$d/Directory.Packages.props"
-  # package source mapping by source KEY (URLs stay in the user-level config, never here):
-  # this is the documented NU1507 fix for CPM consumers on a private feed plus nuget.org.
-  cat > "$d/NuGet.config" << 'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSourceMapping>
+  # CPM over two sources triggers NU1507 unless every source is mapped by KEY. The
+  # mapping goes through the same helper so the cleared candidate feed stays declared,
+  # and CredProx* maps to credprox-build — the built feed. Mapping it to the machine's
+  # `credprox` key instead puts RELEASED bytes in scope and a cold-cache run cannot
+  # tell the two apart (the slice 3 cold-cache lesson).
+  write_local_feed_config "$d" '  <packageSourceMapping>
     <packageSource key="nuget.org">
       <package pattern="*" />
     </packageSource>
-    <packageSource key="credprox">
+    <packageSource key="credprox-build">
       <package pattern="CredProx*" />
     </packageSource>
-  </packageSourceMapping>
-</configuration>
-EOF
+  </packageSourceMapping>'
   python3 - "$d/app.csproj" << 'PYEOF'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
@@ -382,6 +451,477 @@ curl_check_mw() {
   curl -sf http://localhost:8088/__admin/requests 2>/dev/null | grep -q 'X-Consumer-Middleware'
 }
 
+# --- multi-package add-on cells (ADR-0005) ----------------------------------------
+# The add-ons ship only in the locally built artifacts/packages feed until the next
+# release, so these two cells restore from that directory: no remote source is asked
+# for a package id it has never carried.
+
+add_local_feed() { # dir — the repo's built feed, and nothing else (see write_local_feed_config)
+  local dir=$1
+  write_local_feed_config "$dir"
+}
+
+keys_smoke() { # cellid dir — valid key 200, missing and wrong key 401, key value never upstream
+  local id=$1 d=$2 pid code nocode badcode journal
+  run_app "$d"
+  pid=$!
+  for _ in $(seq 1 30); do
+    kill -0 "$pid" 2>/dev/null || { kill "$pid" 2>/dev/null; record "$id" FAIL "proxy exited early (see $d/run.log)"; return 1; }
+    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-CredProx-Key: consumer-keys-cell' \
+      http://127.0.0.1:5080/echo/headers 2>/dev/null || true)
+    [ "$code" = "200" ] && break
+    sleep 1
+  done
+  nocode=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5080/echo/headers 2>/dev/null || true)
+  badcode=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-CredProx-Key: wrong-value-entirely' \
+    http://127.0.0.1:5080/echo/headers 2>/dev/null || true)
+  journal=$(curl -sf http://localhost:8088/__admin/requests 2>/dev/null || true)
+  kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  if [ "$code" != "200" ]; then record "$id" FAIL "valid key got $code (see $d/run.log)"; return 1; fi
+  if [ "$nocode" != "401" ] || [ "$badcode" != "401" ]; then
+    record "$id" FAIL "missing key got $nocode, wrong key got $badcode, expected 401"; return 1
+  fi
+  if printf '%s' "$journal" | grep -q 'consumer-keys-cell'; then
+    record "$id" FAIL "caller key reached the upstream journal"; return 1
+  fi
+  return 0
+}
+
+cell_keys() {
+  local d=$SCRATCH/keys
+  scaffold_web "$d"
+  add_local_feed "$d"
+  add_credprox_pkg "$d" CredProx CredProx.CallerKeys || { record keys FAIL "package add"; return; }
+  python3 - "$d/Program.cs" << 'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
+assert tail3 in s, "scaffold tail not found"
+s = s.replace(tail3, """builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+{
+    ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+    ["CredProx:Callers:app-a:Keys:0:KeyHash"] =
+        "sha256:ede2d53fa6c1f60d7bd8df67f87a9093931ac51ab01df64315f5f1fc88374003",
+});
+builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
+var app = builder.Build();
+app.MapReverseProxy();
+app.Run();
+""")
+p.write_text(s)
+PYEOF
+  [ $? -ne 0 ] && { record keys FAIL "program rewrite"; return; }
+  build_warnaserror "$d" || { record keys FAIL "build, see $d/build.log"; return; }
+  start_wiremock || { record keys FAIL "wiremock start"; return; }
+  keys_smoke keys "$d" || { stop_wiremock; return; }
+  stop_wiremock
+  record keys PASS "core+CallerKeys: valid key 200, missing/wrong key 401, key value never upstream"
+}
+
+cell_keytokens() {
+  local d=$SCRATCH/keytokens
+  scaffold_web "$d"
+  add_local_feed "$d"
+  add_credprox_pkg "$d" CredProx CredProx.CallerKeys CredProx.CallerTokens \
+    || { record keytokens FAIL "package add"; return; }
+  # One host registering BOTH add-ons: the shared caller policy must arrive once and
+  # the key path must still work with the token scheme registered alongside.
+  python3 - "$d/Program.cs" << 'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
+assert tail3 in s, "scaffold tail not found"
+s = s.replace(tail3, """builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+{
+    ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
+    ["CredProx:Callers:app-a:Keys:0:KeyHash"] =
+        "sha256:ede2d53fa6c1f60d7bd8df67f87a9093931ac51ab01df64315f5f1fc88374003",
+    ["CredProx:CallerToken:Authority"] = "https://issuer.invalid/",
+    ["CredProx:CallerToken:Audience"] = "consumer-compat",
+});
+builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
+builder.Services.AddCredProxCallerTokenAuthentication(builder.Configuration);
+var app = builder.Build();
+app.MapReverseProxy();
+app.Run();
+""")
+p.write_text(s)
+PYEOF
+  [ $? -ne 0 ] && { record keytokens FAIL "program rewrite"; return; }
+  build_warnaserror "$d" || { record keytokens FAIL "build, see $d/build.log"; return; }
+  start_wiremock || { record keytokens FAIL "wiremock start"; return; }
+  keys_smoke keytokens "$d" || { stop_wiremock; return; }
+  stop_wiremock
+  record keytokens PASS "core+CallerKeys+CallerTokens coexist; key path green (token path not exercised)"
+}
+
+cell_hmac() {
+  local d=$SCRATCH/hmac
+  scaffold_web "$d"
+  add_local_feed "$d"
+  add_credprox_pkg "$d" CredProx CredProx.Hmac || { record hmac FAIL "package add"; return; }
+  cat > "$d/appsettings.json" << 'EOF'
+{
+  "CredProx": {
+    "Destinations": { "sign": { "Template": "http://localhost:5080" } },
+    "Credentials": {
+      "signer": {
+        "Type": "Hmac",
+        "Secret": "secret:hmac-key",
+        "Algorithm": "SHA256",
+        "Encoding": "HexLower",
+        "Components": [ "method", "path", "timestamp", "bodyHash" ],
+        "Separator": "\n",
+        "TimestampFormat": "UnixSeconds",
+        "SignatureHeader": "X-Signature",
+        "TimestampHeader": "X-Timestamp",
+        "BufferBody": true,
+        "MaxBodyBytes": 1048576
+      },
+      "signer-small": {
+        "Type": "Hmac",
+        "Secret": "secret:hmac-key",
+        "Algorithm": "SHA256",
+        "Encoding": "HexLower",
+        "Components": [ "method", "path", "timestamp", "bodyHash" ],
+        "Separator": "\n",
+        "TimestampFormat": "UnixSeconds",
+        "SignatureHeader": "X-Signature",
+        "TimestampHeader": "X-Timestamp",
+        "BufferBody": true,
+        "MaxBodyBytes": 16
+      }
+    },
+    "Secrets": { "hmac-key": "cc-shared-key" }
+  },
+  "ReverseProxy": {
+    "Routes": {
+      "api": {
+        "ClusterId": "sign",
+        "Match": { "Path": "/api/{**catch-all}" },
+        "Transforms": [ { "PathRemovePrefix": "/api" } ],
+        "Metadata": { "CredProx.Destination": "sign", "CredProx.Credential": "signer" }
+      },
+      "small": {
+        "ClusterId": "sign",
+        "Match": { "Path": "/small/{**catch-all}" },
+        "Transforms": [ { "PathRemovePrefix": "/small" } ],
+        "Metadata": { "CredProx.Destination": "sign", "CredProx.Credential": "signer-small" }
+      }
+    },
+    "Clusters": {
+      "sign": { "Destinations": { "sign": { "Address": "http://localhost:5080/" } } }
+    }
+  }
+}
+EOF
+  python3 - "$d/Program.cs" << 'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+s = s.replace("builder.Services.AddCredProxBuiltInCredentials();",
+              "builder.Services.AddCredProxBuiltInCredentials();\nbuilder.Services.AddCredProxHmac();")
+tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
+assert tail3 in s, "scaffold tail not found"
+s = s.replace(tail3, """var app = builder.Build();
+// The stub vendor, same shape as samples/HmacSigning: an INDEPENDENT verifier of the
+// documented canonical layout, sharing no code with CredProx.
+app.Map("/verify", async (HttpContext context) =>
+{
+    using var reader = new StreamReader(context.Request.Body, Encoding.UTF8);
+    var body = await reader.ReadToEndAsync();
+    var canonical = string.Join('\\n', context.Request.Method, context.Request.Path,
+        context.Request.Headers["X-Timestamp"].ToString(),
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(body))).ToLowerInvariant());
+    var expected = Convert.ToHexString(HMACSHA256.HashData(
+        Encoding.UTF8.GetBytes("cc-shared-key"), Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    var ok = context.Request.Headers["X-Signature"].ToString() == expected;
+    context.Response.StatusCode = ok ? 200 : 401;
+    await context.Response.WriteAsync(ok ? "signature valid" : "signature invalid");
+});
+app.MapReverseProxy();
+app.Run();
+""")
+s = "using System.Security.Cryptography;\nusing System.Text;\n" + s
+p.write_text(s)
+PYEOF
+  [ $? -ne 0 ] && { record hmac FAIL "program rewrite"; return; }
+  build_warnaserror "$d" || { record hmac FAIL "build, see $d/build.log"; return; }
+  run_app "$d"; local pid=$! detail="proxy never answered" signed overcap
+  for _ in $(seq 1 30); do
+    if ! kill -0 "$pid" 2>/dev/null; then detail="proxy exited early (see $d/run.log)"; break; fi
+    signed=$(curl -sf -X POST -d '{"order":42}' http://127.0.0.1:5080/api/verify 2>/dev/null || true)
+    # no -f here: the expected answer IS a 413, and curl -f would swallow the body and the -w line
+    overcap=$(python3 -c "print('x'*100, end='')" | curl -s -X POST --data-binary @- -w '\nHTTP:%{http_code}' http://127.0.0.1:5080/small/verify 2>/dev/null || true)
+    [ -n "$signed$overcap" ] && detail="verify/cap assertions not matched (see $d/run.log)"
+    if printf '%s' "$signed" | grep -q 'signature valid' \
+       && printf '%s' "$overcap" | grep -q 'credprox.body_too_large_to_sign' \
+       && printf '%s' "$overcap" | grep -q 'HTTP:413'; then
+      kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+      record hmac PASS "core+CredProx.Hmac: independent verifier accepted the signature, cap answered 413"
+      return
+    fi
+    sleep 1
+  done
+  kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  record hmac FAIL "$detail"
+}
+cell_loginexchange() {
+  local d=$SCRATCH/loginexchange
+  scaffold_web "$d"
+  add_local_feed "$d"
+  add_credprox_pkg "$d" CredProx CredProx.LoginExchange || { record loginexchange FAIL "package add"; return; }
+  cat > "$d/appsettings.json" << 'EOF'
+{
+  "CredProx": {
+    "Destinations": { "svc": { "Template": "http://localhost:5080" } },
+    "Credentials": {
+      "le": {
+        "Type": "LoginExchange",
+        "LoginEndpoint": "http://localhost:5080/login",
+        "Method": "POST",
+        "Form": { "User": "cc-svc", "Password": "secret:cc-password" },
+        "Response": "JsonPath",
+        "ResponseField": "sessionId",
+        "Lifetime": "01:00:00",
+        "Partition": { "From": "header:X-API-Env", "Allowed": ["uat"] }
+      }
+    },
+    "Secrets": { "cc-password": "demo-cc-password" }
+  },
+  "ReverseProxy": {
+    "Routes": {
+      "svc": {
+        "ClusterId": "svc",
+        "Match": { "Path": "/svc/{**catch-all}" },
+        "Transforms": [ { "PathRemovePrefix": "/svc" } ],
+        "Metadata": { "CredProx.Destination": "svc", "CredProx.Credential": "le" }
+      }
+    },
+    "Clusters": { "svc": { "Destinations": { "svc": { "Address": "http://localhost:5080/" } } } }
+  }
+}
+EOF
+  python3 - "$d/Program.cs" << 'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+s = s.replace("builder.Services.AddCredProxBuiltInCredentials();",
+              "builder.Services.AddCredProxBuiltInCredentials();\nbuilder.Services.AddCredProxLoginExchange();")
+tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
+assert tail3 in s, "scaffold tail not found"
+s = s.replace(tail3, """var app = builder.Build();
+// The vendor stub: a login endpoint handing out a session for the right credentials,
+// and a protected endpoint reporting only whether a session arrived — the password
+// never leaves the proxy, and the session value never reaches the caller's echo.
+// the form is read by hand: the minimal-API binder for a positional record answers
+// 415 to a plain form POST in this template (no antiforgery metadata on the scaffold).
+app.MapPost("/login", async (HttpContext ctx) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var ok = form["User"] == "cc-svc" && form["Password"] == "demo-cc-password";
+    return ok ? Results.Json(new { sessionId = "sess-cc-live" }) : Results.StatusCode(401);
+});
+app.Map("/echo", (HttpContext ctx) =>
+    ctx.Request.Headers.Authorization.Count > 0 ? "auth-present" : "auth-missing");
+app.MapReverseProxy();
+app.Run();
+""")
+p.write_text(s)
+PYEOF
+  [ $? -ne 0 ] && { record loginexchange FAIL "program rewrite"; return; }
+  build_warnaserror "$d" || { record loginexchange FAIL "build, see $d/build.log"; return; }
+  run_app "$d"; local pid=$! detail="proxy never answered" uat prod
+  for _ in $(seq 1 30); do
+    if ! kill -0 "$pid" 2>/dev/null; then detail="proxy exited early (see $d/run.log)"; break; fi
+    uat=$(curl -sf -H 'X-API-Env: uat' http://127.0.0.1:5080/svc/echo 2>/dev/null || true)
+    prod=$(curl -s -H 'X-API-Env: prod' http://127.0.0.1:5080/svc/echo -w '\nHTTP:%{http_code}' 2>/dev/null || true)
+    [ -n "$uat$prod" ] && detail="partition assertions not matched (see $d/run.log)"
+    if printf '%s' "$uat" | grep -q '^auth-present$' \
+       && printf '%s' "$prod" | grep -q 'HTTP:400' \
+       && printf '%s' "$prod" | grep -q 'credprox.partition_not_allowed'; then
+      kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+      record loginexchange PASS "core+CredProx.LoginExchange: login session attached, blocked partition refused before any vendor call"
+      return
+    fi
+    sleep 1
+  done
+  kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  record loginexchange FAIL "$detail"
+}
+cell_oauth() {
+  local d=$SCRATCH/oauth
+  scaffold_web "$d"
+  add_local_feed "$d"
+  add_credprox_pkg "$d" CredProx CredProx.OAuth || { record oauth FAIL "package add"; return; }
+  cat > "$d/appsettings.json" << 'EOF'
+{
+  "CredProx": {
+    "Destinations": { "svc": { "Template": "http://localhost:5080" } },
+    "Credentials": {
+      "oa": {
+        "Type": "OAuthClientCredentials",
+        "TokenEndpoint": "http://localhost:5080/token",
+        "ClientAuthentication": "FormPost",
+        "ClientId": "cc-svc",
+        "ClientSecret": "secret:cc-client-secret",
+        "Scope": "cc-scope"
+      },
+      "bad": {
+        "Type": "OAuthClientCredentials",
+        "TokenEndpoint": "http://localhost:5080/token",
+        "ClientAuthentication": "FormPost",
+        "ClientId": "cc-svc",
+        "ClientSecret": "secret:cc-wrong-secret",
+        "Scope": "cc-scope"
+      }
+    },
+    "Secrets": { "cc-client-secret": "demo-cc-secret", "cc-wrong-secret": "demo-wrong" }
+  },
+  "ReverseProxy": {
+    "Routes": {
+      "svc": {
+        "ClusterId": "svc",
+        "Match": { "Path": "/svc/{**catch-all}" },
+        "Transforms": [ { "PathRemovePrefix": "/svc" } ],
+        "Metadata": { "CredProx.Destination": "svc", "CredProx.Credential": "oa" }
+      },
+      "bad": {
+        "ClusterId": "svc",
+        "Match": { "Path": "/bad/{**catch-all}" },
+        "Transforms": [ { "PathRemovePrefix": "/bad" } ],
+        "Metadata": { "CredProx.Destination": "svc", "CredProx.Credential": "bad" }
+      }
+    },
+    "Clusters": { "svc": { "Destinations": { "svc": { "Address": "http://localhost:5080/" } } } }
+  }
+}
+EOF
+  python3 - "$d/Program.cs" << 'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+s = s.replace("builder.Services.AddCredProxBuiltInCredentials();",
+              "builder.Services.AddCredProxBuiltInCredentials();\nbuilder.Services.AddCredProxOAuth();")
+tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
+assert tail3 in s, "scaffold tail not found"
+s = s.replace(tail3, """var app = builder.Build();
+// The vendor stub: a token endpoint handing out a bearer token for the right client
+// credentials, and a protected endpoint reporting only whether a token arrived — the
+// client secret never leaves the proxy, and the token value never reaches the caller's
+// echo. the form is read by hand: the minimal-API binder for a positional record answers
+// 415 to a plain form POST in this template (no antiforgery metadata on the scaffold).
+app.MapPost("/token", async (HttpContext ctx) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var ok = form["grant_type"] == "client_credentials"
+        && form["client_id"] == "cc-svc"
+        && form["client_secret"] == "demo-cc-secret";
+    return ok
+        ? Results.Json(new { access_token = "cc-token-live", token_type = "Bearer", expires_in = 3600 })
+        : Results.Json(new { error = "invalid_client" }, statusCode: 401);
+});
+app.Map("/echo", (HttpContext ctx) =>
+    ctx.Request.Headers.Authorization.Count > 0 ? "auth-present" : "auth-missing");
+app.MapReverseProxy();
+app.Run();
+""")
+p.write_text(s)
+PYEOF
+  [ $? -ne 0 ] && { record oauth FAIL "program rewrite"; return; }
+  build_warnaserror "$d" || { record oauth FAIL "build, see $d/build.log"; return; }
+  run_app "$d"; local pid=$! detail="proxy never answered" ok refused
+  for _ in $(seq 1 30); do
+    if ! kill -0 "$pid" 2>/dev/null; then detail="proxy exited early (see $d/run.log)"; break; fi
+    ok=$(curl -sf http://127.0.0.1:5080/svc/echo 2>/dev/null || true)
+    # no -f here: the expected answer IS a 502, and curl -f would swallow the body and the -w line
+    refused=$(curl -s http://127.0.0.1:5080/bad/echo -w '\nHTTP:%{http_code}' 2>/dev/null || true)
+    [ -n "$ok$refused" ] && detail="token/refusal assertions not matched (see $d/run.log)"
+    if printf '%s' "$ok" | grep -q '^auth-present$' \
+       && printf '%s' "$refused" | grep -q 'credprox.credential_unavailable' \
+       && printf '%s' "$refused" | grep -q 'HTTP:502'; then
+      kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+      record oauth PASS "core+CredProx.OAuth: bearer token attached from the token endpoint, refused client answered 502 without reaching upstream"
+      return
+    fi
+    sleep 1
+  done
+  kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  record oauth FAIL "$detail"
+}
+# core + CredProx.Operations: the consumer story of the operations split — the host
+# configures Throttling, Resilience and Health and calls the three Add methods from the
+# package; the app boots (the startup refusal stays silent exactly when the features are
+# registered), the static credential attaches through the throttle+resilience pipeline,
+# and /health reports the credential probes' first round (which runs at startup).
+cell_operations() {
+  local d=$SCRATCH/operations
+  scaffold_web "$d"
+  add_local_feed "$d"
+  add_credprox_pkg "$d" CredProx CredProx.Operations || { record operations FAIL "package add"; return; }
+  cat > "$d/appsettings.json" << 'EOF'
+{
+  "CredProx": {
+    "Destinations": { "svc": { "Template": "http://localhost:5080" } },
+    "Credentials": {
+      "echo-key": { "Type": "StaticKey", "Name": "X-API-Key", "Secret": "secret:echo-key" }
+    },
+    "Secrets": { "echo-key": "demo-echo-key" },
+    "Throttling": { "PermitsPerInterval": 10, "Interval": "00:00:01" },
+    "Resilience": { "MaxRetries": 1, "AttemptTimeout": "00:00:10" },
+    "Health": { "Enabled": true, "ProbeInterval": "00:00:05" }
+  },
+  "ReverseProxy": {
+    "Routes": {
+      "svc": {
+        "ClusterId": "svc",
+        "Match": { "Path": "/svc/{**catch-all}" },
+        "Transforms": [ { "PathRemovePrefix": "/svc" } ],
+        "Metadata": { "CredProx.Destination": "svc", "CredProx.Credential": "echo-key" }
+      }
+    },
+    "Clusters": { "svc": { "Destinations": { "svc": { "Address": "http://localhost:5080/" } } } }
+  }
+}
+EOF
+  python3 - "$d/Program.cs" << 'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+s = s.replace("builder.Services.AddCredProxBuiltInCredentials();",
+              "builder.Services.AddCredProxBuiltInCredentials();\n"
+              "builder.Services.AddCredProxThrottling(builder.Configuration);\n"
+              "builder.Services.AddCredProxResilience(builder.Configuration);")
+tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
+assert tail3 in s, "scaffold tail not found"
+s = s.replace(tail3, """// Health probes registered last: they read the credential and destination registries.
+builder.Services.AddCredProxHealthProbes(builder.Configuration);
+var app = builder.Build();
+app.MapHealthChecks("/health");
+// The vendor stub: reports only whether the configured credential header arrived
+// with the right value — the secret reference resolves inside the proxy.
+app.Map("/echo", (HttpContext ctx) =>
+    ctx.Request.Headers["X-API-Key"] == "demo-echo-key" ? "cred-present" : "cred-missing");
+app.MapReverseProxy();
+app.Run();
+""")
+p.write_text(s)
+PYEOF
+  [ $? -ne 0 ] && { record operations FAIL "program rewrite"; return; }
+  build_warnaserror "$d" || { record operations FAIL "build, see $d/build.log"; return; }
+  run_app "$d"; local pid=$! detail="proxy never answered" ok health
+  for _ in $(seq 1 30); do
+    if ! kill -0 "$pid" 2>/dev/null; then detail="proxy exited early (see $d/run.log)"; break; fi
+    ok=$(curl -sf http://127.0.0.1:5080/svc/echo 2>/dev/null || true)
+    health=$(curl -sf http://127.0.0.1:5080/health 2>/dev/null || true)
+    [ -n "$ok$health" ] && detail="echo/health assertions not matched (see $d/run.log)"
+    if printf '%s' "$ok" | grep -q '^cred-present$' \
+       && printf '%s' "$health" | grep -q '^Healthy$'; then
+      kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+      record operations PASS "core+CredProx.Operations: host wires throttle+resilience+health from the package, credential attached through the pipeline, health probes Healthy"
+      return
+    fi
+    sleep 1
+  done
+  kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  record operations FAIL "$detail"
+}
 cell_container() {
   local d=$SCRATCH/container
   scaffold_web "$d"
@@ -407,6 +947,7 @@ cell_testing() {
   local d=$SCRATCH/testing
   rm -rf "$d" && mkdir -p "$d"
   (cd "$d" && dotnet new xunit -o . >/dev/null 2>&1) || { record testing FAIL "template"; return; }
+  write_local_feed_config "$d"
   add_credprox_pkg "$d" CredProx.Testing || { record testing FAIL "package add"; return; }
   (cd "$d" && dotnet package add Microsoft.Extensions.TimeProvider.Testing >/dev/null 2>&1)
   # the conformance suite is [Experimental(CREDPROX001)] like the plugin contract —
@@ -504,6 +1045,7 @@ cell_trim() {
   local a=$SCRATCH/trim-aot
   rm -rf "$a" && mkdir -p "$a"
   (cd "$a" && dotnet new console -o . >/dev/null 2>&1) || { record trim FAIL "console template"; return; }
+  write_local_feed_config "$a"
   add_credprox_pkg "$a" CredProx || { record trim FAIL "package add (console)"; return; }
   sed -i 's|<Nullable>enable</Nullable>|<Nullable>enable</Nullable>\n    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>|' "$a"/*.csproj
   # root the CredProx entry points so the linker analyses the library, not just the probe
@@ -525,7 +1067,7 @@ EOF
 
 # --- driver ----------------------------------------------------------------------
 
-ALL_CELLS=(web webapi auth container net8 net9 drift testing trim)
+ALL_CELLS=(web webapi auth container net8 net9 drift testing trim keys keytokens hmac loginexchange oauth operations)
 if [ "$#" -gt 0 ]; then CELLS=("$@"); else CELLS=("${ALL_CELLS[@]}"); fi
 for c in "${CELLS[@]}"; do
   echo "-- cell $c"
@@ -539,6 +1081,12 @@ for c in "${CELLS[@]}"; do
     drift) cell_drift ;;
     trim) cell_trim ;;
     testing) cell_testing ;;
+    keys) cell_keys ;;
+    keytokens) cell_keytokens ;;
+    hmac) cell_hmac ;;
+    loginexchange) cell_loginexchange ;;
+    oauth) cell_oauth ;;
+    operations) cell_operations ;;
     *) echo "unknown cell $c" >&2; exit 2 ;;
   esac
 done

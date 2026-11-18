@@ -2,6 +2,12 @@
   <Folder Name="/src/">
     <Project Path="src/CredProx.Abstractions/CredProx.Abstractions.csproj" />
     <Project Path="src/CredProx.AzureKeyVault/CredProx.AzureKeyVault.csproj" />
+    <Project Path="src/CredProx.CallerKeys/CredProx.CallerKeys.csproj" />
+    <Project Path="src/CredProx.CallerTokens/CredProx.CallerTokens.csproj" />
+    <Project Path="src/CredProx.Hmac/CredProx.Hmac.csproj" />
+    <Project Path="src/CredProx.LoginExchange/CredProx.LoginExchange.csproj" />
+    <Project Path="src/CredProx.OAuth/CredProx.OAuth.csproj" />
+    <Project Path="src/CredProx.Operations/CredProx.Operations.csproj" />
     <Project Path="src/CredProx/CredProx.csproj" />
     <Project Path="src/CredProx.Testing/CredProx.Testing.csproj" />
   </Folder>
@@ -30,7 +36,11 @@
     <Project Path="tests/CredProx.ConformanceTests/CredProx.ConformanceTests.csproj" />
     <Project Path="tests/CredProx.E2ETests/CredProx.E2ETests.csproj" />
     <Project Path="tests/CredProx.LoadTests/CredProx.LoadTests.csproj" />
+    <Project Path="tests/CredProx.SampleSmokes/CredProx.SampleSmokes.csproj" />
     <Project Path="tests/CredProx.SecurityTests/CredProx.SecurityTests.csproj" />
     <Project Path="tests/CredProx.Tests/CredProx.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/aca-live-harness/AcaLiveHarness.csproj" />
   </Folder>
 </Solution>

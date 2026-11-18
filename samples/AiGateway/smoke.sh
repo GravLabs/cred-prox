@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# E13 smoke (in-process, no Docker): the provider is stubbed in the same host so the SSE
-# timing assertion is deterministic — the stub flushes a first event, waits 400 ms, then
-# writes the second; the smoke fails if CredProx delivered them buffered together.
+# Offline check: the sample's smoke cells live in the shared test project
+# (tests/CredProx.SampleSmokes, Trait Sample=AiGateway) — this script is the
+# per-sample entry point CI keeps calling.
 set -euo pipefail
-cd "$(dirname "$0")"
-
-dotnet run -- --smoke
+cd "$(dirname "$0")/../.."
+dotnet test tests/CredProx.SampleSmokes --filter "Sample=AiGateway|Sample=Stamp"

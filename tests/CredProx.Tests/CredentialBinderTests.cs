@@ -22,6 +22,9 @@ public sealed class CredentialBinderTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxHmac();
+        services.AddCredProxLoginExchange();
+        services.AddCredProxOAuth();
         services.AddCredProxCredentials(configuration);
         return services.BuildServiceProvider();
     }
@@ -46,6 +49,80 @@ public sealed class CredentialBinderTests
         Assert.Contains("Magic", error.Message);
         Assert.Contains("OAuthClientCredentials", error.Message);
         Assert.Contains("StaticKey", error.Message);
+    }
+
+    [Fact]
+    public void UnregisteredLoginExchangePackage_FailsStartupNamingThePackage()
+    {
+        // The Type discriminator is unchanged by the split (ADR-0005); a credential naming
+        // the packaged type without its add-on fails like any unregistered type, and the
+        // message names the package to add. The built-in registration alone must not
+        // bring the type — that is what makes the hint reachable.
+        var configuration = Config(
+            ("Credentials:login:Type", "LoginExchange"),
+            ("Credentials:login:LoginEndpoint", "https://vendor.example/login"));
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials(); // deliberately no AddCredProxLoginExchange
+        services.AddCredProxCredentials(configuration);
+
+        var error = Assert.Throws<OptionsValidationException>(() =>
+            services.BuildServiceProvider().GetRequiredService<CredentialRegistry>());
+
+        Assert.Contains("The LoginExchange type ships in the CredProx.LoginExchange package", error.Message);
+        Assert.Contains("AddCredProxLoginExchange()", error.Message);
+    }
+
+    [Fact]
+    public void UnregisteredHmacPackage_FailsStartupNamingThePackage()
+    {
+        // The Hmac twin of the LoginExchange pin above: the packaged type without its
+        // add-on fails at startup naming the package to reference and the registration
+        // to call. The built-in registration alone must not bring the type.
+        var configuration = Config(
+            ("Credentials:hmac:Type", "Hmac"),
+            ("Credentials:hmac:Secret", "vault-hmac-key"));
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials(); // deliberately no AddCredProxHmac
+        services.AddCredProxCredentials(configuration);
+
+        var error = Assert.Throws<OptionsValidationException>(() =>
+            services.BuildServiceProvider().GetRequiredService<CredentialRegistry>());
+
+        Assert.Contains("The Hmac type ships in the CredProx.Hmac package", error.Message);
+        Assert.Contains("AddCredProxHmac()", error.Message);
+    }
+
+    [Theory]
+    [InlineData("OAuthClientCredentials")]
+    [InlineData("TokenExchange")]
+    [InlineData("JwtAssertion")]
+    public void UnregisteredOAuthPackage_FailsStartupNamingThePackage(string type)
+    {
+        // The OAuth twins of the Hmac and LoginExchange pins above: each packaged type
+        // without its add-on fails at startup naming the package to reference and the
+        // registration to call. The built-in registration alone must not bring any of
+        // the three types — that is what makes the hint reachable.
+        var configuration = Config(
+            ("Credentials:oauth:Type", type),
+            ("Credentials:oauth:TokenEndpoint", "https://vendor.example/token"));
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials(); // deliberately no AddCredProxOAuth
+        services.AddCredProxCredentials(configuration);
+
+        var error = Assert.Throws<OptionsValidationException>(() =>
+            services.BuildServiceProvider().GetRequiredService<CredentialRegistry>());
+
+        Assert.Contains($"The {type} type ships in the CredProx.OAuth package", error.Message);
+        Assert.Contains("AddCredProxOAuth()", error.Message);
     }
 
     [Fact]
@@ -130,6 +207,8 @@ public sealed class CredentialBinderTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxHmac();
+        services.AddCredProxLoginExchange();
         services.AddHttpClient(OAuthClientCredentialsProvider.HttpClientName)
             .ConfigurePrimaryHttpMessageHandler(() => handler);
         services.AddCredProxCredentials(configuration);
@@ -428,6 +507,28 @@ public sealed class CredentialBinderTests
             .Get("signer");
 
         Assert.Equal(["method", "path"], Assert.IsType<HmacOptions>(binding.Options).Components);
+    }
+
+    [Fact]
+    public void Hmac_AlgorithmAndEncoding_BindFromConfigStrings()
+    {
+        // The non-default algorithm and encoding arms are reachable through config: the
+        // strings bind to the typed enum values the signer switches on.
+        var configuration = Config(
+            ("Credentials:signer:Type", "Hmac"),
+            ("Credentials:signer:Secret", "literal"),
+            ("Credentials:signer:SignatureHeader", "X-Signature"),
+            ("Credentials:signer:Components:0", "method"),
+            ("Credentials:signer:Algorithm", "SHA384"),
+            ("Credentials:signer:Encoding", "HexUpper"));
+
+        var binding = BuildServices(configuration)
+            .GetRequiredService<CredentialRegistry>()
+            .Get("signer");
+
+        var options = Assert.IsType<HmacOptions>(binding.Options);
+        Assert.Equal(HmacAlgorithm.SHA384, options.Algorithm);
+        Assert.Equal(HmacSignatureEncoding.HexUpper, options.Encoding);
     }
 
     [Fact]

@@ -4,8 +4,8 @@ namespace CredProx.Abstractions;
 
 /// <summary>
 /// A secret accessor scoped to a single plugin instance: it resolves only the
-/// <c>secret:</c> references named in that plugin's own configuration
-/// (see <c>docs/credprox-plan.md</c> §3.5 rule 4). A buggy or malicious plugin cannot
+/// <c>secret:</c> references named in that plugin's own configuration.
+/// A buggy or malicious plugin cannot
 /// read other integrations' secrets through it.
 /// </summary>
 [Experimental("CREDPROX001")]

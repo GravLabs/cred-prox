@@ -1,4 +1,4 @@
-# E6 — ADP: certificate-based client credentials, as configuration
+# ADP: certificate-based client credentials, as configuration
 
 ## What it demonstrates
 
@@ -18,10 +18,10 @@ certificate stores it.
   swap the value, nothing else changes.)
 - **GET-only routing** (`/adp/{**catch-all}` → PathRemovePrefix → the vendor cluster),
   bearer attached and scrubbed from the caller's view. The route declares
-  `"Methods": ["GET"]`; the restriction surfaces as the routing layer's refusal —
-  measured live once, then pinned into `smoke.sh`: POST → 404 (no matching route),
-  GET → 200. YARP owns route matching; the sample proves the shipped config's effect
-  rather than re-implementing method routing.
+  `"Methods": ["GET"]`; the restriction surfaces as the routing layer's refusal:
+  POST → 404 (no matching route), GET → 200, asserted by the cells. YARP owns route
+  matching; the sample proves the shipped config's effect rather than re-implementing
+  method routing.
 
 The offline stack is honest about enforcement: nginx with `ssl_verify_client on` sits
 in front of the WireMock stub **for the token path and the API paths**, so the
@@ -38,7 +38,7 @@ Docker. No accounts, no real certificate.
 ```bash
 cd samples/ADP
 ./generate-certs.sh           # sample CA + nginx server cert + base64 PFX bundles
-docker compose up -d          # vendor stub :8081, KV stub :8082, mTLS nginx :8443
+docker compose up -d          # vendor stub :5104, KV stub :8082, mTLS nginx :8443
 SSL_CERT_FILE=$PWD/certs/ca.crt dotnet run
 ```
 
@@ -57,7 +57,7 @@ Three independent witnesses, one request:
 - `client = CN=client-alpha` — the **upstream** (nginx injects the verified client DN,
   the stub echoes it) names the certificate that arrived.
 - `Bearer [redacted]` — the token was attached on the wire and scrubbed caller-side;
-  the stub's journal (`GET http://localhost:8081/__admin/requests`) shows the raw
+  the stub's journal (`GET http://localhost:5104/__admin/requests`) shows the raw
   bearer on the proxied request only.
 - `docker compose logs nginx` — one line per request: the subject, on the token path
   and on the API path.
@@ -86,10 +86,10 @@ Three independent witnesses, one request:
 
 ### Wire shape (measured, not assumed)
 
-The token call this sample puts on the wire, recorded from the stub's journal by
-`smoke.sh` into `bin/wire-check.txt` (per-run, untracked). The committed
-`samples/ADP/wire-check.txt` is the curated artifact from a green run, and `smoke.sh`
-asserts the fresh recording matches it byte for byte:
+The token call this sample puts on the wire, read from the stub's own journal by the
+offline cells each run. The committed `samples/ADP/wire-check.txt` is the pinned
+record from a green run, and a cell asserts this run's journal-derived recording
+matches it:
 
 ```
 POST /auth/oauth/v2/token?grant_type=client_credentials
@@ -107,11 +107,12 @@ No `scope` is sent (the original sent none); add `"Scope": "..."` only if your A
 tenant asks for one. Token refresh follows CredProx's cache policy (refresh at 80 % of
 lifetime, 30 s before expiry — earlier than the original's 5-minute rule, never later).
 
-## Key Vault variant
+## Key Vault style
 
 ```bash
+export ASPNETCORE_ENVIRONMENT=KeyVault
 export KeyVault__Uri=https://<your-vault>.vault.azure.net/
-dotnet run -- --variant kv
+dotnet run
 ```
 
 Secrets then come from Azure Key Vault through the stock configuration provider
@@ -127,19 +128,21 @@ auto-renewable, read here as a plain secret. On rotation the provider re-reads o
 reload interval and the connection registry swaps the certificate onto new
 connections — no restart.
 
-`./smoke.sh` proves exactly that **offline**: the same provider runs against a loopback
-stub (only the transport is swapped), the stub swaps the served PFX mid-run with a
-bumped `attributes.updated` — the signal a real rotation carries — and the next request
-presents the new certificate. No Azure account is involved; a real-vault run is still
-its own check.
+The offline cells prove exactly that without Azure: `ASPNETCORE_ENVIRONMENT=KeyVaultOffline`
+runs the same provider against a loopback stub (only the transport is swapped), the cell
+swaps the served PFX mid-run with a bumped `attributes.updated` — the signal a real
+rotation carries — and the next request presents the new certificate. A real-vault run
+is still its own check. By hand, `./rotate-kv-stub.sh secrets.d/CredProx__Secrets__adpClientCert[-beta]`
+installs or rotates the stub's secret the same way.
 
 ## Switching to the real vendor
 
 ```bash
+export ASPNETCORE_ENVIRONMENT=RealAdp
 export CredProx__Credentials__adp__ClientId=...              # from ADP
 export CredProx__Secrets__adpClientSecret=...                     # from ADP
 export CredProx__Secrets__adpClientCert="$(cat adp-auth-cert.b64)"  # base64 PFX, no password
-dotnet run -- --variant real
+dotnet run
 ```
 
 `appsettings.RealAdp.json` repoints the credential to
@@ -150,11 +153,12 @@ your PFX is password-protected, add
 
 **Where each value comes from.** The real-vendor file commits only endpoint facts — it
 deliberately declares no `ClientId` and no `Secrets` keys, so the values you export
-above (or keep in user-secrets, or serve through `--variant kv`) reach the app
-untouched; a source cannot shadow a key it does not declare. `--variant kv` takes the
-vault endpoint itself from `KeyVault__Uri` and refuses at startup, naming
-`KeyVault:Uri`, when it is missing. `samples/ADP/variant-guard.sh` (run by `smoke.sh`)
-watches all three behaviors.
+above (or keep in user-secrets, or serve from Key Vault) reach the app untouched; a
+source cannot shadow a key it does not declare. The Key Vault style takes the vault
+endpoint itself from `KeyVault__Uri` and refuses at startup, naming `KeyVault:Uri`,
+when it is missing. The offline cells watch all these behaviors — the exported values
+reaching the real-vendor host, the provider dialing the exported endpoint, and the
+fail-fast without one.
 
 **Why these secret names are camelCase.** A secret key becomes an environment variable
 (`CredProx__Secrets__<name>`), and bash `export` refuses names containing hyphens — a
@@ -167,11 +171,17 @@ exactly as written.
 
 ```bash
 cd samples/ADP && ./smoke.sh
+# or directly:
+dotnet test tests/CredProx.SampleSmokes --filter Sample=ADP
 ```
 
-Checks the behaviour above — certificate on both hops, bearer attached + scrubbed,
-certificateless run fails cleanly with no key material in the output, Key Vault
-rotation witness — and prints `SMOKE OK`.
+Ten cells drive the real host against the docker stack: certificate + bearer + caller-side
+scrub on the API hop, the wire shape matched against the pinned `wire-check.txt`, the
+client certificate named by nginx's log on both hops, the TLS-layer refusal of a
+certificateless request, the certificateless host refusing with no key material in its
+output, the offline Key Vault rotation reaching new connections without restart, the
+exported values reaching the real-vendor style, the Key Vault style failing fast without
+an endpoint and dialing the one it is given, and the GET-only route.
 
 ## What is verified offline vs what needs the real account
 

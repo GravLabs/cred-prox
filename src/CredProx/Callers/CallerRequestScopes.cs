@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// The per-request scope set published by an authenticating layer (M39, ADR-0004):
+/// The per-request scope set published by an authenticating layer (ADR-0004):
 /// the caller-token path sets it from the token's <c>roles</c>/<c>scp</c> claim, and
 /// the operation allow-list stage intersects the caller's rules with it — a named rule
 /// only runs when its <see cref="CallerOperationRule.Name"/> is in this set. An unnamed

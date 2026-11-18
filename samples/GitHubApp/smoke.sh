@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# E8 smoke in stub mode (plan §6: "stub mode in CI"): generated RSA App key and both
-# GitHub endpoints in-process — no Docker and no GitHub account needed.
+# Offline check: the sample's smoke cells live in the shared test project
+# (tests/CredProx.SampleSmokes, Trait Sample=GitHubApp) — this script is the
+# per-sample entry point CI keeps calling.
 set -euo pipefail
-cd "$(dirname "$0")"
-
-dotnet run -- --smoke
+cd "$(dirname "$0")/../.."
+dotnet test tests/CredProx.SampleSmokes --filter "Sample=GitHubApp|Sample=Stamp"

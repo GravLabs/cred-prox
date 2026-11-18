@@ -1,15 +1,11 @@
 using CredProx;
 
-// E11 (plan §6): the operational story — throttling under load with a vendor stub that
-// returns 429 + Retry-After, a circuit breaker, and credential health checks. All three
-// are config + one registration line each; the behavior lives in the core (plan §8.4).
-// WireMock plays the vendor: wiremock/mappings holds the three vendor personalities.
+// The operational story on one host: throttling (rate/concurrency limits with a bounded
+// queue), a circuit breaker with retry policy, and background credential-health probes.
+// All three are appsettings.json plus one registration line each; WireMock is the vendor.
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-builder.Services.AddCredProxBuiltInCredentials();
-builder.Services.AddCredProxCredentials(builder.Configuration);
+builder.Services.AddCredProx(builder.Configuration);
 
 // Per-cluster outbound rate/concurrency limits with a bounded queue (full or expired
 // queue -> 429 + Retry-After) and a vendor-429 pause of the whole cluster.
@@ -29,10 +25,7 @@ builder.Services.AddReverseProxy()
 // and destination registries.
 builder.Services.AddCredProxHealthProbes(builder.Configuration);
 
-builder.WebHost.UseUrls("http://localhost:5091");
-
 var app = builder.Build();
 app.MapHealthChecks("/health");
 app.MapReverseProxy();
 app.Run();
-return 0;

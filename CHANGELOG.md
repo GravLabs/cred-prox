@@ -7,6 +7,288 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-17
+
+This release splits single features out of the `CredProx` package into small add-on
+packages (ADR-0005). A host's setup is one core call plus the call of each package it
+actually uses. The split is fail-closed in both directions: a credential naming a
+packaged `Type` without its package fails startup naming the package to add, and a
+configured feature section whose package is absent fails the same way — no written
+configuration ever sits inert.
+
+| Package | Carries | Setup from 0.11.0 |
+|---|---|---|
+| `CredProx` | the core pipeline: token cache, configuration secret stack, `StaticKey`, caller policy, header hygiene, audit, problem responses | the one call `AddCredProx(builder.Configuration)` replaces the granular `AddCredProxTokenCache` + `AddCredProxConfigurationSecrets` + `AddCredProxBuiltInCredentials` + `AddCredProxCredentials` (each stays public for hosts that want the control) |
+| `CredProx.Abstractions` | the plugin contracts every other package builds on | unchanged — referenced transitively |
+| `CredProx.OAuth` | `OAuthClientCredentials`, `TokenExchange`, `JwtAssertion` | add the package reference and call `AddCredProxOAuth()`; configuration is unchanged |
+| `CredProx.Hmac` | `Hmac` request signing | add the package reference and call `AddCredProxHmac()`; configuration is unchanged |
+| `CredProx.LoginExchange` | `LoginExchange` session-login credential | add the package reference and call `AddCredProxLoginExchange()`; configuration is unchanged |
+| `CredProx.Operations` | the outbound throttle, the resilience adapter, credential health probes | add the package reference and call `AddCredProxThrottling()`, `AddCredProxResilience()` and `AddCredProxHealthProbes()`; configuration sections are unchanged |
+| `CredProx.CallerKeys` | caller API keys | add the package reference; the call `AddCredProxCallerAuthentication()` is unchanged, and hosts referencing the moved types recompile |
+| `CredProx.CallerTokens` | agent caller tokens (OIDC access tokens mapped to callers) | add the package reference; the call `AddCredProxCallerTokenAuthentication()` is unchanged, and hosts referencing the moved types recompile |
+| `CredProx.AzureKeyVault` | the `TokenCredential` credential type over `Azure.Identity` | unchanged: `AddCredProxAzureTokenCredential(credential)` |
+| `CredProx.Testing` | the conformance suites a third-party credential type runs against | unchanged |
+
+### Added
+
+- The `CredProx.Hmac` package [Experimental]: the `Hmac` credential type, its signer and
+  the signing stage move out of the core into an add-on (ADR-0005), like the caller
+  add-ons. The host adds the package and calls `AddCredProxHmac()`; configuration is
+  unchanged (`Type: Hmac`), and a credential naming `Type: Hmac` without the package
+  fails startup naming the package to add. New public seam for features that need the
+  whole request body: `CredProxRequestState.MeasureOutgoingBodyAsync(maxBytes, ct)`
+  counts the bytes itself and installs the measured copy as the body that flows onward —
+  it returns `null` only when its own count passed the cap (so a stage answers `413` on a
+  measured overrun and nothing else), any other failure keeps its own cause, and on the
+  forwarder the read and the install both go through the request body the forwarder pumps
+  at send time.
+- The `CredProx.LoginExchange` package [Experimental]: the `LoginExchange` credential
+  type, its options and its startup validator move out of the core into an add-on
+  (ADR-0005), in the same shape. The host adds the package and calls
+  `AddCredProxLoginExchange()`; configuration is unchanged (`Type: LoginExchange`), and a
+  credential naming `Type: LoginExchange` without the package fails startup naming the
+  package to add. The exchange semantics carry across unchanged — per-request template
+  expansion through the core's shared §3.2 expander, the token cached per
+  `(credential, partition)`, and failures that never name secret values or response
+  bodies.
+- The `CredProx.OAuth` package [Experimental]: the three OAuth-based credential types —
+  `OAuthClientCredentials`, `TokenExchange` and `JwtAssertion` — with their options,
+  validators and token clients move out of the core into an add-on (ADR-0005), in the
+  same shape. The host adds the package and calls `AddCredProxOAuth()`; configuration is
+  unchanged (the same `Type` values), and a credential naming one of these types without
+  the package fails startup naming the package to add. The
+  `Microsoft.IdentityModel.Protocols.OpenIdConnect` dependency travels with the package,
+  so a host that does not use the OAuth types no longer carries it; the in-memory token
+  cache stays in the core, as ADR-0005 records.
+- The `CredProx.Operations` package [Experimental]: the outbound throttle, the
+  resilience adapter and the credential health probes move out of the core into an
+  add-on (ADR-0005), in the same shape. The host adds the package and calls
+  `AddCredProxThrottling()`, `AddCredProxResilience()` and
+  `AddCredProxHealthProbes()`; configuration is unchanged
+  (`CredProx:Throttling`, `CredProx:Resilience`, `CredProx:Health`), and a configured
+  section whose feature is not registered fails startup naming the package to add — a
+  written limit never sits inert. The pipeline placement is unchanged: resilience
+  (Order 0) innermost inside one throttle permit (Order 10), both after signing. The
+  `Microsoft.Extensions.Http.Resilience` and `Microsoft.Extensions.Diagnostics.HealthChecks`
+  dependencies travel with the package; caller budgets and the kill switch stay core
+  caller policy, on the `FixedWindowRateLimiter` the throttle now shares.
+- `CredProxConfigValidation.RejectUnknownKeysAtStartup` [Experimental]: the fail-closed
+  unknown-key rule (M17, §3.3) for an add-on package that owns a top-level `CredProx:*`
+  section — allowed keys come from the package's options type by reflection, and an
+  unknown key refuses startup exactly like a core section does. The three operations
+  registration methods call it for `CredProx:Throttling`, `CredProx:Resilience` and
+  `CredProx:Health`.
+- `SecretValues.ResolveIfReferenceAsync` [Experimental]: the rule for an option value
+  that is either a `secret:` reference or a literal is now a public seam — a reference
+  resolves through the credential's scoped accessor, a literal passes through untouched —
+  so an add-on credential type resolves its configured secret values through the same
+  single core implementation the built-in types use instead of copying the rule.
+- The caller-authenticator seam [Experimental]: `AddCredProxCallerAuthenticator<T>` lets
+  your own code decide who a caller is, and CredProx applies the caller configuration —
+  operation rules and header hygiene — around it.
+- `AddCredProxCallerPolicy` [Experimental]: registers the `CredProx.Caller` authorization
+  policy for middleware-enforcing hosts, naming every registered caller scheme — the
+  built-in caller-key (and, when installed, caller-token) schemes and any caller
+  authenticator you registered.
+- `CredProxProblemResponses` [Experimental]: the problem-shaped refusals CredProx answers
+  with (unknown caller, over-budget, refused destination, …) as callable helpers, so your
+  own pipeline stages answer in the same shape the proxy uses.
+- `HeaderHygieneFeature` now has a public constructor `(CredProxCoreOptions,
+  IConfiguration)`, so a host can construct the header-hygiene stage directly; the
+  feature registration path is unchanged.
+- The caller-registry contributor seam [Experimental]: `ICallerRegistryContributor` lets a
+  package build its derived data about the caller registry inside the very bind that
+  accepted it — once at host start and once at every accepted live rebind — and commit it
+  together with the registry as one `CallerRegistryGeneration`, swapped atomically. A
+  contributor that fails refuses the bind exactly like a refused shape: startup fails, or
+  the previous generation (registry and all committed data) keeps serving and one error
+  line names the reason. Readers take `CallerRegistryProvider.CurrentGeneration` and get
+  the registry and every contributor's data as one snapshot — derived data can never
+  drift from, or be poisoned by, the configuration the registry was built against.
+  Register with `AddCredProxCallerRegistryContributor<TContributor>`.
+- The caller-registry validation seam [Experimental]: `ICallerRegistryValidator` lets a
+  package — or your own host code — contribute rules about `CredProx:Callers` that the
+  core must not learn, and CredProx runs every registered validator over the complete
+  caller registry at host start AND on every live configuration rebind: a refused start
+  stops the host, a refused live edit never takes effect — the previous registry keeps
+  serving and the validator's reason is logged. Register with
+  `AddCredProxCallerRegistryValidator<TValidator>`.
+- The `CredProx.CallerTokens` package [Experimental]: agent tokens (M39, ADR-0004) move
+  out of the core into their own package, so a host that authenticates callers with API
+  keys alone no longer carries the JWT bearer handler. Same configuration keys
+  (`CredProx:CallerToken`, `CredProx:Callers:<id>:TokenClientIds`), same scheme name, same
+  guarantees; the host adds a package reference — the registration call
+  `AddCredProxCallerTokenAuthentication` is unchanged.
+- The `CredProx.CallerKeys` package [Experimental]: caller API keys (M6) move out of the
+  core into their own package, so a host that authenticates callers with tokens alone no
+  longer carries the key layer. Same configuration keys (`CredProx:CallerAuth`,
+  `CredProx:Callers:<id>:Keys`), same scheme name, same guarantees; the host adds a
+  package reference — the registration call `AddCredProxCallerAuthentication` is
+  unchanged.
+- `CredProx:CallerToken:RequireHttpsMetadata` [Experimental]: the https requirement on the
+  authority's published metadata is now a configuration key — `true` by default, the
+  production setting, because a caller-token path that accepts http metadata accepts a
+  forged key set — so an offline run can point at a plain-http issuer stub from its
+  environment config file instead of mutating the bearer options in host code. The
+  opt-out is fail-closed: `false` is accepted only when `Authority` is http on a loopback
+  host (`localhost`, `127.0.0.1`, `::1`); any other `Authority` combined with `false`
+  refuses startup naming both keys, so a copied dev setting cannot quietly disable
+  https metadata in production.
+- `AddCredProx(IConfiguration)` [Experimental]: the one core registration — the token
+  cache, the configuration secret stack, the built-in `StaticKey` credential type and the
+  credential binder in a single idempotent call. A host then adds only its package calls
+  (`AddCredProxCallerTokenAuthentication`, `AddCredProxOAuth`, …); the granular core calls
+  stay public for hosts that want control, and the audit log stays the explicit
+  `AddCredProxAudit` it has always been.
+
+### Changed
+
+- A caller identity that authenticates but is not among the configured callers is now
+  refused with 401: a credential is honoured only for a caller you configured.
+- Registering a caller authenticator while no caller is configured under
+  `CredProx:Callers` now refuses to start, instead of quietly refusing every request.
+- `CredProx` no longer depends on `Microsoft.AspNetCore.Authentication.JwtBearer`; the
+  caller-token package does.
+- HMAC body signing handles streamed bodies on the forwarder path: the size cap is decided
+  by bytes the signing stage counted itself — a body exactly at the cap is forwarded whole
+  with its measured length and signature, and 413 `credprox.body_too_large_to_sign` answers
+  only a measured overrun, which is never signed or forwarded. Other body-read failures
+  keep their own cause instead of being reported as a size cap.
+- Caller keys are now served as one accepted unit with the caller registry, not as a
+  lazily-rebuilt table. The `CredProx.CallerKeys` hashed key table is built eagerly inside
+  the bind that accepted the registry — at host start and at every accepted live rebind —
+  through the contributor seam above, and committed with the registry as one generation.
+  A key whose `secret:` reference cannot be resolved no longer keeps a stale table
+  serving quietly: it refuses host start, and refuses a live rebind — the previous
+  registry and table keep serving — with one error line naming caller and key.
+  `ConfigCallerStore` is now constructed from `CallerRegistryProvider` and `TimeProvider`:
+  it reads no configuration and resolves no secret on the request path.
+  `CallerRegistryProvider` now also rebinds on a configuration reload, not only when the
+  secret source signals a change (the pre-existing constructor keeps its former trigger
+  set). Malformed `KeyHash` declarations are part of the aggregated
+  `OptionsValidationException` that names them at startup; resolving a `secret:`
+  reference is the table contributor's alone (once per bind), so a reference that cannot
+  resolve refuses the bind there instead — startup fails, or the previous generation
+  keeps serving.
+
+- One observed change performs exactly one caller-registry bind ATTEMPT in the default
+  callback order; a host that registers its own reload callback on the shared
+  configuration before the source's callback measures two binds for that reload — both
+  safe, no signal dropped. The provider no longer double-watches the common host: the built-in `ConfigurationSecretSource` fires
+  its own change token on every reload of its configuration root, so when the source is
+  that source over the watched root, the provider watches that token alone — one reload,
+  one trigger. Where a host's source is not backed by the watched configuration, both
+  watches stay registered and a trigger whose inputs match the last bind attempt's is
+  dropped with one debug line, where it used to bind again. A refused reload therefore
+  writes one error line per attempt and an accepted one resolves each contributed secret
+  exactly once; in a both-watches host a reload that changes nothing the caller registry
+  reads logs no rebind, while in the single-watch host every reload is a source signal —
+  the provider cannot tell a no-op reload from a rotated secret, and one honest bind per
+  reload is the promise. A genuine change — a `CredProx:Callers` value, or a fresh
+  secret-source signal — always rebinds: a transient bind failure recovers on the next
+  signal even though configuration is unchanged, and a rotated secret rebinds even though
+  no configuration value moved.
+- Secret-resolution failures name the reference or key and the source exception's TYPE,
+  never the source's own message: an unresolvable `secret:` reference now reads
+  `could not be resolved (source exception <Type>)`, and a caller key's `secret:`
+  `KeyHash` likewise. A throwing secret source can no longer carry its message text —
+  which can quote a value — into user-visible startup or rebind errors.
+- `secret:` references in a `KeyHash` are checked by shape at validation and resolved
+  once per bind, not resolved twice. The contributed key rules now accept any
+  non-empty `secret:` reference unseen — a bare `secret:` is refused as an empty
+  reference — and the eager table contributor is the sole resolver: each declared secret
+  is read exactly once per bind, and a reference that resolves to something other than a
+  `sha256:<hex>` hash still refuses the same bind.
+- `ICallerRegistryContributor.Contribute` [Experimental, unreleased] no longer takes a
+  `CancellationToken`: the core runs the build inside the bind, which runs inside a
+  configuration-change callback — nothing there is cancellable, so the contract is
+  plainly synchronous.
+
+### Breaking
+
+- The `Hmac` and `LoginExchange` credential types are no longer part of the `CredProx`
+  package (ADR-0005). Removed from it: `HmacOptions`, `HmacAlgorithm`,
+  `HmacSignatureEncoding`, `HmacTimestampFormat`, `HmacProvider`, `HmacSignFeature`,
+  `LoginExchangeOptions`, `LoginExchangeCredentials`, `LoginExchangeResponse` and
+  `LoginExchangeProvider`. Replacements: add the `CredProx.Hmac` /
+  `CredProx.LoginExchange` package reference and call `AddCredProxHmac()` /
+  `AddCredProxLoginExchange()`; the types are unchanged there, the configuration keys
+  and the `Type` discriminator are unchanged, and the credential types resolve through
+  the same public registration seam any third-party type uses. Hosts that do not add a
+  package keep working — a credential naming the packaged type without it fails startup
+  naming the package to add.
+- The `OAuthClientCredentials`, `TokenExchange` and `JwtAssertion` credential types are
+  no longer part of the `CredProx` package (ADR-0005). Removed from it:
+  `OAuthClientCredentialsProvider`, `OAuthClientCredentialsOptions`,
+  `OAuthClientAuthentication`, `TokenExchangeProvider`, `TokenExchangeOptions`,
+  `TokenExchangeMode`, `JwtAssertionProvider`, `JwtAssertionOptions`,
+  `JwtAssertionAlgorithm` and `JwtAssertionExchange`. Replacements: add the
+  `CredProx.OAuth` package reference and call `AddCredProxOAuth()`; the types are
+  unchanged there (namespaces included), the configuration keys and the `Type`
+  discriminators are unchanged, and `IRequiresInboundToken` — implemented by
+  `TokenExchangeOptions` — stays in the core. Hosts that do not add the package keep
+  working — a credential naming one of these types without it fails startup naming the
+  package to add. This is binary-breaking for the moved types (different assembly);
+  recompile against both packages.
+- The outbound throttle, the resilience adapter and the credential health probes are
+  no longer part of the `CredProx` package (ADR-0005). Removed from it:
+  `ThrottleOptions`, `ThrottleClusterOptions`, `ResilienceOptions`,
+  `ResilienceClusterOptions`, `CredProxHealthOptions`, `AddCredProxThrottling`,
+  `AddCredProxResilience` and `AddCredProxHealthProbes`. Replacements: add the
+  `CredProx.Operations` package reference and call the same-named `Add` methods; the
+  configuration sections, options shapes and problem responses are unchanged there, and
+  a configured section whose feature is not registered fails startup naming the package
+  to add. `FixedWindowRateLimiter` stays in the core — caller budgets are core policy —
+  and is now the public limiter the Operations throttle uses. A host that configures
+  `CredProx:Throttling`, `CredProx:Resilience` or `CredProx:Health` without the package
+  now fails startup instead of ignoring the section. This is binary-breaking for the
+  moved types (different assembly); recompile against both packages.
+- The caller-key types now live in `CredProx.CallerKeys` instead of `CredProx`
+  (namespaces unchanged): `AddCredProxCallerAuthentication`, `CallerKeyOptions`,
+  `ICallerStore`, `CallerKeyMatch`, `ConfigCallerStore` and the request-path handler
+  `CallerKeyAuthenticationHandler`. The public `CallerKey` model type
+  is removed outright rather than moved — a key entry is configuration the package
+  validates, and its hash material never leaves the store. The `CallerBinder` two-argument
+  constructor (`configuration`, `accessorFactory`) is collapsed into the one constructor
+  that also takes contributed rules; pass an empty rule list where you passed none. The
+  `HeaderHygieneFeature` constructor taking `IEnumerable<CallerKeyOptions>` is replaced by
+  the `(CredProxCoreOptions, IConfiguration)` one named under Added. This
+  is binary-breaking for the removed members (pre-1.0 experimental surface); recompile.
+  The scheme name's
+  public constant is now `CallerKeyOptions.Scheme` (same value) and
+  `CredProxAuth.CallerKeyScheme` is no longer public. `CallerDefinition` no longer
+  carries `Keys` — the keys package reads that key from configuration itself, and
+  entry-shape validation (missing or double-listed `KeyId`, malformed `KeyHash`,
+  unparseable `ExpiresAt`, unknown fields under a `Keys` entry) rides the
+  caller-registry validation seam: host start AND every live rebind, a refused rebind
+  keeping the previous registry serving, with the same verbatim error messages as
+  before the split. Without the package the entries are inert — no key can authenticate
+  and nothing validates them. This is binary-breaking for the moved types (different
+  assembly); recompile against both packages.
+- The caller-token types now live in `CredProx.CallerTokens` instead of `CredProx`
+  (namespaces unchanged): `AddCredProxCallerTokenAuthentication`, `CallerTokenOptions`,
+  `ICallerTokenMapper`, `CallerTokenMapping`, `DefaultCallerTokenMapper`. The scheme name's
+  public constant is now `CallerTokenOptions.Scheme` (same value) and
+  `CredProxAuth.CallerTokenScheme` is no longer public. `CallerDefinition` no longer
+  carries `TokenClientIds` — the token package reads that key from configuration itself,
+  and entry-shape validation (blank, padded or double-listed client ids) rides the
+  caller-registry validation seam above: host start AND every live rebind, a refused
+  rebind keeping the previous registry serving. The same config was already refused
+  before the split — at the registration call rather than at host start — so the visible
+  change is timing, plus the rebind guarantee a registration-time check could never have:
+  drift into a refused shape after start is refused too. (Consequence: a host that
+  registers the services but never starts the host is no longer refused at registration.)
+  Without the package the entries are inert — no client id can authenticate and nothing
+  validates them. This is binary-breaking for the moved types (different assembly);
+  recompile against both packages.
+
+### Fixed
+- A caller whose request waits out a vendor pause is now forwarded once the pause ends, even
+  when the wait timer wakes a fraction of a millisecond early; such a request used to be
+  answered `429 credprox.throttled` for a cluster that had just become ready. A pause - or an
+  extension of it that arrives while the request waits - that outlasts `MaxQueueWait` still
+  answers `429`.
+
 ## [0.11.0] - 2026-11-16
 
 Agent tokens (M39): an agent presents a short-lived Microsoft Entra (or any OIDC) access
@@ -45,7 +327,10 @@ a recompile, and existing positional call sites need no edits, except that decon
   the host's `HttpContext.User` under Entra's raw names — `roles`, `scp`, `azp`, `appid`,
   `uti` — and the stock JWT bearer rename to the long claim types never happens on this
   scheme. `RoleClaimType` is pinned to the raw `roles`, so `ClaimsPrincipal.IsInRole`
-  keeps working for hosts on the token path.
+  keeps working for hosts on the token path. The claim names are configuration, not
+  code: `CallerTokenOptions.ClientClaimNames` (default `azp`, `appid`) and
+  `CallerTokenOptions.ScopeClaimNames` (default `roles`, `scp`) let an OIDC issuer that
+  names the client id or the scopes differently be met by configuration.
 
 ### Changed
 

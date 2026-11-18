@@ -9,12 +9,11 @@ using Microsoft.Extensions.Options;
 namespace CredProx;
 
 /// <summary>
-/// Binds every <c>CredProx:Credentials:&lt;name&gt;</c> section at startup (see
-/// <c>docs/credprox-plan.md</c> §3.3): the section's <c>Type</c> must name a registered
-/// credential type (§3.5 rule 6 — unknown types fail startup, never fall back to a default),
-/// the options are bound and validated, and the secret accessor is scoped to the section
-/// (§3.5 rule 4). A section may reference a preset by name; the preset layers beneath the
-/// host's fields and an unknown preset is a startup error (§3 "Vendor presets"). All
+/// Binds every <c>CredProx:Credentials:&lt;name&gt;</c> section at startup: the section's
+/// <c>Type</c> must name a registered credential type (unknown types fail startup, never
+/// fall back to a default), the options are bound and validated, and the secret accessor is
+/// scoped to the section. A section may reference a preset by name; the preset layers
+/// beneath the host's fields and an unknown preset is a startup error. All
 /// problems are collected into one
 /// <see cref="OptionsValidationException"/> naming the credentials — never values.
 /// </summary>
@@ -82,8 +81,20 @@ public sealed class CredentialBinder
             if (registration is null)
             {
                 var known = string.Join(", ", _registrations.Select(r => r.TypeName).Order(StringComparer.Ordinal));
+                // A type that moved out of the core names the add-on the host must
+                // reference — the only package knowledge the core keeps, as strings, so a
+                // host that forgot the package hears its name at startup.
+                var packageHint = typeName switch
+                {
+                    "Hmac" => " The Hmac type ships in the CredProx.Hmac package: add the package reference and call AddCredProxHmac().",
+                    "LoginExchange" => " The LoginExchange type ships in the CredProx.LoginExchange package: add the package reference and call AddCredProxLoginExchange().",
+                    "OAuthClientCredentials" => " The OAuthClientCredentials type ships in the CredProx.OAuth package: add the package reference and call AddCredProxOAuth().",
+                    "TokenExchange" => " The TokenExchange type ships in the CredProx.OAuth package: add the package reference and call AddCredProxOAuth().",
+                    "JwtAssertion" => " The JwtAssertion type ships in the CredProx.OAuth package: add the package reference and call AddCredProxOAuth().",
+                    _ => string.Empty,
+                };
                 errors.Add(
-                    $"The credential '{name}' uses unknown credential Type '{typeName}'. Registered types: {known}.");
+                    $"The credential '{name}' uses unknown credential Type '{typeName}'. Registered types: {known}.{packageHint}");
                 continue;
             }
 

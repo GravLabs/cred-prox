@@ -189,6 +189,46 @@ public sealed class TokenExchangeProviderM31Tests
         Assert.Equal(1, JwksCalls(handler)); // no refetch: the cached set was never touched
     }
 
+    // ---- direct-JWKS retrieval failures (:269, :280) ----
+
+    // Inbound validation cannot start without key material: an unreachable endpoint
+    // surfaces as the retrieval failure carrying the endpoint's own reason, and the
+    // token endpoint is never reached.
+    [Fact]
+    public async Task JwksEndpointUnreachable_FailsRetrieval_WithoutTokenExchange()
+    {
+        var (provider, handler, _) = Create((req, _) => req.RequestUri!.AbsolutePath.Contains("/jwks")
+            ? throw new HttpRequestException("no route to host")
+            : Json(HttpStatusCode.OK, """{"access_token":"down-tok","expires_in":300}"""));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => provider
+            .GetCredentialAsync(Options_direct(), TestSecrets.AccessorFor([]), Ctx(IssueToken(IssuerRsa)), default).AsTask());
+
+        Assert.Contains("token-exchange JWKS", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be retrieved", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("no route to host", ex.Message, StringComparison.Ordinal); // the caller sees why
+        Assert.Equal(1, JwksCalls(handler));
+        Assert.Equal(0, TokenCalls(handler));
+    }
+
+    // A 200 whose body is not a JWKS is the other half: same exception type, the
+    // malformed message, nothing forwarded.
+    [Fact]
+    public async Task JwksUnparseableBody_FailsMalformed_WithoutTokenExchange()
+    {
+        var (provider, handler, _) = Create((req, _) => req.RequestUri!.AbsolutePath.Contains("/jwks")
+            ? Json(HttpStatusCode.OK, "not-a-jwks{{{")
+            : Json(HttpStatusCode.OK, """{"access_token":"down-tok","expires_in":300}"""));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => provider
+            .GetCredentialAsync(Options_direct(), TestSecrets.AccessorFor([]), Ctx(IssueToken(IssuerRsa)), default).AsTask());
+
+        Assert.Contains("token-exchange JWKS", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("is malformed", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(1, JwksCalls(handler));
+        Assert.Equal(0, TokenCalls(handler));
+    }
+
     // ---- rejection messages name the credential (:170, :178) ----
 
     [Fact]

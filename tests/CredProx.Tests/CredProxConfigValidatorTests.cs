@@ -24,6 +24,7 @@ public sealed class CredProxConfigValidatorTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(config);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
         services.AddCredProxCredentials(config);
         var credentialProvider = services
             .BuildServiceProvider()

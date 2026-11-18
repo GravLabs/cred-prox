@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="CredProx" />
+    <PackageReference Include="CredProx.CallerKeys" />
   </ItemGroup>
 
 </Project>

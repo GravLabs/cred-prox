@@ -3,8 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// Response scrubbing options bound from <c>CredProx:Scrubbing</c> (see
-/// <c>docs/credprox-plan.md</c> §8.2, M20): the safety net that removes an injected
+/// Response scrubbing options bound from <c>CredProx:Scrubbing</c>: the safety net that removes an injected
 /// credential from an upstream response that reflects it back (error pages, echo
 /// endpoints).
 /// </summary>

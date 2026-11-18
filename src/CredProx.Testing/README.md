@@ -4,6 +4,7 @@ The test toolkit for [CredProx](https://github.com/GravLabs/cred-prox) plugin au
 same fakes and conformance suites the built-in credential types, secret sources and the
 token cache are tested with — so a plugin can prove it behaves like the built-ins on the
 points that matter: secret hygiene, refresh-on-401, single-flight, cache scoping.
+There is no host registration: this package is referenced by test projects only.
 
 ## Fakes
 

@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 namespace CredProx;
 
 /// <summary>
-/// Runs the stage-ordered response features (M20, plan §8.2) on the upstream response at
+/// Runs the stage-ordered response features on the upstream response at
 /// the end of the outbound pipeline: after refresh-on-401 has settled on one response,
 /// and before YARP has received — let alone copied — anything. That position is what the
 /// contract promises: a response feature reshapes the response <em>before the caller

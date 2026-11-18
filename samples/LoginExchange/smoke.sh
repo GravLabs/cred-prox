@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-# E12 smoke (plan §6: "runs without accounts"). Starts the vendor stub, runs the proxy's
-# --smoke checks, and tears everything down.
+# Offline check: the sample's smoke cells live in the shared test project
+# (tests/CredProx.SampleSmokes, Trait Sample=LoginExchange) — this script is the
+# per-sample entry point CI keeps calling.
 set -euo pipefail
-cd "$(dirname "$0")"
-
-docker compose up -d
-trap 'docker compose down' EXIT
-
-for _ in $(seq 1 30); do
-  if curl -sf http://localhost:8082/__admin/mappings >/dev/null; then break; fi
-  sleep 1
-done
-
-dotnet run -- --smoke
+cd "$(dirname "$0")/../.."
+dotnet test tests/CredProx.SampleSmokes --filter "Sample=LoginExchange|Sample=Stamp"

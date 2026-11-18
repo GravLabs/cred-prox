@@ -1,4 +1,4 @@
-# E18 — Caller API keys: authenticating the callers of your proxy
+# Caller API keys: authenticating the callers of your proxy
 
 ## What it demonstrates
 
@@ -25,7 +25,7 @@ Docker (the upstream stub). No accounts.
 
 ```bash
 cd samples/CallerApiKey
-docker compose up -d          # the upstream stub on :8081
+docker compose up -d          # the upstream stub on :8100
 dotnet run
 ```
 
@@ -49,7 +49,7 @@ upstream received the request
 The stub never received `X-API-Key` — check its journal:
 
 ```bash
-curl -s http://localhost:8081/__admin/requests | grep -c X-API-Key    # 0
+curl -s http://localhost:8100/__admin/requests | grep -c X-API-Key    # 0
 ```
 
 ## The exact config
@@ -82,13 +82,18 @@ An expired key fails exactly like an unknown one. Hashes are of the raw key:
 
 ## Verify it
 
+One cell per check, driving the real host over real sockets from
+`tests/CredProx.SampleSmokes` against the stub from `docker-compose.yml`:
+
 ```bash
+dotnet test tests/CredProx.SampleSmokes --filter Sample=CallerApiKey
+# or the one-line wrapper:
 cd samples/CallerApiKey && ./smoke.sh
 ```
 
-Checks: missing key → 401; wrong key → the same 401 with nothing echoed; valid key →
-proxied 200; the stub journal shows the key header never reached the upstream. Prints
-`SMOKE OK`.
+The cells: missing key → 401; wrong key → the same 401 with nothing about it echoed;
+valid key → proxied 200; and the stub's own journal shows no request at `/api/data`
+ever carried the key header — under its own name or the default caller header.
 
 ## Deliberately not shown here
 

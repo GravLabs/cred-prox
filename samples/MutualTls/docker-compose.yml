@@ -2,7 +2,7 @@ services:
   nginx:
     image: nginx:1.27-alpine
     ports:
-      - "8443:443"
+      - "8444:443"
     volumes:
       - ./certs:/etc/nginx/pki:ro
       - ./nginx.conf:/etc/nginx/nginx.conf:ro

@@ -7,7 +7,7 @@ namespace CredProx;
 
 /// <summary>
 /// Layers the presets a credential references beneath the host's own configuration
-/// (see <c>docs/credprox-plan.md</c> §3 "Vendor presets"): each
+/// : each
 /// <c>CredProx:Credentials:&lt;name&gt;</c> section carrying a <c>Preset</c> key gets the
 /// named fragment flattened into configuration keys under its section, added as a
 /// <em>lower-priority</em> source — so every field the host writes wins over the preset,
@@ -18,7 +18,7 @@ namespace CredProx;
 /// read, a <c>secret:</c> reference introduced by a preset is validated exactly like one
 /// the host wrote: it must resolve through the host's configured
 /// <see cref="CredProx.Abstractions.ISecretSource"/> or startup fails — a preset cannot
-/// introduce a secret reference the host did not configure (§5.2 "Presets").
+/// introduce a secret reference the host did not configure.
 /// Since 0.4.0 the library ships no built-in presets: fragments come from the host's
 /// <c>CredProx:Presets</c> configuration or from its own <see cref="IPresetSource"/>
 /// registrations.

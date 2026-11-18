@@ -7,7 +7,7 @@ namespace CredProx.Testing;
 /// <summary>
 /// An <see cref="ILoggerProvider"/> that keeps every line the host logs — formatted
 /// message, plus the exception text on its own line when one is attached — so a
-/// conformance suite can assert the §5.2 rule that secret values never appear in logs at
+/// conformance suite can assert the rule that secret values never appear in logs at
 /// any level.
 /// </summary>
 [Experimental("CREDPROX001")]

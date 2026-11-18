@@ -9,14 +9,14 @@ namespace CredProx;
 /// <summary>
 /// Gives every <c>credprox-token:&lt;name&gt;</c> named client (see
 /// <see cref="CredProxHttpClientNames"/>) a primary handler carrying that connection's
-/// client certificate (see <c>docs/credprox-plan.md</c> §3.2: a credential's
-/// <c>Connection</c> makes the token call present that connection's certificate).
+/// client certificate: a credential's
+/// <c>Connection</c> makes the token call present that connection's certificate.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The handler is built from the <em>live</em> connection registry at handler-creation
 /// time, not from a registration-time snapshot: a connection added by a configuration
-/// reload gets its certificate-carrying client without a restart (M5 note N2).
+/// reload gets its certificate-carrying client without a restart.
 /// <see cref="IHttpClientFactory"/> recreates primary handlers on their expiry, so a
 /// rotated certificate is picked up the same way.
 /// </para>

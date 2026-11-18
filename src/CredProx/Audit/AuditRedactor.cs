@@ -1,9 +1,8 @@
 namespace CredProx;
 
 /// <summary>
-/// Applies the audit redaction rules before a record reaches any sink
-/// (<c>docs/credprox-plan.md</c> §5.2: "redacted headers/JSON fields never reach the
-/// sink"). Header names in the record's <c>headers</c> map are masked against the header
+/// Applies the audit redaction rules before a record reaches any sink, so redacted
+/// headers/JSON fields never reach it. Header names in the record's <c>headers</c> map are masked against the header
 /// set; any nested field whose name matches the JSON-field set is masked at any depth.
 /// Masking replaces the value with <see cref="Masked"/> — the name stays, the value goes.
 /// </summary>

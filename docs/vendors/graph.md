@@ -4,8 +4,8 @@
 |---|---|
 | **Auth model** | Entra ID OAuth 2.0 client credentials per tenant; Graph then takes the bearer token. App permissions require admin consent — the consent-free M26 validation set deliberately used Azure RBAC targets instead ([docs/live-validation-report.md](../live-validation-report.md)) |
 | **CredProx credential** | `OAuthClientCredentials` with `ClientAuthentication: BasicHeader` — **or** secretless `TokenCredential` (ambient Azure identity) |
-| **Sample** | [E5 `samples/MicrosoftGraph`](../../samples/MicrosoftGraph/README.md) — both variants, plus Key Vault as the secret source |
-| **Verification** | Endpoint form, `.default` scope and Basic client auth verified in sample E5 (`appsettings.OAuth.json` / `appsettings.ManagedIdentity.json`); the live Entra and Key Vault paths were validated against the maintainer's tenant in M26 ([report](../live-validation-report.md)) |
+| **Sample** | [`samples/MicrosoftGraph`](../../samples/MicrosoftGraph/README.md) — both variants, plus Key Vault as the secret source |
+| **Verification** | Endpoint form, `.default` scope and Basic client auth verified in the MicrosoftGraph sample (`appsettings.OAuth.json` / `appsettings.ManagedIdentity.json`); the live Entra and Key Vault paths were validated against the maintainer's tenant in M26 ([report](../live-validation-report.md)) |
 
 ## CredProx config
 
@@ -57,7 +57,7 @@ Client-credentials variant (works anywhere; needs a tenant + app secret):
 ```
 
 Running on Azure (App Service, Container Apps, VM…), the credential can be
-**secretless** — verified in sample E5's [`appsettings.ManagedIdentity.json`](../../samples/MicrosoftGraph/appsettings.ManagedIdentity.json):
+**secretless** — verified in the MicrosoftGraph sample's [`appsettings.ManagedIdentity.json`](../../samples/MicrosoftGraph/appsettings.ManagedIdentity.json):
 
 ```jsonc
 "Credentials": {
@@ -70,7 +70,7 @@ Running on Azure (App Service, Container Apps, VM…), the credential can be
 
 No client secret, no token endpoint — `TokenCredential` takes the ambient Azure
 identity. It declares only its own keys: CredProx refuses unknown keys per credential
-type, so the two variants' credential blocks cannot be layered ([E5 README](../../samples/MicrosoftGraph/README.md)).
+type, so the two variants' credential blocks cannot be layered (the [MicrosoftGraph README](../../samples/MicrosoftGraph/README.md)).
 
 ## Required secrets
 
@@ -81,7 +81,7 @@ type, so the two variants' credential blocks cannot be layered ([E5 README](../.
 ## Scopes and audiences
 
 - `https://graph.microsoft.com/.default` requests the app's **configured** permissions
-  (verified in sample E5); fine-grained scopes instead are a permission-model choice —
+  (verified in the MicrosoftGraph sample); fine-grained scopes instead are a permission-model choice —
   see the admin-consent note in the table above and plan §8.6's parked Graph
   admin-consent variants.
 
@@ -89,7 +89,7 @@ type, so the two variants' credential blocks cannot be layered ([E5 README](../.
 
 - **Two hosts, one config:** the token endpoint is `login.microsoftonline.com/<tenant-id>`
   while the API host is `graph.microsoft.com` — both appear in the block (verified in
-  sample E5, which needs "two host values" per its README).
+  the MicrosoftGraph sample, which needs "two host values" per its README).
 - Sovereign clouds (US Gov, China…) use different login/API hosts — **UNVERIFIED:**
   confirm against vendor docs and change both.
 - **Admin consent:** app permissions must be consented by an admin before tokens

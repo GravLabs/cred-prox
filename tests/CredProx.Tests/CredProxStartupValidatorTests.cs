@@ -3,6 +3,7 @@ using CredProx.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 using Yarp.ReverseProxy.Configuration;
@@ -82,6 +83,7 @@ public sealed class CredProxStartupValidatorTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(config);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
         services.AddCredProxCredentials(config);
         services.AddSingleton(new DestinationBinder(
             config, [new HeaderPartitionSourceFactory()]).Bind());
@@ -572,5 +574,124 @@ public sealed class CredProxStartupValidatorTests
         await validator.StartAsync(default);
 
         Assert.DoesNotContain(_logger.Messages, m => m.Contains("fully-dynamic", StringComparison.Ordinal));
+    }
+
+    // ---- the CredProx.Operations add-on refusal (ADR-0005): a configured operations
+    // section without its feature fails startup naming the package, never sits inert ----
+
+    [Fact]
+    public async Task ThrottlingSection_WithoutTheOperationsAddOn_RefusesAtStartup()
+    {
+        var configuration = Config(("CredProx:Throttling:PermitsPerInterval", "10"));
+        using var services = BuildServices(configuration);
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(
+            () => validator.StartAsync(default));
+        Assert.Contains(
+            "The 'CredProx:Throttling' section is configured but the outbound throttle is not "
+            + "registered: it ships in the CredProx.Operations package: add the package "
+            + "reference and call AddCredProxThrottling().",
+            error.Message);
+    }
+
+    [Fact]
+    public async Task ResilienceSection_WithoutTheOperationsAddOn_RefusesAtStartup()
+    {
+        var configuration = Config(("CredProx:Resilience:MaxRetries", "2"));
+        using var services = BuildServices(configuration);
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(
+            () => validator.StartAsync(default));
+        Assert.Contains(
+            "The 'CredProx:Resilience' section is configured but the resilience adapter is not "
+            + "registered: it ships in the CredProx.Operations package: add the package "
+            + "reference and call AddCredProxResilience().",
+            error.Message);
+    }
+
+    [Fact]
+    public async Task HealthSection_WithoutTheOperationsAddOn_RefusesAtStartup()
+    {
+        var configuration = Config(("CredProx:Health:CertWarningDays", "30"));
+        using var services = BuildServices(configuration);
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(
+            () => validator.StartAsync(default));
+        Assert.Contains(
+            "The 'CredProx:Health' section is configured but the credential health probes are "
+            + "not registered: they ship in the CredProx.Operations package: add the package "
+            + "reference and call AddCredProxHealthProbes().",
+            error.Message);
+    }
+
+    [Fact]
+    public async Task HealthSection_WithOneBuiltInProbeOnly_StillRefusesAtStartup()
+    {
+        // The health refusal requires both built-in probes; a lone probe (custom or a
+        // partial registration) must not silence it.
+        var configuration = Config(("CredProx:Health:CertWarningDays", "30"));
+        using var services = BuildServices(
+            configuration,
+            mutateServices: s => s.AddSingleton<ICredentialHealthProbe>(
+                sp => new TokenObtainableProbe(
+                    sp.GetRequiredService<CredentialRegistryProvider>(),
+                    NullLogger<TokenObtainableProbe>.Instance)));
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(
+            () => validator.StartAsync(default));
+        Assert.Contains("The 'CredProx:Health' section is configured", error.Message);
+        Assert.Contains("call AddCredProxHealthProbes().", error.Message);
+    }
+
+    [Fact]
+    public async Task AllThreeOperationsSections_WithoutTheAddOn_RefuseTogether()
+    {
+        var configuration = Config(
+            ("CredProx:Throttling:PermitsPerInterval", "10"),
+            ("CredProx:Resilience:MaxRetries", "2"),
+            ("CredProx:Health:CertWarningDays", "30"));
+        using var services = BuildServices(configuration);
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(
+            () => validator.StartAsync(default));
+        Assert.Equal(
+            3,
+            error.Failures.Count(f => f.Contains("CredProx.Operations package", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task OperationsSections_WithTheAddOnRegistered_Pass()
+    {
+        var configuration = Config(
+            ("CredProx:Throttling:PermitsPerInterval", "10"),
+            ("CredProx:Resilience:MaxRetries", "2"),
+            ("CredProx:Health:CertWarningDays", "30"));
+        using var services = BuildServices(
+            configuration,
+            mutateServices: s =>
+            {
+                // The certificate probe reads the connection registry; this minimal
+                // harness has no connections section, so supply the empty registry the
+                // full host entry point would bind.
+                var secretSource = new ConfigurationSecretSource(configuration);
+                s.AddSingleton(new ConnectionRegistryProvider(
+                    new ConnectionBinder(
+                        configuration,
+                        new SecretAccessorFactory(secretSource),
+                        NullLoggerFactory.Instance),
+                    secretSource,
+                    NullLogger<ConnectionRegistryProvider>.Instance));
+                s.AddCredProxThrottling(configuration);
+                s.AddCredProxResilience(configuration);
+                s.AddCredProxHealthProbes(configuration);
+            });
+        var validator = Validator(services, configuration);
+
+        await validator.StartAsync(default);
     }
 }

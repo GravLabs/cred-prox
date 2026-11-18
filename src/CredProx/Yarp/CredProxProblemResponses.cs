@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -7,14 +8,15 @@ using Microsoft.AspNetCore.Http;
 namespace CredProx;
 
 /// <summary>
-/// Writes the <c>application/problem+json</c> short-circuit responses of
-/// <c>docs/credprox-plan.md</c> §3.4. Titles and codes are static strings chosen by the
+/// Writes the <c>application/problem+json</c> short-circuit responses. Titles and codes
+/// are static strings chosen by the
 /// caller; request values, secret references and exception messages never enter the body
-/// (§5.2 "Diagnostics": secrets never appear in problem responses). Since M24 (§8.5)
-/// every problem document carries a <c>type</c> distinguishing proxy failures from
+/// (secrets never appear in problem responses). Every problem document carries a
+/// <c>type</c> distinguishing proxy failures from
 /// vendor failures rewritten by the error normaliser.
 /// </summary>
-internal static class CredProxProblemResponses
+[Experimental("CREDPROX001")]
+public static class CredProxProblemResponses
 {
     /// <summary>
     /// RFC 7807 <c>type</c> of every problem the proxy itself produced (§8.5). A URN,
@@ -27,6 +29,19 @@ internal static class CredProxProblemResponses
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    /// <summary>
+    /// Writes the problem document for a short-circuited request straight onto the
+    /// response: <c>application/problem+json</c> in the CredProx problem shape. Feature packages
+    /// whose handlers answer like the core's enforcement use this so every CredProx
+    /// refusal carries one body.
+    /// </summary>
+    /// <param name="response">The response to write.</param>
+    /// <param name="statusCode">The HTTP status; already set on the response by the caller.</param>
+    /// <param name="code">The stable <c>credprox.*</c> problem code.</param>
+    /// <param name="title">A static human title; never a request value.</param>
+    /// <param name="cancellationToken">The request cancellation token.</param>
+    /// <param name="retryAfter">The <c>Retry-After</c> window; <see langword="null"/> to omit the header.</param>
+    /// <param name="extensions">Static extension members of the document; never request values.</param>
     public static async ValueTask WriteAsync(
         HttpResponse response,
         int statusCode,
@@ -106,7 +121,7 @@ internal static class CredProxProblemResponses
 
     /// <summary>
     /// Serializes one problem document to UTF-8 bytes — the shape the error normaliser
-    /// (M24) puts in place of a vendor error body. Extension values are static per call
+    /// puts in place of a vendor error body. Extension values are static per call
     /// site or the vendor's own (already-scrubbed) payload.
     /// </summary>
     internal static byte[] CreateProblemBytes(

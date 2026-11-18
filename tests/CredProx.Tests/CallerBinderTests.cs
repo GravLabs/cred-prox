@@ -9,14 +9,14 @@ namespace CredProx.Tests;
 
 /// <summary>
 /// Startup binding of <c>CredProx:Callers</c> (§4 Phase B): every validation error names
-/// the caller and key id but never a key value or hash; a <c>secret:</c> hash reference
-/// resolves through the caller's own scoped accessor; reloads may empty the registry
-/// (kill switch) while startup may not.
+/// the caller and key id but never a key value or hash; the CredProx.CallerKeys rules
+/// reach the binder through the registry-validator channel the helper registers; reloads
+/// may empty the registry (kill switch) while startup may not.
 /// </summary>
 public sealed class CallerBinderTests
 {
     [Fact]
-    public void BindsCallersKeysAndOperations()
+    public void BindsCallersAndOperations()
     {
         var binder = Binder(new Dictionary<string, string?>
         {
@@ -31,9 +31,6 @@ public sealed class CallerBinderTests
         var registry = binder.Bind();
 
         var caller = registry.Get("app-a");
-        var key = Assert.Single(caller.Keys);
-        Assert.Equal("k1", key.KeyId);
-        Assert.Equal(new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero), key.ExpiresAt);
         var rule = Assert.Single(caller.Operations);
         Assert.Equal("reports", rule.Route);
         Assert.Contains("GET", rule.Methods);
@@ -95,29 +92,19 @@ public sealed class CallerBinderTests
     }
 
     [Fact]
-    public void SecretHashReference_ResolvesThroughCallersScopedAccessor()
+    public void SecretHashReference_Unresolvable_Binds_TheResolverRefuses()
     {
-        var binder = Binder(new Dictionary<string, string?>
-        {
-            ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
-            ["CredProx:Callers:app-a:Keys:0:KeyHash"] = "secret:app-a-key-hash",
-            ["CredProx:Secrets:app-a-key-hash"] = Hash("v1"),
-        });
-
-        var registry = binder.Bind();
-        Assert.Equal(32, Assert.Single(registry.Get("app-a").Keys).Hash.Length);
-    }
-
-    [Fact]
-    public void SecretHashReference_Unresolvable_Fails()
-    {
-        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        // The binder runs the contributed rules, and those are shape-only: an
+        // unresolvable reference binds the registry normally and the bind is refused by
+        // the table contributor — the sole resolver per bind — so a host still refuses
+        // to start. What must NOT happen here is a resolution.
+        var registry = Binder(new Dictionary<string, string?>
         {
             ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
             ["CredProx:Callers:app-a:Keys:0:KeyHash"] = "secret:missing-hash",
-        }).Bind());
+        }).Bind();
 
-        Assert.Contains(ex.Failures, f => f.Contains("app-a", StringComparison.Ordinal) && f.Contains("k1", StringComparison.Ordinal));
+        Assert.Equal("app-a", registry.Get("app-a").CallerId);
     }
 
     [Fact]
@@ -236,7 +223,7 @@ public sealed class CallerBinderTests
         });
 
         var registry = binder.Bind();
-        Assert.Equal("k1", Assert.Single(registry.Get("app-a").Keys).KeyId);
+        Assert.Equal("reports", Assert.Single(registry.Get("app-a").Operations).Route);
     }
 
     [Fact]
@@ -481,16 +468,20 @@ public sealed class CallerBinderTests
     }
 
     [Fact]
-    public void EmptySecretHash_Fails_NamingKey()
+    public void EmptySecretHash_Binds_TheResolverRefuses()
     {
-        var ex = Assert.Throws<OptionsValidationException>(() => Binder(new Dictionary<string, string?>
+        // An empty secret value is invisible to a shape-only check — reading it would be
+        // the resolution the sole resolver owns. The registry binds; the table
+        // contributor refuses the same configuration (the eager-table tests pin the
+        // refusal naming caller and key).
+        var registry = Binder(new Dictionary<string, string?>
         {
             ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
             ["CredProx:Callers:app-a:Keys:0:KeyHash"] = "secret:hash-ref",
             ["CredProx:Secrets:hash-ref"] = "",
-        }).Bind());
+        }).Bind();
 
-        Assert.Contains(ex.Failures, f => f.Contains("resolved an empty KeyHash secret", StringComparison.Ordinal));
+        Assert.Equal("app-a", registry.Get("app-a").CallerId);
     }
 
     [Fact]
@@ -507,10 +498,29 @@ public sealed class CallerBinderTests
         Assert.Contains(ex.Failures, f => f.Contains("Known keys at that level: Keys, Limits, Operations, TokenClientIds.", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Ctor_NullValidators_Refuses_NamingTheParameter()
+    {
+        // The validators parameter carries its null contract — a null rule list is a
+        // programming error, refused at the seam.
+        var config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
+        Assert.Throws<ArgumentNullException>(
+            "validators",
+            () => new CallerBinder(
+                config, new SecretAccessorFactory(new ConfigurationSecretSource(config)), null!));
+    }
+
     private static CallerBinder Binder(Dictionary<string, string?> entries)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
-        return new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)));
+        var secretSource = new ConfigurationSecretSource(config);
+        // A keys-consuming host contributes the package's key rules as a registry
+        // validator; these tests pin those messages through the binder's validation
+        // channel, exactly as the host's DI wires them.
+        return new CallerBinder(
+            config,
+            new SecretAccessorFactory(secretSource),
+            [new CallerKeyRules()]);
     }
 
     private static string Hash(string keyValue) =>

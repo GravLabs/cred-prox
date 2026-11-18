@@ -16,15 +16,18 @@ bash scripts/consumer-compat.sh web drift  # selected cells
 The script needs the .NET 10 SDK and Docker. It resolves CredProx packages
 from the machine-local CredProx feed — declared as a source in the *user-level*
 NuGet config on publishing machines. Its URL is never committed anywhere, and
-the script itself references the source only by key (`credprox`). Each run uses
-an isolated `NUGET_PACKAGES` cache under a scratch directory and clears the
-per-run HTTP cache, so a published package can be re-verified the same day it
-changes.
+the script itself references the source only by key (`credprox`). Scratch
+projects default to `artifacts/consumer-compat/` in the repo (override with
+`M32_SCRATCH`); each run uses an isolated `NUGET_PACKAGES` cache under that
+scratch and clears the per-run HTTP cache, so a published package can be
+re-verified the same day it changes.
 
-Results below were measured on 2026-11-07 against **CredProx 0.8.2**,
-linux-x64, .NET SDK 10.0.114. Every smoke asserts the credential contract
-end to end: the caller-side echo shows `[redacted]` while the raw credential is
-proven vendor-side in the WireMock request journal.
+Results below were measured on 2026-11-17 against **CredProx 0.12.0** built from
+the release-prep commit `e10f18c0a622d75c3af6313d2d75cc9234c2f25c` from
+the local feed (all fifteen cells, cold caches), linux-x64, .NET SDK 10.0.115 —
+the same matrix passed at 0.8.2 on 2026-11-07. Every smoke asserts the
+credential contract end to end: the caller-side echo shows `[redacted]` while
+the raw credential is proven vendor-side in the WireMock request journal.
 
 ## Results matrix
 
@@ -39,6 +42,12 @@ proven vendor-side in the WireMock request journal.
 | drift | CPM + `-warnaserror`: CredProx, CredProx.AzureKeyVault, latest `Yarp.ReverseProxy`, `Azure.Identity` 1.17.0 | pass | no `NU1605`; `Azure.Core` converges to a single 1.49.0 for both consumers — see drift notes |
 | testing | xunit consumer project running `CredentialProviderConformanceTests<TProvider,TOptions>` | pass | needs `NoWarn` of `CREDPROX001` (the suite is `[Experimental]`) |
 | trim | web app `PublishTrimmed` self-contained; console `PublishAot` | measured, **not supported** | see trimming section |
+| keys | minimal web app adding `CredProx` + `CredProx.CallerKeys` | pass | valid key 200, missing/wrong key 401, key value never reaches upstream |
+| keytokens | as `keys` plus `CredProx.CallerTokens` | pass | the two caller-auth packages coexist; key path green (token path not exercised) |
+| hmac | web app adding `CredProx.Hmac`, signed request against WireMock | pass | an independent verifier accepted the signature; an over-cap body answered 413 |
+| loginexchange | web app adding `CredProx.LoginExchange` against a stand-in login | pass | login session attached; blocked partition refused before any vendor call |
+| oauth | web app adding `CredProx.OAuth`, token endpoint against WireMock | pass | bearer attached from the token endpoint; refused client answered 502 without reaching upstream |
+| operations | web app adding `CredProx.Operations` (throttle + resilience + health from the package) | pass | credential attached through the pipeline; health probes report Healthy |
 
 ## Framework support
 
@@ -118,10 +127,12 @@ Measured, and the answer is deliberately conservative:
 
 ## Consumer-visible API notes
 
-- The DI-based proxy setup (`AddCredProxTokenCache`,
-  `AddCredProxConfigurationSecrets`, `AddCredProxBuiltInCredentials`,
-  `AddCredProxCredentials`, `AddReverseProxy().…AddCredProx`) is
-  warning-clean under `-warnaserror` with no suppression.
+- The DI-based proxy setup — the one-call `AddCredProx(builder.Configuration)`
+  plus `AddReverseProxy().…AddCredProx(builder.Configuration)` — is
+  warning-clean under `-warnaserror` with no suppression. The granular calls
+  (`AddCredProxTokenCache`, `AddCredProxConfigurationSecrets`,
+  `AddCredProxBuiltInCredentials`, `AddCredProxCredentials`) remain available
+  and were the shape measured at 0.8.2.
 - Individual `[Experimental(CREDPROX001)]` surfaces — the conformance suite,
   and direct `typeof`/reflection on annotated marker types — require
   suppressing exactly `CREDPROX001`. Do not blanket-suppress.

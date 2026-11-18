@@ -11,44 +11,55 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-15): `0.10.0` is **published on the registry** — the M38 token-lifetime
-policy: vendor-stated expiry (`expires_in`, `expires_at`) follows one invariant accept/cap/reject
-grammar across all three credential providers (explicit offset or `Z` reads exactly as before; an
-accepted lifetime above 24 h is capped to 24 h; non-numeric, non-finite and thousands-grouped
-values reject through the protocol-violation path with nothing cached; an already-past
-`expires_at` rejects as unusable; the configured `DefaultLifetime` is never capped), and the token
-cache floors its refresh arithmetic at `DateTimeOffset.MinValue`. The only public surface change
-is additive optional-`ILogger` constructor overloads on `TokenExchangeProvider` and
-`JwtAssertionProvider`; APICompat against the published `0.9.4` surface is otherwise clean on all
-four packages. The benchmark regression gate's SSE allocation arms now WARN above their 12 %
-allowance and hard-FAIL only above 2.5× the baseline allocation (measured scheduling-noise
-attribution below). GitHub `main` and tag `0.10.0` sit on **one squashed commit**
-`3ba52649c85a3d8b56ab4473c7ea87678e7ac3ba` (noreply author; tree identical to the internal release
-commit `6f247e0`) appended on the previous public tip `ca814c7` — a regular append: no collapse,
-no tag deletions. CI green on the public commit (Actions run 43765381059, all three jobs, the
-Examples job smokes E6 and E18). `0.10.0` shipped end to end: packed once from the public commit
-(deterministic CI path mapping, fresh obj, isolated restore cache), the four nupkgs pushed exactly
-once (the client auto-routes the adjacent snupkgs; pushes authenticate via the machine-local
-`packageSourceCredentials` — an anonymous PUT answers 401 — and serving is proven consumer-side),
-consumer restore byte-identical, QuickStart smoke green on the downloaded bytes — the symbol
-packages carry the full public SHA `3ba5264` and the `/_/` source mapping. `0.10.0` is the
-supported version; `0.9.4`, `0.9.3`, `0.9.2`, `0.9.1`, `0.9.0` and `0.8.2` source links still
-resolve (their commits are publicly referenced). Source links for `0.8.1` and earlier point at
-commits that are off every branch and tag; they resolve only while GitHub retains the
-unreferenced objects (no support purge was requested) — **unsupported-by-construction** (see the
-`0.8.1` history entry). The Entra on-behalf-of removal shipped at `0.8.0` stays **breaking** for
-`Mode: EntraObo` users, and the `0.9.0` https default stays breaking as described; both CHANGELOG
-entries remain the consumer contract. The `0.7.1` known issues stay resolved (F1: CI-path-mapped
-PDBs; F2: packed from a publicly resident commit); the `0.7.0`/`0.7.1` published packages keep
-their historical metadata (immutable). The baseline rotation **ran with the `0.10.0` prep**:
-`build/baselines/` holds the published `0.9.4` bytes (sha256-verified; ADR-0001); the next
-rotation runs at the next release prep per the rule below.
+Current state (2026-11-17): `0.12.0` prep is **complete, awaiting its check** — the M42 package split
+(ADR-0005) ships **ten packages at one version**, six of them (`CredProx.CallerKeys`,
+`CredProx.CallerTokens`, `CredProx.Hmac`, `CredProx.LoginExchange`, `CredProx.OAuth`,
+`CredProx.Operations`) reaching the registry for the first time; the publish ceremony is
+the maintainer's and has not run yet. Previously: `0.11.0` is **published on the registry** — the M39 agent tokens:
+an agent presents a short-lived Microsoft Entra (or any OIDC) access token instead of a stored
+secret, and Entra app roles narrow it to named rules — a token gets exactly the operations its
+roles name, and a caller without named rules admits no token (sample E19 `samples/AgentTokens`;
+ADR-0004). The caller-token API is additive; the one Breaking change is the caller contract
+surface collapse — `CallerDefinition`, `CallerOperationRule` and `CallerIdentity` now carry
+single constructors with optional parameters, migration is a recompile, and deconstructing a
+`CallerIdentity` takes three variables (the CHANGELOG `[0.11.0]` Breaking entry is the consumer
+contract; the four removed signatures are the 4 `CP0002` entries in the shipped
+`CompatibilitySuppressions.xml` files — see the Rules section below). APICompat against the
+published `0.10.0` surface is otherwise clean on all four packages. GitHub `main` and tag
+`0.11.0` sit on **one squashed commit**
+`f23938405d797f4dfc6564faaa7bdfb5dff2599a` (noreply author; tree identical to the internal
+release commit `1fa3b6b`) appended on the previous public tip `3ba5264` — a regular append: no
+collapse, no tag deletions; the annotated tag peels to that commit (the first tag object of this
+release was replaced minutes after creation — see the `0.11.0` history entry). CI green on the
+public commit (Actions run 43796995079, all three jobs). `0.11.0` shipped end to end: packed
+once from the public commit (deterministic CI path mapping, fresh obj, isolated restore cache),
+the four nupkgs pushed exactly once (the client auto-routes the adjacent snupkgs; pushes
+authenticate via the machine-local `packageSourceCredentials` — an anonymous PUT answers 401 —
+and serving is proven consumer-side), consumer restore byte-identical, QuickStart smoke green on
+the downloaded bytes — the symbol packages carry the full public SHA `f239384` and the `/_/`
+source mapping. `0.11.0` is the supported version; `0.10.0`, `0.9.4`, `0.9.3`, `0.9.2`, `0.9.1`,
+`0.9.0` and `0.8.2` source links still resolve (their commits are publicly referenced). Source
+links for `0.8.1` and earlier point at commits that are off every branch and tag; they resolve
+only while GitHub retains the unreferenced objects (no support purge was requested) —
+**unsupported-by-construction** (see the `0.8.1` history entry). The Entra on-behalf-of removal
+shipped at `0.8.0` stays **breaking** for `Mode: EntraObo` users, the `0.9.0` https default
+stays breaking as described, the `0.11.0` caller contract collapse is the third breaking
+change, recompile-only as the CHANGELOG describes it, and the `0.12.0` package split is the
+fourth: binary-breaking for hosts that reference moved types (recompile against the core
+plus the feature package), additive for everyone else — the CHANGELOG `[0.12.0]` Breaking
+entries are that contract; the CHANGELOG entries remain the consumer
+contract. The `0.7.1` known issues stay resolved (F1: CI-path-mapped PDBs; F2: packed from a
+publicly resident commit); the `0.7.0`/`0.7.1` published packages keep their historical
+metadata (immutable). The baseline rotation **ran with the `0.12.0` prep**: `build/baselines/`
+holds the published `0.11.0` bytes (sha256-verified; ADR-0001); the six first-ship
+packages have no baseline yet and start validation at the rotation that follows the
+`0.12.0` publication; the next rotation runs at the next release prep per the rule below.
 
 ## What gets published
 
-Four packages and their symbol packages, all at the same version:
+Ten packages and their symbol packages, all at the same version:
 
-`CredProx` · `CredProx.Abstractions` · `CredProx.AzureKeyVault` · `CredProx.Testing`
+`CredProx` · `CredProx.Abstractions` · `CredProx.AzureKeyVault` · `CredProx.CallerTokens` · `CredProx.CallerKeys` · `CredProx.Hmac` · `CredProx.LoginExchange` · `CredProx.OAuth` · `CredProx.Operations` · `CredProx.Testing`
 
 Feed: the `credprox` source from machine-local NuGet config (anonymous download live).
 
@@ -66,7 +77,12 @@ Feed: the `credprox` source from machine-local NuGet config (anonymous download 
 4. **The release tag exists**: `git tag <version> <release-commit>` — pushing the tag
    needs the maintainer's explicit OK, like any push.
 5. **The baseline folder is current**: `build/baselines/` holds the *previously
-   published* version's four nupkgs (see Rules and ADR-0001).
+   published* version's nupkgs — four through `0.10.0`, six from the release that
+   first ships `CredProx.CallerTokens` and `CredProx.CallerKeys` together, eight
+   from the release that also ships `CredProx.Hmac` and `CredProx.LoginExchange`,
+   nine from the release that also ships `CredProx.OAuth`, ten from the release that
+   also ships `CredProx.Operations`
+   (see Rules and ADR-0001).
 
 6. **Benchmark regression pass (required since 2026-11-10):** on a quiet machine, run a
    full `tests/CredProx.Benchmarks` pass at the release commit and gate it with
@@ -88,10 +104,23 @@ source root in the PDB; the published PDB must carry `/_/` paths:
 dotnet pack src/CredProx.Abstractions -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
 dotnet pack src/CredProx              -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
 dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.CallerTokens  -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.CallerKeys    -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.Hmac          -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.LoginExchange -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.OAuth         -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.Operations    -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
 dotnet pack src/CredProx.Testing      -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
 ```
 
 Packing also runs the APICompat baseline check against `build/baselines` — it must exit 0.
+`CredProx.CallerTokens`, `CredProx.CallerKeys`, `CredProx.Hmac`, `CredProx.LoginExchange`,
+`CredProx.OAuth` and `CredProx.Operations`
+carry no baseline yet — each ships first at
+the version these steps produce (`0.12.0`) — so their package validation is off
+(`EnablePackageValidation=false` in each project) and all six start validation at the
+baseline rotation that follows the `0.12.0` publication, when their own published bytes
+enter `build/baselines/`.
 
 Sanity-check the symbols before pushing (the CI step asserts the same on every build).
 The path-form assertions are not decoration: `0.7.1` shipped with local build paths in
@@ -168,9 +197,18 @@ dotnet nuget locals http-cache --clear
   unsupported-by-construction. Never push internal history: the M25 clean-start
   guarantee means the public repo stays free of pre-launch internals, which is why the
   naive `git push --tags` route is structurally wrong here, not just untidy.
+- **Public tags are built, never inherited** (lesson from the `0.11.0` tag incident in
+  the history entry): an annotated tag object's *tagger* is taken from the
+  `GIT_COMMITTER_*` identity — setting `GIT_AUTHOR_*` alone does not cover it — and the
+  object header keeps the refname the tag was created under, so a locally cross-named
+  tag pushes a wrong header and a private identity. Build every public tag with
+  `git mktag` from explicit text (noreply tagger, header exactly the release name),
+  verify with `git cat-file -p` before the push (zero private-email hits, header exactly
+  the release name), and never push a cross-named local tag.
 - **Baseline rotation each release** (ADR-0001): after publishing `<new>`, the next
   milestone sets `<PackageValidationBaselineVersion>` in `Directory.Build.props` to
-  `<new>` and replaces `build/baselines/` with the four nupkgs **downloaded from the
+  `<new>` and replaces `build/baselines/` with the release's nupkgs (five since
+  `CredProx.CallerTokens`; four before) **downloaded from the
   registry** (the published bytes), updating the sha256 list in ADR-0001.
   **Exception recorded 2026-11-04:** the `0.8.0` release shipped WITHOUT the rotation to
   `0.7.1` that was owed since that release — the served `0.7.1` bytes embed local builder
@@ -190,16 +228,119 @@ dotnet nuget locals http-cache --clear
   comparison, and on newer SDKs listing `ExperimentalAttribute` there would disable
   that native skip). Intentional removals are recorded in the project's
   `CompatibilitySuppressions.xml` (SDK default path, auto-detected; regenerate with
-  `dotnet pack /p:ApiCompatGenerateSuppressionFile=true`) — as of `0.8.1` the file is
-  **deleted**: every historical intentional removal (the 0.4.0 preset, the 0.5.0
-  binary-level signature replacements, the 0.8.0 EntraObo removal) is already inside the
-  current `0.8.1` baseline, so no suppression can fire; a fresh-obj pack must show zero
-  diagnostics **and** zero unnecessary-suppression warnings. Pre-1.0 the CHANGELOG
+  `dotnet pack /p:ApiCompatGenerateSuppressionFile=true`). The file was **deleted** at
+  `0.8.1`, when every historical intentional removal (the 0.4.0 preset, the 0.5.0
+  binary-level signature replacements, the 0.8.0 EntraObo removal) was already inside the
+  baseline; **`0.11.0` ships it again** — `CredProx` and `CredProx.Abstractions` carry
+  4 `CP0002` entries between them, exactly the member removals of the CHANGELOG
+  `[0.11.0]` Breaking entry (the caller-contract constructor/deconstruct collapse), and
+  the files are removed at the next baseline rotation, when those removals move into the
+  baseline. A fresh-obj pack must show zero diagnostics **beyond the file's entries** and
+  zero unnecessary-suppression warnings. Pre-1.0 the CHANGELOG
   preamble is the consumer contract.
 - A credential failure in the library answers `502` (§3.4) — the status codes in
   `README`/plan are the contract; changing one is a plan change, not a packaging fix.
 
 ## Release history
+
+- `0.12.0` (internal release commit TBD at the ceremony; GitHub mirror TBD): **prepared
+  2026-11-17; publish pending the maintainer's ceremony** — the M42 package split
+  (ADR-0005): ten packages at one version. The core keeps the pipeline, the configuration
+  secret stack, `StaticKey`, caller policy, header hygiene, audit and problem responses;
+  OAuth, LoginExchange, Hmac, the Operations features, caller keys and agent tokens ship
+  as six feature packages, joining `CredProx`, `CredProx.Abstractions`,
+  `CredProx.AzureKeyVault` and `CredProx.Testing` (four to ten). Breaking: the split is
+  binary-breaking for hosts referencing moved types (recompile against both packages);
+  the CHANGELOG `[0.12.0]` Breaking entries name every moved and removed type — the
+  45+2 APICompat suppressions map to those entries one-for-one against the rotated
+  `0.11.0` baseline. Baseline rotation ran in prep: the four published `0.11.0` nupkgs,
+  sha256-verified (ADR-0001). Gates at the prep commit `e10f18c0a622d75c3af6313d2d75cc9234c2f25c`:
+  pack ×10 from fresh obj answered `cp=0 unnecessary=0` on every package, APICompat active
+  only on the four baselined packages; ten nupkgs, no `-dev` name; the exact-version cache
+  evicted (leftover 0) and rebuilt — every loaded and packed assembly reads
+  `0.12.0+e10f18c0a…`, zero `-dev` bytes in bins or packages. Battery: 1902 unit + 35 security
+  + 40 conformance tests, 0 failed / 0 skipped, coverage gate green on all ten; E2E 3/3;
+  Load 7/7; the build Release-clean (0W/0E). Sample smokes: all 18 wrappers green, port
+  uniqueness green, `CredProx.SampleSmokes` 85/85 with the loaded-library stamp gate on.
+  Consumer matrix: 15/15 PASS against the local `0.12.0` feed at the prep commit. ACA
+  harness: image built, offline proxy smoke `SMOKE OK`. Bench vs `baselines/0.11.0`:
+  13 methods compared, `FAIL=3` — the three credential-attach arms measure +108…118 B
+  per request at the gate, and +106…128 B across four passes on identical code
+  (`StaticKeyAttach` varies by up to 17 B between runs); **accepted
+  by the maintainer**
+  as the measured cost of the release delta (docs/benchmarks.md, "Accepted release-delta
+  allocations"), the other ten arms unchanged or better; the baseline rotates at the
+  post-publish refresh. Disclosure scans over the tracked tree, the release diff and the
+  commit messages: zero hits (the private-key-marker matches in the tree are the
+  detector's own code).
+  Ceremony facts — pack-once, sanity loop, push round, consumer verify,
+  GitHub squash + tag, CI — are filled by the maintainer at publish: [CEREMONY-PENDING].
+
+- `0.11.0` (GitHub `f23938405d797f4dfc6564faaa7bdfb5dff2599a`, internal release commit
+  `1fa3b6b`): published 2026-11-16 — agent tokens (M39, ADR-0004; sample E19): an agent
+  presents a short-lived Microsoft Entra (or any OIDC) access token instead of a stored
+  secret, and Entra app roles narrow it to named rules — a token gets exactly the
+  operations its roles name, and a caller without named rules admits no token; caller API
+  keys keep working unchanged. The caller-token API is additive; docs lead with the most
+  useful examples and the Spotify example is removed (M40). One Breaking change: the
+  caller contract surface (`CallerDefinition`, `CallerOperationRule`, `CallerIdentity`)
+  collapses to single constructors with optional parameters — migration is a recompile,
+  positional call sites need no edits, and deconstructing a `CallerIdentity` now takes
+  three variables. The test battery was measured at the prep commit `8ae20d8` — the delta
+  to the release commit `1fa3b6b` is CHANGELOG text only — and passed there in full:
+  packs ×4 with APICompat run proven, full-solution build 0 Warning(s) / 0 Error(s),
+  1769 + 35 Security + 40 Conformance tests, coverage at or above every project's floor
+  (98.0/93.9, 100.0, 99.0, 94.6), 3 E2E + 7 Load, 18 samples build, 7/7 sample smokes
+  including E19, disclosure scans (four secret shapes and internal-URL shapes over the
+  tracked tree, the release diff and the commit messages) zero hits. The release bench
+  gate ran on the prep-check pass and printed `bench-compare: 13 methods compared,
+  FAIL=0 WARN=4` (compare exit 0; the WARNs are the documented warn-mode overhead/SSE
+  arms — `FAIL=0` is the stable signal on this machine). Ceremony: packed **once** from a
+  clean detached worktree at the PUBLIC commit after tree equality with `1fa3b6b`,
+  `-p:ContinuousIntegrationBuild=true` from fresh obj into an isolated package cache;
+  sanity loop ×4 passed (SourceLink carries the full public SHA and the `/_/*`-to-raw
+  mapping in every symbol package; no builder-home paths in any pdb or dll; in-package lib
+  shape `net10.0`-only, matching the published baselines); member-wise disclosure scan
+  over all eight packages (49 members) zero hits. The push round: four nupkgs (the client
+  auto-routes the adjacent snupkgs), each version exactly once — every PUT answered
+  `201 Created`; the push logs record URL and credentials redacted. Nupkg sha256:
+  `CredProx` `6934294cecab55ef0326bb8c46decd05f8355f76549537743fa9a91abb7afc45`,
+  `CredProx.Abstractions` `8da80fffd950ab737f4a74f5423e75ef34aa344c830cdabf020af04abea987ca`,
+  `CredProx.AzureKeyVault` `25d78cc78cc3bef957d975eb6c4ece3c7fff4677a66bfd1024fbe4a22f1312c2`,
+  `CredProx.Testing` `0ab2ccae9a33a7879e67419c9aad8c5a78ea3e61a47c3e7ad20dce07c2b9a7a5`.
+  APICompat honesty: APICompat was not re-run by log line at the public SHA `f239384` —
+  the pack-once run proved it via 4/4 fresh per-project validation semaphores (the gate's
+  messages are Low-importance and absent from minimal-verbosity logs by design), and that
+  is sufficient because the tree is unchanged along `8ae20d8` → `1fa3b6b` → `f239384` (a
+  CHANGELOG-only delta); an independent verification against the published `0.10.0`
+  baselines showed log-line APICompat passes on all four packages plus a
+  suppression-sabotage probe covering the same surface. Consumer verify: http-cache
+  cleared, out-of-repo scratch project, isolated package cache, all four downloads
+  byte-identical to the pushed artifacts (served `contentHash` byte-for-byte), each served
+  nuspec carrying commit `f239384`, the loaded dll reporting `0.11.0+f23938405d…`
+  InformationalVersion; `samples/QuickStart` smoke green on those exact bytes. GitHub:
+  ONE squashed commit on the previous public tip `3ba5264`, noreply identity — a regular
+  append, no collapse, no tag deletions; the fresh-clone audit confirmed one new commit,
+  tree equality with `1fa3b6b` and zero disclosure hits; CI green (Actions run
+  43796995079, all three jobs). **Tag incident:** the first public tag object carried a
+  private tagger email and the creation refname in its header. It was replaced within
+  minutes in precedent form — `git mktag` from explicit text, noreply tagger, `+0000`,
+  header `tag 0.11.0` — and the discarded object is **not in the published history**: no
+  branch or tag references it. It does remain fetchable by exact SHA until GitHub collects
+  unreachable objects or a Support purge is requested, so it is not correct to say it was
+  never exposed. The ceremony lesson is recorded in the Rules section above.
+  **Not verified at publish (kept honest):** the SourceLink debugger step-through (CI
+  asserts the path form in the packed PDBs instead); the consumer-side `.snupkg` download
+  path (symbol packages were checked at pack time only); the consumer smoke ran the
+  in-process `--smoke` stand-in, not the Docker/WireMock E1 variant. Benchmarks: the
+  post-publish refresh pass on a quiet machine, gated against `baselines/0.10.0`:
+  `bench-compare: 13 methods compared, FAIL=0 WARN=5` (all five WARNs are warn-mode
+  overhead-suite arms — `OAuthCacheHit` ratio ×1.35, `OAuthCacheHitScrub` ratio ×2.38 and
+  mean ×1.87, `SseCredProx` ratio ×1.55 with allocations down to 11,751 B, `SsePlain`
+  ratio ×1.30 with allocations down to 9,035 B, `StaticKeyAttach` ratio ×1.67 and mean
+  ×1.32 — inside the documented echo-arm noise band; the allocation gate is green,
+  `SingleFlight` 23,457 B inside its `max(32 B, 1 %)` allowance) — this pass became
+  `baselines/0.11.0/` (`MACHINE.md` records the environment).
 
 - `0.10.0` (GitHub `3ba52649c85a3d8b56ab4473c7ea87678e7ac3ba`, internal release commit
   `6f247e0`): published 2026-11-15 — the M38 token-lifetime policy (minor): vendor-stated expiry

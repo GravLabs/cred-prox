@@ -3,8 +3,8 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// One explicit credential-type registration (see <c>docs/credprox-plan.md</c> §3.5 rule 6:
-/// nothing is discovered by scanning): the configuration <c>Type</c> name mapped to its
+/// One explicit credential-type registration (nothing is discovered by scanning):
+/// the configuration <c>Type</c> name mapped to its
 /// options and provider types.
 /// </summary>
 [Experimental("CREDPROX001")]

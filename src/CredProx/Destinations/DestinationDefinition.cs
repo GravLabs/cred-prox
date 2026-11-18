@@ -3,8 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// The bound shape of one <c>CredProx:Destinations:&lt;name&gt;</c> section
-/// (see <c>docs/credprox-plan.md</c> §3.2):
+/// The bound shape of one <c>CredProx:Destinations:&lt;name&gt;</c> section:
 /// <code>
 /// { "Template": "https://target.{partition}.cayuse.com", "Partition": "header:X-API-Env",
 ///   "Allowed": ["uat", "app"], "StripHeader": true }
@@ -28,7 +27,7 @@ public sealed class DestinationDefinition
     /// <summary>
     /// The exact partition values admitted (ordinal match). Required non-empty whenever
     /// <see cref="Partition"/> is set — a destination that resolves a partition without an
-    /// allow-list fails startup (§5.2 "Validation").
+    /// allow-list fails startup.
     /// </summary>
     public List<string> Allowed { get; set; } = [];
 

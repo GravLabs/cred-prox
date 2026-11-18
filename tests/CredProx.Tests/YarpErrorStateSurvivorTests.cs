@@ -167,6 +167,20 @@ public sealed class YarpErrorStateSurvivorTests
             body);
     }
 
+    // ---- outgoing body seam ----
+
+    [Fact]
+    public async Task MeasureOutgoingBody_NullProxyContent_MeasuresEmptyBody()
+    {
+        // The public seam's null-Content arm: a request whose outgoing message carries no
+        // content measures as an EMPTY body, not null — null is reserved for a body that
+        // passed the cap, and a feature measuring through the seam must tell the two apart.
+        var (state, _, _) = State(); // the helper's HttpRequestMessage carries no Content
+        var measured = await state.MeasureOutgoingBodyAsync(1024, default);
+        Assert.NotNull(measured);
+        Assert.Empty(measured);
+    }
+
     [Fact]
     public async Task Abort_GuardsRunBeforeAnythingElse()
     {

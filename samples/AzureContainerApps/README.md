@@ -1,109 +1,106 @@
-# AzureContainerApps — M29 round-2 host (one image, three modes)
+# Azure Container Apps: the deployment host
 
-The plan's round-2 test host (`docs/azure-live-test-plan.md` §Round 2): one
-container image that can act as the CredProx **proxy**, the **counterparty**
-(three independent verifiers), or the in-cluster **battery**. The live run
-deploys proxy + counterparty as one internal-only Container App and drives the
-battery as a Container Apps Job — zero public listeners anywhere (G2).
+This is the app you actually deploy to Azure Container Apps: callers knock with an
+API key, the vendor credential arrives from Key Vault, and reaching the vault itself
+needs no secret — the Container App's **managed identity** does that. No modes and no
+harness in here; every fact is config or environment. The live-gate harness (one image,
+four roles, its own in-image smoke) lives in `tools/aca-live-harness`; it is not this
+host's concern.
 
-## Modes
+## What it shows
 
-| Invocation | Role |
-|---|---|
-| `--mode proxy` | CredProx forwarder on `ASPNETCORE_URLS`. Routes: `/arm/*` (TokenCredential → ARM with the managed identity), `/jwt/*`, `/hmac/*`, `/mtls/*` → counterparty. Every route demands a caller key. |
-| `--mode counterparty` | The verifiers: RS256 client-assertion check against the PINNED public key, independent HMAC canonical-string recomputation, mTLS client-cert chain pinned to the CA + CN echo. Owns its ports in code (`8082` http, `8443` https strict client-cert). |
-| `--mode battery --proxy https://<internal-fqdn> [--phase all\|jwtprobe]` | Console probe, no listener. Prints one `P<n> PASS/FAIL` line per plan phase (`all`) or just the JWT-lifetime probe (`jwtprobe`, for the rotation witness). Caller key from vault secret `CredProx--Secrets--caller-key` (needs `KeyVault__Uri` + identity) or `CREDPROX_SMOKE_CALLER_KEY`. Strict TLS — an internal-ingress chain failure is a finding, not retried around. |
-| `--mode proxy --smoke` | Offline proof in one process: counterparty + proxy + battery checks with generated material, no vault, no Azure. Exit 0 prints `SMOKE OK:`. |
-| `--mode reloadproof` | Offline VAULT-PROVIDER RELOAD proof: the real provider + a real `SecretClient` + its real polling loop poll a loopback Key-Vault REST stub (`tools/keyvault-stub.py`) with ONLY the transport swapped. Rewrite the stub's file mid-run: the reload token fires and the value changes without a restart. Exit 0 prints `RELOAD PROOF OK`. Recipe below. |
+- **Managed identity → Key Vault → `secret:` refs** (`appsettings.json` + 8 lines of
+  Program.cs): with `KeyVault__Uri` set, the stock Azure Key Vault configuration
+  provider plugs in over `DefaultAzureCredential` — under Container Apps that resolves
+  to the app's user-assigned identity through the platform's env contract, no
+  connection string anywhere. A vault secret `CredProx--Secrets--acme-vendor-key`
+  answers `secret:acme-vendor-key`; the caller-key hash is held as a secret ref too.
+  `ReloadInterval` is set explicitly because the provider default (null) never polls a
+  rotated value.
+- **Caller keys at the internal ingress** (`CredProx:CallerAuth`, `CredProx:Callers`):
+  `X-API-Key` validated against SHA-256 hashes, constant-time compare; missing and
+  wrong keys get the identical refusal.
+- **The vendor key no app ever holds** (`CredProx:Credentials:acme`): a `StaticKey`
+  header credential — the proxy injects `Authorization: Bearer <key>`; the stand-in
+  echoes what it received and CredProx's response scrubber redacts it before the
+  caller sees it.
+- **Probes without credentials** (`/health`): Container Apps liveness/readiness hit a
+  plain health endpoint; nothing authenticates or forwards there.
+- **`secret:` refs with no vault** (`KeyVault__Uri` unset): the same references resolve
+  from plain config (env/user-secrets) exactly like every other sample — that is the
+  path the offline run and the offline check use. The Key Vault + managed identity path
+  is the same stock provider the shipped MicrosoftGraph sample runs, and the live-gate
+  harness (`tools/aca-live-harness`) proves it against a real vault, reload included.
 
-## Build and offline proof
-
-The example consumes the packed packages from `artifacts/packages` — pack
-first (the Dockerfile header lists these too):
+## Run it (offline, no Azure)
 
 ```bash
-dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
-dotnet pack src/CredProx -c Release -o artifacts/packages
-dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
-docker build -f samples/AzureContainerApps/Dockerfile -t credprox-m29:latest .
-docker run --rm credprox-m29:latest --mode proxy --smoke
+cd samples/AzureContainerApps
+(cd StubApi && dotnet run &)   # the vendor stand-in
+dotnet run
 ```
 
-`P5 PASS … P9 PASS` + `SMOKE OK` is the G1 offline gate. The full live gate
-list lives in the plan (§Round 2); `scripts/live-*.sh` drive it — **only**
-after the maintainer's gate, nothing here mutates Azure by itself.
-
-The offline **reload** proof (no Azure, no tenant; Linux docker):
+Then call through the gateway:
 
 ```bash
-mkdir -p /tmp/kvdata && printf 'first-value' > /tmp/kvdata/CredProx--Secrets--proof.txt
-python3 samples/AzureContainerApps/tools/keyvault-stub.py --data /tmp/kvdata &
-docker run --rm --network host \
-  -e KeyVault__Uri=https://credprox-m29-stub.vault.azure.net/ \
-  -e CREDPROX_RELOAD_SECONDS=5 -e CREDPROX_PROOF_SECONDS=60 \
-  credprox-m29:latest --mode reloadproof
-# mid-run, from this host:
-printf 'rotated-value-1' > /tmp/kvdata/CredProx--Secrets--proof.txt
+curl -s http://localhost:5097/acme/thing \
+  -H 'X-API-Key: credprox-e17-aca-demo-key'
 ```
 
-`RELOAD TOKEN FIRED; CredProx:Secrets:proof = rotated-value-1` +
-`RELOAD PROOF OK` is the gate. reloadproof uses the real provider and
-SecretClient with a transport swapped to a loopback stub: it proves the
-reload mechanism (polling → change detection → reload token → value swap in
-the running process), not Azure-side latency.
+```
+{"result":{"item":"acme-widget"},"saw_authorization":"Bearer [redacted]"}
+```
 
-## Configuration truth
+Nobody sent the vendor key: the gateway took it from config (the inline demo value —
+with no vault set the `secret:` refs fall back to `CredProx:Secrets` like in every
+sample), injected it upstream, and redacted the echo.
 
-- Secret material arrives ONLY from Key Vault through the stock provider
-  chain (`AddAzureKeyVault` + `AddCredProxConfigurationSecrets`, the shipped
-  MicrosoftGraph pattern): vault secret `CredProx--Secrets--<name>` answers
-  `secret:<name>` in `appsettings.json`. Consumed: `jwt-signing-key`,
-  `hmac-key`, `mtls-client-cert` (+`-password`), and on the counterparty
-  `cp-server-cert` (+`-password`); the battery reads `caller-key`. Pinning
-  material (`CredProxTest--jwt-public`, `CredProxTest--mtls-ca`) comes from the same
-  vault but is PUBLIC by design.
-- The caller registry arrives as plain env config
-  (`CredProx__Callers__battery__Keys__0__KeyHash=sha256:<hex>`). The registry
-  stores only the SHA-256 hash — the key VALUE is not config, only a vault
-  secret the battery fetches. The container trust anchor for the counterparty
-  server cert is the PUBLIC test-CA (`CREDPROX_TEST_CA_PEM_B64` →
-  `update-ca-certificates` in the entrypoint); no secret travels that path.
-- **Metadata placement matters**: `CredProx.Connection` is a CLUSTER metadata
-  (the connection certificate attaches to the forwarding HttpClient — see
-  `CredProxForwarderHttpClientFactory`, and the MutualTls sample);
-  `CredProx.Destination` / `CredProx.Credential` are ROUTE metadata. Wrong
-  placement starts clean but attaches nothing — the smoke run catches it.
-- **Egress prefix**: the CredProx destination `Template`
-  (`CredProx:Destinations:<name>:Template`) is authoritative — the CredProx
-  transform overwrites YARP's cluster `Address` per request. Keep both
-  consistent (they are here and in the deploy config).
-- `/arm` strips its prefix (real ARM wants `/subscriptions`); `/jwt`, `/hmac`,
-  `/mtls` forward the full path — the counterparty is namespaced by prefix and
-  its HMAC verifier signs/verifies the received path.
-- **2+ managed identities on one Container App:** set
-  `ManagedIdentityClientId` **in code** (the credential options). With a
-  single UAI the platform picks it; with two or more, nothing on the ACA
-  managed-identity wire ever sees an env-level hint and identity selection is
-  silently ambiguous. Live finding 2026-11-06.
-- **ACR pull:** the pull identity must be BOTH attached
-  (`az containerapp identity assign`) AND selected via
-  `configuration.registries[].identity` — an environment-level identity does
-  not pull images, for the app or for a Job. Live finding 2026-11-06.
+## Verify it
 
-## Honesty notes
+```bash
+cd samples/AzureContainerApps && ./smoke.sh
+# or directly:
+dotnet test tests/CredProx.SampleSmokes --filter Sample=AzureContainerApps
+```
 
-- Smoke **P5** runs against an in-proc ARM stub: route + caller-auth +
-  forwarding only, NOT the managed identity. The MI path is proven only by
-  the live battery P5 against real ARM.
-- Smoke runs the arm credential as a fixed-token stub
-  (`SmokeTokenCredential`) — no Azure environment exists in the container.
-- The pinned verifiers prove signature/chain CORRECTNESS with independent
-  code — they do not assert vendor trust, and the Keycloak-style claim
-  "vendor verified the client assertion" is not made anywhere.
-- The vault is treated as a custodian/deliverer only — no HSM, no
-  never-exports claim is made about the keys (they travel as PEM/PFX to the
-  consuming process, which is what this test is actually about).
-- A rotated vault value reaches a running process only because
-  `AddAzureKeyVault` is called with `ReloadInterval` set (all sites here set
-  30s); the provider default never polls. Without it (or a restart), the old
-  value is served forever.
+The cell runs the host on its bare shipped config: the value the vendor receives is
+the configured key as a bearer header, the caller's copy arrives `[redacted]`, and
+neither the vendor key nor the caller key appears anywhere in the response body or the
+host console. The Key Vault + managed identity path is proven live by
+`tools/aca-live-harness`, whose own offline proof covers the provider's reload
+mechanism.
+
+## Deploy it to Azure Container Apps
+
+Build the image from the repository root (pack the packages first):
+
+```bash
+docker build -f samples/AzureContainerApps/Dockerfile -t credprox-aca:latest .
+```
+
+1. **Identity.** Create (or reuse) a user-assigned managed identity and attach it to
+   the Container App.
+2. **Vault access.** On the key vault, grant that identity **Key Vault Secrets User**.
+   Nothing else is needed — the app reads through the identity, not a stored secret.
+3. **Secrets.** Set the two vault secrets the config references:
+   `CredProx--Secrets--demoCallerKeyHash` → `sha256:<64 hex>` of your real caller key,
+   `CredProx--Secrets--acme-vendor-key` → the real vendor key. Rename the config
+   entries to fit your callers and vendor — they are plain config keys.
+4. **The app.** `az containerapp create` with `--ingress internal` (zero public
+   listeners — callers reach the internal FQDN), `--target-port 8080` (the image bakes
+   `ASPNETCORE_URLS`), `--secrets` free (secrets come from the vault, not from app
+   secrets), and `KeyVault__Uri=https://<your-vault>.vault.azure.net/` in env.
+5. **Probes.** Point liveness and readiness at `/health` (plain 200, GET, no
+   credential).
+6. **Call it** from inside the VPC: `curl https://<internal-fqdn>/acme/thing -H
+   'X-API-Key: <your caller key>'`.
+
+## What just happened (one request traced)
+
+`GET /acme/thing` with `X-API-Key: <caller key>` → caller authentication resolves the
+caller from the SHA-256 hash store (a secret ref answered by the vault) → the `acme`
+credential hands over the cached vendor key (on a cache miss: read from the vault
+through the managed identity) → placement injects `Authorization: Bearer <key>` and
+registers the value with the response scrubber → the vendor answers; its echo of the
+key arrives to the caller as `Bearer [redacted]` → the host console shows the call with
+no credential value in sight (the offline cell proves exactly that).

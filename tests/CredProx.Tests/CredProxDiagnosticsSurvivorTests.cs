@@ -21,7 +21,8 @@ public sealed class CredProxDiagnosticsSurvivorTests
         {
             InstrumentPublished = (instrument, l) =>
             {
-                if (instrument.Meter == CredProxDiagnostics.Meter)
+                if (instrument.Meter == CredProxDiagnostics.Meter
+                    || instrument.Meter == OperationsDiagnostics.Meter)
                 {
                     l.EnableMeasurementEvents(instrument);
                 }
@@ -50,12 +51,17 @@ public sealed class CredProxDiagnosticsSurvivorTests
                     published.Add((instrument.Name, instrument.Unit, instrument.Description));
                 }
 
-                if (instrument.Meter == CredProxDiagnostics.Meter)
+                if (instrument.Meter == CredProxDiagnostics.Meter
+                    || instrument.Meter == OperationsDiagnostics.Meter)
                 {
                     l.EnableMeasurementEvents(instrument);
                 }
             },
         };
+        // Touch both shipped meters so every instrument is published before we assert;
+        // the two packages each own a Meter on the same "CredProx" scope name.
+        GC.KeepAlive(CredProxDiagnostics.Meter);
+        GC.KeepAlive(OperationsDiagnostics.Meter);
         listener.Start();
         listener.Dispose();
 
@@ -98,8 +104,8 @@ public sealed class CredProxDiagnosticsSurvivorTests
     {
         var connectionA = "diag-a-" + Guid.NewGuid().ToString("N");
         var connectionB = "diag-b-" + Guid.NewGuid().ToString("N");
-        CredProxDiagnostics.RecordCertificateDaysToExpiry(connectionA, 12.5);
-        CredProxDiagnostics.RecordCertificateDaysToExpiry(connectionB, -3.25);
+        OperationsDiagnostics.RecordCertificateDaysToExpiry(connectionA, 12.5);
+        OperationsDiagnostics.RecordCertificateDaysToExpiry(connectionB, -3.25);
 
         var queue = new ConcurrentQueue<Point>();
         using var listener = Listen(queue);
@@ -118,9 +124,9 @@ public sealed class CredProxDiagnosticsSurvivorTests
     public void HealthGauge_KeysByKindAndName_SoItemsStayDistinct()
     {
         var suffix = Guid.NewGuid().ToString("N");
-        CredProxDiagnostics.RecordHealthStatus("credential", "diag-cred-" + suffix, 1);
-        CredProxDiagnostics.RecordHealthStatus("probe", "diag-probe-" + suffix, 2);
-        CredProxDiagnostics.RecordHealthStatus("credential", "diag-cred-" + suffix, 0);
+        OperationsDiagnostics.RecordHealthStatus("credential", "diag-cred-" + suffix, 1);
+        OperationsDiagnostics.RecordHealthStatus("probe", "diag-probe-" + suffix, 2);
+        OperationsDiagnostics.RecordHealthStatus("credential", "diag-cred-" + suffix, 0);
 
         var queue = new ConcurrentQueue<Point>();
         using var listener = Listen(queue);

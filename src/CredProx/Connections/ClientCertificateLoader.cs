@@ -6,8 +6,8 @@ using System.Text;
 namespace CredProx;
 
 /// <summary>
-/// Loads a client certificate from a secret value (see <c>docs/credprox-plan.md</c> §3.2:
-/// <c>"ClientCertificate": "secret:adp-auth-cert"</c>). Two shapes are accepted: a PEM
+/// Loads a client certificate from a secret value such as
+/// <c>"ClientCertificate": "secret:adp-auth-cert"</c>. Two shapes are accepted: a PEM
 /// bundle containing at least one certificate and one private key (encrypted keys need the
 /// configured password), and a base64-encoded PKCS#12 (PFX) blob. Failure messages name
 /// the reference and the failure kind — never the value, the password, or key material.

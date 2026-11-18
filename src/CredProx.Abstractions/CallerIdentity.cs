@@ -4,13 +4,13 @@ using System.Security.Claims;
 namespace CredProx.Abstractions;
 
 /// <summary>
-/// The authenticated caller of a proxied request (see <c>docs/credprox-plan.md</c> §4
-/// Phase B): who presented a valid inbound API key, and which of that caller's keys did
+/// The authenticated caller of a proxied request: who presented a valid inbound API key,
+/// and which of that caller's keys did
 /// it (callers keep multiple active keys for rotation). Carries no key material.
 /// </summary>
 /// <param name="CallerId">The configured caller identifier.</param>
 /// <param name="KeyId">The identifier of the key that authenticated.</param>
-/// <param name="ClientId">For a caller token (M39, ADR-0004), the application (client)
+/// <param name="ClientId">For a caller token (ADR-0004), the application (client)
 /// id the token was issued to — the <c>azp</c>/<c>appid</c> the mapper matched;
 /// <see langword="null"/> on the caller-key path. Part of record equality.</param>
 [Experimental("CREDPROX001")]

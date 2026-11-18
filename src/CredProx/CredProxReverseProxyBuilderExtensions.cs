@@ -3,6 +3,7 @@ using CredProx;
 using CredProx.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Http;
 using Yarp.ReverseProxy.Configuration;
 using Yarp.ReverseProxy.Forwarder;
@@ -17,7 +18,10 @@ public static class CredProxReverseProxyBuilderExtensions
 {
     // The fixed CredProx configuration topology (plan §3): each subsection has its own
     // binder, which validates the keys inside it (M14a/M16/M17); the root check trusts
-    // these names and rejects everything else.
+    // these names and rejects everything else. "CallerToken" and "CallerAuth" stay
+    // listed even though the CredProx.CallerTokens and CredProx.CallerKeys add-ons read
+    // (and validate) those sections — the names must bind for a config written against
+    // 0.11.0 to start unchanged.
     private static readonly IReadOnlySet<string> CoreSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "Audit", "CallerAuth", "CallerToken", "Callers", "Connections", "Credentials",
@@ -27,8 +31,7 @@ public static class CredProxReverseProxyBuilderExtensions
     /// <summary>
     /// Adds the CredProx core: the stage-ordered pipeline and, in later milestones, the
     /// YARP adapters that run it. Credential types, secret sources and other plugins are
-    /// registered explicitly on top of this; nothing is discovered by scanning
-    /// (see <c>docs/credprox-plan.md</c> §3.5 rule 6).
+    /// registered explicitly on top of this; nothing is discovered by scanning.
     /// </summary>
     /// <param name="builder">The YARP reverse proxy builder.</param>
     /// <returns>The same <paramref name="builder"/>, for chaining.</returns>
@@ -42,8 +45,7 @@ public static class CredProxReverseProxyBuilderExtensions
     }
 
     /// <summary>
-    /// Adds the full CredProx request path on a YARP reverse proxy builder
-    /// (see <c>docs/credprox-plan.md</c> §3.1, §3.3):
+    /// Adds the full CredProx request path on a YARP reverse proxy builder:
     /// <list type="bullet">
     /// <item>binds <c>CredProx:Destinations</c> and <c>CredProx:Connections</c> into their
     /// registries (startup-validated by <see cref="CredProxStartupValidator"/>);</item>
@@ -132,7 +134,7 @@ public static class CredProxReverseProxyBuilderExtensions
             sp.GetService<TimeProvider>() ?? TimeProvider.System,
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CredProxAuditRecorder>>(),
             coreOptions,
-            sp.GetService<CallerKeyOptions>()));
+            configuration));
 
         // Partition sources (§3.2): the built-in header scheme; plugins add factories.
         services.TryAddEnumerable(
@@ -175,7 +177,6 @@ public static class CredProxReverseProxyBuilderExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, DestinationResolutionFeature>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, HeaderHygieneFeature>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, CredentialAttachFeature>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, HmacSignFeature>());
 
         // The built-in response features: secret scrubbing (M20, §8.2), then vendor
         // error normalisation (M24, §8.5). The pipeline orders response features by
@@ -214,6 +215,13 @@ public static class CredProxReverseProxyBuilderExtensions
         // The startup gate: eager binds, secret-reference validation and metadata
         // cross-checks before the first request is served.
         services.AddHostedService<CredProxStartupValidator>();
+
+        // ADR-0005 fail-closed pair to the binder's check: callers declared under
+        // CredProx:Callers with no caller authenticator registered refuse startup —
+        // evaluated at startup, not in an extension, because the authenticator may be
+        // registered by any extension in any order.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, CallerAuthenticatorStartupGuard>());
 
         return builder;
     }

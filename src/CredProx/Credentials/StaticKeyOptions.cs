@@ -3,9 +3,9 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// Options for the <c>StaticKey</c> credential type (see <c>docs/credprox-plan.md</c> §4):
+/// Options for the <c>StaticKey</c> credential type:
 /// a fixed key resolved from a <c>secret:</c> reference (or literal), attached as a header
-/// or query parameter, replacing any existing value (§5.2 "Static key" row).
+/// or query parameter, replacing any existing value.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class StaticKeyOptions : IHasAttachment

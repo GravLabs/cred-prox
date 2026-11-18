@@ -11,21 +11,19 @@ services:
       - ./realm:/opt/keycloak/data/import:ro
 
   api:
-    image: credprox-e7-sample
+    image: credprox-percaller-stubapi
     build:
       context: ../..
-      dockerfile: samples/PerCallerCredentials/Dockerfile
-    command: ["dotnet", "/app/PerCallerCredentials.dll", "--role", "api"]
+      dockerfile: samples/PerCallerCredentials/StubApi/Dockerfile
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
-      Api__Authority: http://keycloak:8080/realms/credprox
     depends_on:
       - keycloak
     ports:
       - "5084:8080"
 
   proxy:
-    image: credprox-e7-sample
+    image: credprox-percaller-sample
     build:
       context: ../..
       dockerfile: samples/PerCallerCredentials/Dockerfile
@@ -35,4 +33,4 @@ services:
       - keycloak
       - api
     ports:
-      - "5083:8080"
+      - "5100:8080"

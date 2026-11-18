@@ -5,7 +5,7 @@ namespace CredProx;
 /// <summary>
 /// A read stream that removes every occurrence of the request's injected secret values
 /// from the bytes flowing through it, replacing each with <c>[redacted]</c>
-/// (<see cref="AuditRedactor.Masked"/>; M20, plan §8.2).
+/// (<see cref="AuditRedactor.Masked"/>).
 /// </summary>
 /// <remarks>
 /// <para>

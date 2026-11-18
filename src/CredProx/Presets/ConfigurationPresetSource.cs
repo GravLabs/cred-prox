@@ -9,8 +9,7 @@ namespace CredProx;
 
 /// <summary>
 /// Presets written in the host's own configuration under
-/// <c>CredProx:Presets:&lt;name&gt;</c> (see <c>docs/credprox-plan.md</c> §3 plugin points:
-/// "presets from configuration"). A section shaped like a
+/// <c>CredProx:Presets:&lt;name&gt;</c>. A section shaped like a
 /// <c>CredProx:Credentials</c> entry is a preset a credential can reference by that name —
 /// community-contributed vendor knowledge with no code and no new package.
 /// </summary>

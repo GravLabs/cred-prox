@@ -1,4 +1,4 @@
-# E15 — AI agent egress (plan §8.3)
+# AI agent egress
 
 "Never give the agent the key" is the security principle vendors now push, and agents
 running MCP tools or plain HTTP calls are the fastest-growing consumers of third-party
@@ -23,35 +23,41 @@ plain config; the Salesforce integration is vendor facts, not vendor C#.
   `secret:sf-client-secret`, `Scope: api`.
 - **One shared credential, one cached token**: both agents ride the same `salesforce`
   credential; the token cache means exactly one issuance at the token endpoint no matter
-  how many agents call (the smoke counts issuances). Each agent still gets its own key,
+  how many agents call (the cells count issuances). Each agent still gets its own key,
   its own tool allow-list, and its own audit identity.
-- **The session token never reaches the agent** (M20, plan §8.2): the stub's data API
-  echoes the `Authorization` header it validated into a `debug_authorization` field —
-  the same thing a real error page or verbose endpoint does. The response scrubber
-  removes the injected session token there: the agent sees
+- **The session token never reaches the agent**: the stand-in's data API echoes the
+  `Authorization` header it validated into a `debug_authorization` field — the same
+  thing a real error page or verbose endpoint does. The response scrubber removes the
+  injected session token there: the agent sees
   `"debug_authorization":"Bearer [redacted]"`. The value is also absent from every log
   line; the audit records caller, route, status — never a credential.
 
-## Run the smoke (CI, no Docker)
+## Run it
 
 ```bash
-dotnet run -- --smoke
+cd samples/AgentEgress
+(cd StubApi && dotnet run &)   # the vendor stand-in
+dotnet run
 ```
 
-The token endpoint and data API are stubbed in-process and make the checks the real
-vendor makes: the token endpoint validates the form-posted client credentials (wrong
-ones → `invalid_client`, and no proxied call gets a 200 without them), and the data API
-refuses anything whose bearer isn't the token it issued. The smoke asserts: keyless →
-401; forged key → 401; crm query → 200 with the record echoed and the debug field
-scrubbed; exactly one token issuance across the whole run; crm agent on Case → 403;
-support agent on query → 403; support create → 200 (echo scrubbed) and still one
-issuance (shared cache); audit shows `proxied_call` per agent, `rejected_call` for each
-blocked call, and no line contains the client secret, the session token, or any agent's
-own key.
+Then call through the gateway as the CRM agent — with only its own key:
+
+```bash
+curl -s http://localhost:5089/salesforce/services/data/v62.0/query?q=SELECT+1 \
+  -H 'X-CredProx-Key: credprox-e15-crm-agent-demo-key'
+```
+
+```
+{"result":{"records":[{"attributes":{"type":"Account"},"Id":"001xx000003DWYl","Name":"Acme"}],"totalSize":1,"done":true},"debug_authorization":"Bearer [redacted]"}
+```
+
+The vendor saw its issued bearer on the call and returned real data; the agent sees the
+record with the session token redacted — it never held, and cannot recover, either half
+of the credential chain.
 
 ## The production shape: an MCP server as the agent runtime
 
-The smoke plays the agent's role with `HttpClient`. In production the agent runtime is
+The cells play the agent's role with `HttpClient`. In production the agent runtime is
 one hop away and holds exactly one secret — its CredProx key. With the Model Context
 Protocol SDK the tool handler is roughly:
 
@@ -91,8 +97,24 @@ service identity with an auditable caller id per agent on every request.
    revoking an agent is deleting one entry under `CredProx:Callers`.
 
 For per-**user** Salesforce tokens (the agent acting as a person), the same route works
-with `TokenExchange` (E14) instead of `OAuthClientCredentials` — the caller key admits
-the agent, and the exchanged token is cached per user.
+with `TokenExchange` instead of `OAuthClientCredentials` — the caller key admits the
+agent, and the exchanged token is cached per user.
+
+## Verify it
+
+```bash
+cd samples/AgentEgress && ./smoke.sh
+# or directly:
+dotnet test tests/CredProx.SampleSmokes --filter Sample=AgentEgress
+```
+
+Four cells against the stand-in: keyless and forged keys → 401 with the token endpoint
+untouched; the CRM agent's read → 200 with the record echoed, the debug field redacted,
+and exactly one issuance; the tool boundaries — CRM on Case →
+`403 credprox.operation_not_allowed`, support on query → 403, support's create → 200
+(echo redacted) and **still one issuance** across both agents (the shared cache); and
+the audit log from the host's own console — `proxied_call` and `rejected_call` per
+agent, no line containing the client secret, the session token, or any agent's own key.
 
 ## What just happened (one request traced)
 

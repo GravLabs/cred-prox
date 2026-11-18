@@ -1,5 +1,6 @@
 using CredProx;
 using FsCheck;
+using Microsoft.Extensions.Configuration;
 using FsCheck.Xunit;
 using Xunit;
 
@@ -19,7 +20,8 @@ public sealed class HeaderHygieneProperties
         proxyRequest.Headers.TryAddWithoutValidation("X-API-Key", generated.Get);
         proxyRequest.Headers.TryAddWithoutValidation("X-Trace", "keep-me");
 
-        await new HeaderHygieneFeature(new CredProxCoreOptions(), []).ApplyAsync(context, default);
+        await new HeaderHygieneFeature(new CredProxCoreOptions(), new ConfigurationBuilder().Build())
+            .ApplyAsync(context, default);
 
         Assert.False(proxyRequest.Headers.Contains("X-API-Key"));
         Assert.True(proxyRequest.Headers.Contains("X-Trace")); // only the key header goes
@@ -33,7 +35,8 @@ public sealed class HeaderHygieneProperties
         proxyRequest.Headers.TryAddWithoutValidation("X-Custom-Key", generated.Get);
         proxyRequest.Headers.TryAddWithoutValidation("X-API-Key", "kept-because-not-the-key");
 
-        await new HeaderHygieneFeature(options, []).ApplyAsync(context, default);
+        await new HeaderHygieneFeature(options, new ConfigurationBuilder().Build())
+            .ApplyAsync(context, default);
 
         Assert.False(proxyRequest.Headers.Contains("X-Custom-Key"));
         Assert.True(proxyRequest.Headers.Contains("X-API-Key"));
@@ -45,7 +48,9 @@ public sealed class HeaderHygieneProperties
         var context = SecurityContexts.Create(out var proxyRequest, destinationName: null);
         proxyRequest.Headers.TryAddWithoutValidation("X-API-Key", "caller-key");
 
-        await new HeaderHygieneFeature(new CredProxCoreOptions { InboundKeyHeader = "" }, [])
+        await new HeaderHygieneFeature(
+                new CredProxCoreOptions { InboundKeyHeader = "" },
+                new ConfigurationBuilder().Build())
             .ApplyAsync(context, default);
 
         Assert.True(proxyRequest.Headers.Contains("X-API-Key"));

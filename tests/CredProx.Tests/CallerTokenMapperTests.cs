@@ -20,7 +20,7 @@ public sealed class CallerTokenMapperTests
     private static string Hash() =>
         "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("unused"))).ToLowerInvariant();
 
-    private static CallerRegistryProvider Registry(params (string Caller, string[]? TokenClients)[] callers)
+    private static World Registry(params (string Caller, string[]? TokenClients)[] callers)
     {
         var entries = new Dictionary<string, string?>();
         foreach (var (caller, tokenClients) in callers)
@@ -44,16 +44,22 @@ public sealed class CallerTokenMapperTests
         }
 
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
-        return new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config))),
-            new ConfigurationSecretSource(config),
-            NullLogger<CallerRegistryProvider>.Instance);
+        return new World(
+            new CallerRegistryProvider(
+                new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)), []),
+                new ConfigurationSecretSource(config),
+                NullLogger<CallerRegistryProvider>.Instance),
+            config);
     }
 
+    // The mapper reads each caller's token client ids from configuration (its own key),
+    // so the world carries the config next to the registry that names the callers.
+    private sealed record World(CallerRegistryProvider Provider, IConfiguration Configuration);
+
     private static DefaultCallerTokenMapper Mapper(
-        CallerRegistryProvider provider,
+        World world,
         CallerTokenOptions? options = null) =>
-        new(provider, options ?? new CallerTokenOptions());
+        new(world.Provider, options ?? new CallerTokenOptions(), world.Configuration);
 
     private static ClaimsPrincipal Principal(params (string Type, string Value)[] claims) =>
         new(new ClaimsIdentity(claims.Select(c => new Claim(c.Type, c.Value)), authenticationType: "test"));
@@ -187,11 +193,9 @@ public sealed class CallerTokenMapperTests
     [Fact]
     public void TokenOnlyCaller_IsMatchable()
     {
-        var provider = Registry(("token-only", ["c1"]));
-        // The definition bound with zero keys — the token clients are its credential.
-        Assert.True(provider.Current.TryGet("token-only", out var definition));
-        Assert.Empty(definition!.Keys);
-        Assert.Equal("token-only", Mapper(provider).MapToken(Principal(("azp", "c1")))!.Identity.CallerId);
+        var world = Registry(("token-only", ["c1"]));
+        Assert.True(world.Provider.Current.TryGet("token-only", out _));
+        Assert.Equal("token-only", Mapper(world).MapToken(Principal(("azp", "c1")))!.Identity.CallerId);
     }
 
     [Fact]

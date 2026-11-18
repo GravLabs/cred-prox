@@ -119,10 +119,14 @@ public sealed class CallerRebindSurvivorTests
     {
         private Action<object?>? _callback;
         private object? _state;
+        private bool _fired;
 
         public bool ActiveChangeCallbacks => true;
 
-        public bool HasChanged => false;
+        // A token that fired reports itself changed — every real change token does, and
+        // the provider's single-flight gate reads exactly this to tell a genuine secret-
+        // source signal from the same reload event arriving through the other watch.
+        public bool HasChanged => _fired;
 
         public IDisposable RegisterChangeCallback(Action<object?> callback, object? state)
         {
@@ -131,7 +135,11 @@ public sealed class CallerRebindSurvivorTests
             return new NoopDisposable();
         }
 
-        public void Fire() => _callback?.Invoke(_state);
+        public void Fire()
+        {
+            _fired = true;
+            _callback?.Invoke(_state);
+        }
 
         private sealed class NoopDisposable : IDisposable
         {
@@ -161,7 +169,13 @@ public sealed class CallerRebindSurvivorTests
             ["CredProx:Callers:app-a:Keys:0:KeyHash"] = "sha256:" + new string('a', 64),
         });
         var config = new ConfigurationBuilder().Add(source).Build();
-        var binder = new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)));
+        var secretSource = new ConfigurationSecretSource(config);
+        // The keys rules are the validator that refuses the bad rebind, exactly as the
+        // keys package's DI contributes them to a host.
+        var binder = new CallerBinder(
+            config,
+            new SecretAccessorFactory(secretSource),
+            [new CallerKeyRules()]);
         var logs = new List<string?>();
         var token = new ManualChangeToken();
         var provider = new CallerRegistryProvider(

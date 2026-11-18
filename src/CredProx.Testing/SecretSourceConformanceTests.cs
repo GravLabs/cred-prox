@@ -5,8 +5,8 @@ using Xunit;
 namespace CredProx.Testing;
 
 /// <summary>
-/// The conformance suite for <see cref="ISecretSource"/> implementations (see
-/// <c>docs/credprox-plan.md</c> §5.2 "Secrets"): a configured reference resolves to its
+/// The conformance suite for <see cref="ISecretSource"/> implementations:
+/// a configured reference resolves to its
 /// value, an unknown reference resolves to <see langword="null"/> (the caller turns that
 /// into a startup error naming the reference — never a value), and the same name resolves
 /// consistently. The built-in configuration source runs this same suite.

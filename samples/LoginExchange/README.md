@@ -1,4 +1,4 @@
-# E12 — LoginExchange: session logins, per-environment partitions, allow-list
+# LoginExchange: session logins, per-environment partitions, allow-list
 
 ## What it demonstrates
 
@@ -17,7 +17,7 @@ endpoint and get a session token back. Shown against a vendor-neutral WireMock s
 
 ## What you need
 
-Docker (the WireMock stub on `:8082`). No accounts.
+Docker (the WireMock stub on `:8101`). No accounts.
 
 ## Run it
 
@@ -30,7 +30,7 @@ dotnet run
 **UAT** — the caller names the environment, not a credential:
 
 ```bash
-curl -s -H 'X-API-Env: uat' http://localhost:5087/acme/api/v1/timeoff
+curl -s -H 'X-API-Env: uat' http://localhost:5101/acme/api/v1/timeoff
 ```
 
 ```
@@ -44,7 +44,7 @@ with form user `uat-svc` (the `{partition}` template) and the secret password; t
 **Staging** — a different partition, a different session:
 
 ```bash
-curl -s -H 'X-API-Env: staging' http://localhost:5087/acme/api/v1/timeoff
+curl -s -H 'X-API-Env: staging' http://localhost:5101/acme/api/v1/timeoff
 ```
 
 ```
@@ -54,7 +54,7 @@ Acme stub received: Authorization = sess-staging-svc
 **Prod** — blocked by the allow-list, before any vendor call:
 
 ```bash
-curl -si -H 'X-API-Env: prod' http://localhost:5087/acme/api/v1/timeoff | head -6
+curl -si -H 'X-API-Env: prod' http://localhost:5101/acme/api/v1/timeoff | head -6
 ```
 
 ```
@@ -68,11 +68,11 @@ content-type: application/problem+json
 
 ```jsonc
 "CredProx": {
-  "Destinations": { "acme": { "Template": "http://localhost:8082" } },
+  "Destinations": { "acme": { "Template": "http://localhost:8101" } },
   "Credentials": {
     "acme": {
       "Type": "LoginExchange",
-      "LoginEndpoint": "http://localhost:8082/acme/{partition}/login",
+      "LoginEndpoint": "http://localhost:8101/acme/{partition}/login",
       "Method": "POST",
       "Form": { "User": "{partition}-svc", "Password": "secret:acme-password" },
       "Response": "JsonPath", "ResponseField": "sessionId",
@@ -90,15 +90,22 @@ vendor that wants `Authorization: Bearer <session>` instead of the bare token, s
 
 ## Verify it
 
+One cell per behaviour above, driving the real host over real sockets from
+`tests/CredProx.SampleSmokes` against the stub from `docker-compose.yml`:
+
 ```bash
+dotnet test tests/CredProx.SampleSmokes --filter Sample=LoginExchange
+# or the one-line wrapper:
 cd samples/LoginExchange && ./smoke.sh
 ```
 
-Checks all three behaviours above and prints `SMOKE OK`.
+Attachment is proven twice per admitted partition — the caller's body carries the
+redaction, the stub's own request journal carries the raw session — and the
+prod partition is checked to be refused before any vendor call.
 
 ## What just happened
 
-Tracing `curl -H 'X-API-Env: uat' http://localhost:5087/acme/api/v1/timeoff`:
+Tracing `curl -H 'X-API-Env: uat' http://localhost:5101/acme/api/v1/timeoff`:
 
 1. The route matches and names credential `acme`.
 2. The credential declares a partition: CredProx reads `X-API-Env: uat` and checks it

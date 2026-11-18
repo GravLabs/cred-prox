@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Threading.RateLimiting;
 
 namespace CredProx;
@@ -7,10 +8,17 @@ namespace CredProx;
 /// <c>PermitsPerInterval</c> permits start each window, waiters queue FIFO (bounded by
 /// <c>QueueLimit</c>) and are granted at the next window boundary. The framework's own
 /// limiters have no <see cref="TimeProvider"/> hook, so the built-in rate limiter is this
-/// subclass — it makes the rate window testable with <c>FakeTimeProvider</c> (§5.1) and
+/// subclass — it makes the rate window testable with <c>FakeTimeProvider</c> and
 /// keeps the <see cref="RateLimiter"/> abstraction the chained pipeline expects.
 /// </summary>
-internal sealed class FixedWindowRateLimiter : RateLimiter
+/// <remarks>
+/// Core caller budgets construct this directly; it is also the public seam the
+/// CredProx.Operations throttle consumes for its per-cluster limiters — the limiter stays
+/// core because caller budgets are core policy (ADR-0005), and the throttle feature rides
+/// the same window semantics.
+/// </remarks>
+[Experimental("CREDPROX001")]
+public sealed class FixedWindowRateLimiter : RateLimiter
 {
     private readonly int _permitsPerInterval;
     private readonly TimeSpan _interval;
@@ -25,6 +33,15 @@ internal sealed class FixedWindowRateLimiter : RateLimiter
     private long _totalFailed;
     private bool _disposed;
 
+    /// <summary>
+    /// Creates a limiter admitting <paramref name="permitsPerInterval"/> permits per
+    /// <paramref name="interval"/>, queueing at most <paramref name="queueLimit"/> waiters
+    /// FIFO, measured on <paramref name="time"/>.
+    /// </summary>
+    /// <param name="permitsPerInterval">Permits each window starts with (at least 1).</param>
+    /// <param name="interval">Window length (positive).</param>
+    /// <param name="queueLimit">Maximum queued waiters (0 admits no queueing).</param>
+    /// <param name="time">The clock the windows are measured on.</param>
     public FixedWindowRateLimiter(int permitsPerInterval, TimeSpan interval, int queueLimit, TimeProvider time)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(permitsPerInterval, 1);
@@ -40,6 +57,7 @@ internal sealed class FixedWindowRateLimiter : RateLimiter
         _remaining = permitsPerInterval;
     }
 
+    /// <inheritdoc />
     protected override ValueTask<RateLimitLease> AcquireAsyncCore(
         int permitCount,
         CancellationToken cancellationToken)
@@ -99,6 +117,7 @@ internal sealed class FixedWindowRateLimiter : RateLimiter
         }
     }
 
+    /// <inheritdoc />
     protected override RateLimitLease AttemptAcquireCore(int permitCount)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(permitCount, 1);
@@ -124,6 +143,7 @@ internal sealed class FixedWindowRateLimiter : RateLimiter
         }
     }
 
+    /// <inheritdoc />
     public override RateLimiterStatistics GetStatistics()
     {
         lock (_gate)
@@ -138,6 +158,7 @@ internal sealed class FixedWindowRateLimiter : RateLimiter
         }
     }
 
+    /// <inheritdoc />
     public override TimeSpan? IdleDuration
     {
         get
@@ -149,6 +170,7 @@ internal sealed class FixedWindowRateLimiter : RateLimiter
         }
     }
 
+    /// <inheritdoc />
     protected override void Dispose(bool disposing)
     {
         if (disposing)

@@ -25,6 +25,9 @@ public sealed class PresetTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
+        services.AddCredProxHmac();
+        services.AddCredProxLoginExchange();
         services.AddCredProxCredentials(configuration);
         return services.BuildServiceProvider();
     }
@@ -287,6 +290,9 @@ public sealed class PresetTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
+        services.AddCredProxHmac();
+        services.AddCredProxLoginExchange();
         services.AddSingleton<IPresetSource, ArrayPresetSource>();
         services.AddCredProxCredentials(configuration);
 
@@ -336,6 +342,9 @@ public sealed class PresetTests
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
+        services.AddCredProxHmac();
+        services.AddCredProxLoginExchange();
         services.AddSingleton<IPresetSource, JwtAssertionPresetSource>();
         services.AddCredProxCredentials(configuration);
 

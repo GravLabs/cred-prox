@@ -59,14 +59,14 @@ public sealed class AuditRecorderSurvivorTests
         CredProxAuditOptions? options = null,
         RecordingLogger? logger = null,
         CredProxCoreOptions? coreOptions = null,
-        CallerKeyOptions? callerKeys = null) =>
+        IConfiguration? configuration = null) =>
         new(
             [sink],
             options ?? new CredProxAuditOptions(),
             TimeProvider.System,
             logger ?? new RecordingLogger(),
             coreOptions ?? new CredProxCoreOptions(),
-            callerKeys);
+            configuration);
 
     /// <summary>
     /// A DefaultHttpContext never runs <c>Response.OnCompleted</c> callbacks: <c>CompleteAsync</c>

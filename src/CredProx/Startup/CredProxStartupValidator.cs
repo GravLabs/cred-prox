@@ -11,29 +11,33 @@ using Yarp.ReverseProxy.Configuration;
 namespace CredProx;
 
 /// <summary>
-/// The CredProx startup gate (§3.3 "Validation"), run as the host starts:
+/// The CredProx startup gate, run as the host starts:
 /// <list type="bullet">
 /// <item>resolves the credential, destination and connection registries — every section
 /// binds and every client certificate loads before traffic (no lazy first-request
 /// surprises);</item>
 /// <item>resolves every literal <c>secret:</c> reference — including ones a referenced
-/// preset introduces — and rejects nested-brace secret declarations (§3.2 shapes only);</item>
+/// preset introduces — and rejects nested-brace secret declarations (declared reference shapes only);</item>
 /// <item>warns on fully-dynamic secret declarations whose shape admits every name;</item>
 /// <item>checks every YARP <c>CredProx.Credential</c> / <c>CredProx.Destination</c> /
 /// <c>CredProx.Connection</c> metadata reference and every credential's
 /// <c>Connection</c> option against the registries;</item>
 /// <item>when caller authentication is registered, binds <c>CredProx:Callers</c> and
 /// checks every caller operation <c>Route</c> reference against the configured routes;</item>
-/// <item>binds <c>CredProx:KillSwitch</c> (M18, §8.4), so a switch that cannot be read is
-/// a startup failure and never an unarmed switch.</item>
+/// <item>binds <c>CredProx:KillSwitch</c>, so a switch that cannot be read is
+/// a startup failure and never an unarmed switch;</item>
+/// <item>refuses <c>CredProx:Throttling</c> / <c>CredProx:Resilience</c> /
+/// <c>CredProx:Health</c> configuration whose feature is not registered — those sections
+/// ship in the CredProx.Operations add-on (ADR-0005), and a configured limit must never
+/// sit inert.</item>
 /// </list>
 /// All problems are collected into one <see cref="OptionsValidationException"/> naming
-/// references — never values (§5.2 "Validation").
+/// references — never values.
 /// </summary>
 /// <remarks>
 /// This is the startup gate; after startup, <see cref="CredProxConfigValidator"/> re-runs
 /// the metadata cross-checks on every YARP configuration load, so a bad reload is refused
-/// and the previous configuration keeps serving (M5 note N1).
+/// and the previous configuration keeps serving.
 /// </remarks>
 [Experimental("CREDPROX001")]
 public sealed class CredProxStartupValidator : IHostedService
@@ -49,7 +53,7 @@ public sealed class CredProxStartupValidator : IHostedService
     /// <param name="services">Resolves the registries eagerly.</param>
     /// <param name="proxyConfigProviders">The YARP config sources whose metadata is checked.</param>
     /// <param name="configuration">The application configuration root.</param>
-    /// <param name="secretValidator">The literal-reference resolver from M2.</param>
+    /// <param name="secretValidator">The literal-reference resolver.</param>
     /// <param name="presetSources">The preset sources, so preset-introduced secret references are scanned too.</param>
     /// <param name="logger">Logs fully-dynamic declaration warnings.</param>
     public CredProxStartupValidator(
@@ -152,10 +156,64 @@ public sealed class CredProxStartupValidator : IHostedService
 
         ValidateProxyMetadata(errors, credentials, destinations, connections, callers);
 
+        RejectUnregisteredOperationsSections(errors);
+
         if (errors.Count > 0)
         {
             throw new OptionsValidationException("CredProx", typeof(object), errors);
         }
+    }
+
+    /// <summary>
+    /// The <c>CredProx:Throttling</c>, <c>CredProx:Resilience</c> and <c>CredProx:Health</c>
+    /// sections belong to the CredProx.Operations add-on. A configured section whose feature
+    /// is not registered is refused at startup, not left inert: an operator who wrote a
+    /// limit or enabled a probe expects it enforced, and silence is the worst outcome.
+    /// Detection goes through the public abstractions the add-on registers into
+    /// (<see cref="IPipelineFeature"/>, <see cref="ICredentialHealthProbe"/>) matched on the
+    /// built-in implementation names — the core must not know the add-on's assembly the way
+    /// the credential binder already does not know the OAuth providers'.
+    /// </summary>
+    private void RejectUnregisteredOperationsSections(List<string> errors)
+    {
+        var featureNames = (_services.GetService<IEnumerable<IPipelineFeature>>() ?? [])
+            .Select(f => f.GetType().FullName)
+            .ToHashSet(StringComparer.Ordinal);
+        var probeNames = (_services.GetService<IEnumerable<ICredentialHealthProbe>>() ?? [])
+            .Select(p => p.GetType().FullName)
+            .ToHashSet(StringComparer.Ordinal);
+
+        RejectIfSectionConfigured(
+            errors, "CredProx:Throttling",
+            featureNames.Contains("CredProx.CredProxThrottleFeature"),
+            "the outbound throttle", plural: false, "AddCredProxThrottling");
+        RejectIfSectionConfigured(
+            errors, "CredProx:Resilience",
+            featureNames.Contains("CredProx.CredProxResilienceFeature"),
+            "the resilience adapter", plural: false, "AddCredProxResilience");
+        var healthRegistered =
+            probeNames.Contains("CredProx.TokenObtainableProbe")
+            && probeNames.Contains("CredProx.CertificateExpiryProbe");
+        RejectIfSectionConfigured(
+            errors, "CredProx:Health",
+            healthRegistered,
+            "the credential health probes", plural: true, "AddCredProxHealthProbes");
+    }
+
+    private void RejectIfSectionConfigured(
+        List<string> errors, string path, bool registered, string feature, bool plural, string addMethod)
+    {
+        if (registered || !_configuration.GetSection(path).GetChildren().Any())
+        {
+            return;
+        }
+
+        var (link, ship) = plural
+            ? ("are not registered", "they ship")
+            : ("is not registered", "it ships");
+        errors.Add(
+            $"The '{path}' section is configured but {feature} {link}: {ship} "
+            + $"in the CredProx.Operations package: add the package reference and call {addMethod}().");
     }
 
     /// <inheritdoc />

@@ -9,19 +9,22 @@ namespace CredProx;
 public static class CredProxAuth
 {
     /// <summary>
-    /// The ASP.NET Core authentication scheme of the CredProx caller API-key handler
-    /// (registered by <c>AddCredProxCallerAuthentication</c>). Hosts that enforce caller
-    /// authentication through middleware set this scheme's authorization policy on their
-    /// YARP routes; the in-pipeline enforcement works with or without it.
+    /// The ASP.NET Core authentication scheme of the CredProx caller API-key handler.
+    /// Internal: the key layer itself lives in the CredProx.CallerKeys add-on, whose
+    /// <c>CallerKeyOptions.Scheme</c> is the public name of the same constant (the
+    /// analogue of <see cref="CallerTokenScheme"/>); the core keeps only the name it must
+    /// match in the policy.
     /// </summary>
-    public const string CallerKeyScheme = "CredProxCallerKey";
+    internal const string CallerKeyScheme = "CredProxCallerKey";
 
     /// <summary>
-    /// The ASP.NET Core authentication scheme of the CredProx caller-token validation —
-    /// the stock JWT bearer handler configured by <c>AddCredProxCallerTokenAuthentication</c>
-    /// (ADR-0004). The caller policy accepts this scheme or <see cref="CallerKeyScheme"/>.
+    /// The ASP.NET Core authentication scheme of the caller-token validation (ADR-0004) —
+    /// the scheme name the caller policy accepts for a caller token alongside
+    /// <see cref="CallerKeyScheme"/>. Internal: the token layer itself lives in the
+    /// CredProx.CallerTokens add-on, whose <c>CallerTokenOptions.Scheme</c> is the public
+    /// name of the same constant; the core keeps only the name it must match in the policy.
     /// </summary>
-    public const string CallerTokenScheme = "CredProxCallerToken";
+    internal const string CallerTokenScheme = "CredProxCallerToken";
 
     /// <summary>
     /// The authorization policy requiring an authenticated CredProx caller, for hosts that

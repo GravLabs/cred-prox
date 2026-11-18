@@ -5,7 +5,7 @@ namespace CredProx;
 /// <summary>
 /// Implemented by credential options that declare where their value is attached to the
 /// outbound request. The credential binder turns this into the attach step the request
-/// feature applies (see <c>docs/credprox-plan.md</c> §3.1).
+/// feature applies.
 /// </summary>
 [Experimental("CREDPROX001")]
 public interface IHasAttachment

@@ -144,6 +144,7 @@ public sealed class CallerAuthIntegrationTests : IAsyncLifetime
                 services.AddCredProxTokenCache();
                 services.AddCredProxConfigurationSecrets(context.Configuration);
                 services.AddCredProxBuiltInCredentials();
+                services.AddCredProxLoginExchange(); // the contoso credential is the packaged type
                 services.AddCredProxCredentials(context.Configuration);
                 services.AddCredProxCallerAuthentication(context.Configuration);
                 services.AddRouting();

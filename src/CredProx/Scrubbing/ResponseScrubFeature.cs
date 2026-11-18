@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace CredProx;
 
 /// <summary>
-/// The built-in response secret scrubber (M20, plan §8.2): when the upstream reflects
+/// The built-in response secret scrubber: when the upstream reflects
 /// a credential the pipeline injected — error pages echoing the request, echo endpoints
 /// — the caller must not see it. Runs at <see cref="Stage.ShapeResponse"/>; on by
 /// default, opted out with <c>CredProx:Scrubbing:Enabled=false</c>. The scan engages
@@ -29,7 +29,7 @@ namespace CredProx;
 /// Scrubbing can change the body length, so a scrubbed response's <c>Content-Length</c>
 /// is dropped (the caller sees chunked framing). The matcher works on UTF-8 bytes — a
 /// body in a non-UTF-8 character set is a documented residue that carries the value
-/// through. <c>text/event-stream</c> bodies scrub per event (M22): events flow as they
+/// through. <c>text/event-stream</c> bodies scrub per event: events flow as they
 /// complete, keeping streaming latency, and a secret split across an event boundary is
 /// the framing's own documented residue. Values are never logged — the logs say that
 /// scrubbing happened, never what it removed.

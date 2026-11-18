@@ -25,6 +25,12 @@ jobs:
           dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
           dotnet pack src/CredProx -c Release -o artifacts/packages
           dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
+          dotnet pack src/CredProx.CallerTokens -c Release -o artifacts/packages
+          dotnet pack src/CredProx.CallerKeys -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Hmac -c Release -o artifacts/packages
+          dotnet pack src/CredProx.LoginExchange -c Release -o artifacts/packages
+          dotnet pack src/CredProx.OAuth -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Operations -c Release -o artifacts/packages
           dotnet pack src/CredProx.Testing -c Release -o artifacts/packages
 
       # Runs after the local feed is populated: the solution includes the examples,
@@ -49,6 +55,11 @@ jobs:
 
       - name: Build
         run: dotnet build CredProx.slnx --configuration Release --no-restore
+
+      # The soak host lives outside the solution; building it here against the feed the
+      # step above packed means a version bump cannot strand it silently.
+      - name: Build the soak host
+        run: dotnet build tools/m33-soak/SoakHost --configuration Release
 
       - name: Test with coverage
         run: >-
@@ -129,7 +140,7 @@ jobs:
 
   # Plan §6: examples build against the packed packages (catching packaging mistakes) and
   # the offline-capable ones smoke against local stubs/containers.
-  # E5 (Graph) builds here; it has no smoke yet (planned offline smoke: plan M41).
+  # The MicrosoftGraph sample builds here and its offline smoke runs below.
   examples:
     name: Examples build and smoke
     runs-on: ubuntu-latest
@@ -147,72 +158,93 @@ jobs:
           dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
           dotnet pack src/CredProx -c Release -o artifacts/packages
           dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
+          dotnet pack src/CredProx.CallerTokens -c Release -o artifacts/packages
+          dotnet pack src/CredProx.CallerKeys -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Hmac -c Release -o artifacts/packages
+          dotnet pack src/CredProx.LoginExchange -c Release -o artifacts/packages
+          dotnet pack src/CredProx.OAuth -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Operations -c Release -o artifacts/packages
           dotnet pack src/CredProx.Testing -c Release -o artifacts/packages
 
       - name: Build all examples (Release, against the packages)
         run: |
-          for p in QuickStart OAuthKeycloak MutualTls MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie CallerApiKey AgentTokens; do
+          for p in QuickStart OAuthKeycloak MutualTls MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie AzureContainerApps CallerApiKey AgentTokens; do
             dotnet build "samples/$p" --configuration Release
           done
 
-      - name: Smoke E1 QuickStart (WireMock)
+      # Cross-sample guard: every host port a sample claims (compose mapping, appsettings
+      # or fixture literal) must belong to exactly one sample. Cheap and offline.
+      - name: Guard sample host ports
+        run: samples/port-uniqueness.sh
+
+      - name: Smoke QuickStart (WireMock)
         run: samples/QuickStart/smoke.sh
 
-      - name: Smoke E2 OAuthKeycloak (Keycloak)
+      - name: Smoke OAuthKeycloak (Keycloak)
         run: samples/OAuthKeycloak/smoke.sh
 
-      - name: Smoke E3 MutualTls (nginx mTLS)
+      - name: Smoke MutualTls (nginx mTLS)
         run: samples/MutualTls/smoke.sh
 
-      - name: Smoke E6 ADP (nginx mTLS + WireMock + offline Key Vault witness)
+      - name: Smoke ADP (nginx mTLS + WireMock + offline Key Vault witness)
         run: samples/ADP/smoke.sh
 
-      - name: Smoke E7 PerCallerCredentials (Keycloak)
+      - name: Smoke PerCallerCredentials (Keycloak)
         run: samples/PerCallerCredentials/smoke.sh
 
-      - name: Smoke E8 GitHubApp (in-process stubs)
+      - name: Smoke GitHubApp (in-process stubs)
         run: samples/GitHubApp/smoke.sh
 
-      - name: Smoke E9 HmacSigning (in-process stub)
+      - name: Smoke HmacSigning (in-process stub)
         run: samples/HmacSigning/smoke.sh
 
       # Conformance self-test + proxy path, both against in-process stubs.
-      - name: Smoke E10 CustomPlugin (in-process stubs)
+      - name: Smoke CustomPlugin (in-process stubs)
         run: samples/CustomPlugin/smoke.sh
 
       # Throttling, vendor-429 pause, circuit breaker, health (shortened load script).
-      - name: Smoke E11 Operations (WireMock)
+      - name: Smoke Operations (WireMock)
         run: samples/Operations/smoke.sh
 
       # Login exchange, per-environment partitions, partition allow-list (WireMock).
-      - name: Smoke E12 LoginExchange (WireMock)
+      - name: Smoke LoginExchange (WireMock)
         run: samples/LoginExchange/smoke.sh
 
       # Caller keys, injected provider key, SSE passthrough, allow-list, throttle, audit.
-      - name: Smoke E13 AiGateway (in-process provider stub)
+      - name: Smoke AiGateway (in-process provider stub)
         run: samples/AiGateway/smoke.sh
 
       # Token exchange against real Keycloak: per-user exchanged tokens, forged
       # inbound 401 before any exchange, caller key still required, downstream
       # audience refuses the inbound token.
-      - name: Smoke E14 TokenExchange (Keycloak)
+      - name: Smoke TokenExchange (Keycloak)
         run: samples/TokenExchange/smoke.sh
 
       # Agent keys, allow-lists as tool boundaries, one shared cached session token
       # across two agents, scrubbing of the token the stub echoes back (in-process).
-      - name: Smoke E15 AgentEgress (in-process Salesforce stub)
+      - name: Smoke AgentEgress (in-process Salesforce stub)
         run: samples/AgentEgress/smoke.sh
 
       # Session-cookie login (Cayuse shape): form login replayed as Cookie, per-environment
       # partitions, caller cookies replaced, transparent refresh, scrubbed echo (in-process).
-      - name: Smoke E16 SessionCookie (in-process CRM stub)
+      - name: Smoke SessionCookie (in-process CRM stub)
         run: samples/SessionCookie/smoke.sh
 
+      # Config-secrets path against the in-process stand-in; the live-gate harness
+      # under tools/aca-live-harness (which proves the Key Vault path) is not built here.
+      - name: Smoke AzureContainerApps (in-process stubs)
+        run: samples/AzureContainerApps/smoke.sh
+
       # Caller API keys: 401 missing == 401 wrong with no echo, key stripped upstream (WireMock).
-      - name: Smoke E18 CallerApiKey (WireMock)
+      - name: Smoke CallerApiKey (WireMock)
         run: samples/CallerApiKey/smoke.sh
 
       # Agent tokens: named role admits, unlisted or absent roles 403, unlisted client and
       # stale token 401, bearer stripped before forwarding (offline OIDC stub).
-      - name: Smoke E19 AgentTokens (offline OIDC stub)
+      - name: Smoke AgentTokens (offline OIDC stub)
         run: samples/AgentTokens/smoke.sh
+
+      # Entra app client credentials and the TokenCredential path, both against
+      # in-process stubs (three cells in the shared smoke project).
+      - name: Smoke MicrosoftGraph (in-process stubs)
+        run: samples/MicrosoftGraph/smoke.sh

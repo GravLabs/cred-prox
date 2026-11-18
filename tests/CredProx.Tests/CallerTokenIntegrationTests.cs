@@ -46,7 +46,7 @@ public sealed class CallerTokenIntegrationTests : IAsyncLifetime
     private static readonly RSA CustomHostRsa = RSA.Create(2048);
 
     private static Action<AuthenticationBuilder> CustomHandlerScheme(RSA key) => builder => builder.AddJwtBearer(
-        CredProxAuth.CallerTokenScheme,
+        CallerTokenOptions.Scheme,
         options =>
         {
             options.MapInboundClaims = false;
@@ -202,6 +202,7 @@ public sealed class CallerTokenIntegrationTests : IAsyncLifetime
                 services.AddCredProxTokenCache();
                 services.AddCredProxConfigurationSecrets(context.Configuration);
                 services.AddCredProxBuiltInCredentials();
+                services.AddCredProxLoginExchange(); // the contoso credential is the packaged type
                 services.AddCredProxCredentials(context.Configuration);
                 services.AddCredProxCallerAuthentication(context.Configuration);
                 if (tokenAuth)
@@ -217,7 +218,7 @@ public sealed class CallerTokenIntegrationTests : IAsyncLifetime
                         // the Authority and hand the handler the RSA key directly. The config
                         // section still carries the dummy Authority/Audience that registration
                         // demands; with Authority nulled no metadata fetch ever happens.
-                        services.Configure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, o =>
+                        services.Configure<JwtBearerOptions>(CallerTokenOptions.Scheme, o =>
                         {
                             o.Authority = null;
                             o.RequireHttpsMetadata = false;

@@ -5,7 +5,7 @@ namespace CredProx;
 /// <summary>
 /// The startup-bound <c>CredProx:Connections</c> section, keyed by name. Built by
 /// <see cref="ConnectionBinder"/>; referenced by cluster metadata
-/// <c>CredProx.Connection</c> and by a credential's <c>Connection</c> option (§3.2).
+/// <c>CredProx.Connection</c> and by a credential's <c>Connection</c> option.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class ConnectionRegistry

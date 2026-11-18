@@ -38,7 +38,7 @@ public sealed class CallerTokenOptionsTests
 
         var scheme = await provider
             .GetRequiredService<IAuthenticationSchemeProvider>()
-            .GetSchemeAsync(CredProxAuth.CallerTokenScheme);
+            .GetSchemeAsync(CallerTokenOptions.Scheme);
 
         Assert.NotNull(scheme);
         Assert.Equal(typeof(JwtBearerHandler), scheme.HandlerType);
@@ -53,10 +53,84 @@ public sealed class CallerTokenOptionsTests
 
         var bearer = provider
             .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
-            .Get(CredProxAuth.CallerTokenScheme);
+            .Get(CallerTokenOptions.Scheme);
 
         Assert.Equal("https://login.microsoftonline.com/tenant-id/v2.0", bearer.Authority);
         Assert.Equal("api://credprox", bearer.Audience);
+    }
+
+    [Fact]
+    public void RequireHttpsMetadata_DefaultsToTrue()
+    {
+        // The real-world default pins both halves: unset stays https-required, and the
+        // bearer options actually carry the CredProx default (not the handler's own).
+        var services = new ServiceCollection();
+        services.AddCredProxCallerTokenAuthentication(ValidConfig());
+        using var provider = services.BuildServiceProvider();
+
+        var bearer = provider
+            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(CallerTokenOptions.Scheme);
+
+        Assert.True(bearer.RequireHttpsMetadata);
+    }
+
+    [Fact]
+    public void RequireHttpsMetadata_OfflineSetting_FlowsToBearerOptions()
+    {
+        // The offline-stub key (slice 5b): an http issuer stub is met by configuration in
+        // the Development environment, not by PostConfigure code in the host.
+        var services = new ServiceCollection();
+        var config = Config(
+            Row("CredProx:CallerToken:Authority", "http://localhost:8085"),
+            Row("CredProx:CallerToken:Audience", "credprox-agent-api"),
+            Row("CredProx:CallerToken:RequireHttpsMetadata", "false"));
+        services.AddCredProxCallerTokenAuthentication(config);
+        using var provider = services.BuildServiceProvider();
+
+        var bearer = provider
+            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(CallerTokenOptions.Scheme);
+
+        Assert.False(bearer.RequireHttpsMetadata);
+    }
+
+    [Fact]
+    public void RequireHttpsMetadata_OfflineSetting_WithLoopbackIPv6Authority_IsAccepted()
+    {
+        // The accepted arm of the fail-closed rule (slice 5b): the opt-out holds for an
+        // http Authority on any loopback host — here the bracketed IPv6 literal, the
+        // host shape a plain TCP listener picks when v6 binds first.
+        var services = new ServiceCollection();
+        var config = Config(
+            Row("CredProx:CallerToken:Authority", "http://[::1]:8085"),
+            Row("CredProx:CallerToken:Audience", "credprox-agent-api"),
+            Row("CredProx:CallerToken:RequireHttpsMetadata", "false"));
+        services.AddCredProxCallerTokenAuthentication(config);
+        using var provider = services.BuildServiceProvider();
+
+        var bearer = provider
+            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(CallerTokenOptions.Scheme);
+
+        Assert.False(bearer.RequireHttpsMetadata);
+    }
+
+    [Fact]
+    public void RequireHttpsMetadata_OfflineSetting_WithNonLoopbackAuthority_FailsRegistration()
+    {
+        // The refused arm — the accident the rule exists to refuse: the Development
+        // setting copied into a config whose Authority is the real issuer. https changes
+        // nothing here; the opt-out is loopback-only, and the refusal names both keys.
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => new ServiceCollection()
+                .AddCredProxCallerTokenAuthentication(Config(
+                    Row("CredProx:CallerToken:Authority", "https://login.microsoftonline.com/tenant-id/v2.0"),
+                    Row("CredProx:CallerToken:Audience", "api://credprox"),
+                    Row("CredProx:CallerToken:RequireHttpsMetadata", "false"))));
+
+        Assert.Contains(nameof(CallerTokenOptions.RequireHttpsMetadata), ex.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(CallerTokenOptions.Authority), ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -232,6 +306,6 @@ public sealed class CallerTokenOptionsTests
 
         Assert.NotNull(policy);
         Assert.Contains(CredProxAuth.CallerKeyScheme, policy.AuthenticationSchemes);
-        Assert.Contains(CredProxAuth.CallerTokenScheme, policy.AuthenticationSchemes);
+        Assert.Contains(CallerTokenOptions.Scheme, policy.AuthenticationSchemes);
     }
 }

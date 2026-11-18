@@ -6,7 +6,7 @@ namespace CredProx;
 
 /// <summary>
 /// The built-in <see cref="Stage.ResolveDestination"/> feature
-/// (see <c>docs/credprox-plan.md</c> §3.2/§3.4): resolves the route's
+/// : resolves the route's
 /// <c>CredProx.Destination</c> entry, admits the request's partition against its
 /// allow-list, and overrides the outbound address prefix with the expanded template.
 /// A missing or disallowed partition answers <c>400 credprox.partition_not_allowed</c>
@@ -16,7 +16,7 @@ namespace CredProx;
 /// <remarks>
 /// The partition value reaches the template only through
 /// <see cref="PartitionSourceBinding.ResolveAsync"/>; the template expansion itself
-/// performs no validation, so the allow-list is the single gate (§3.4, M2/M3 review carry).
+/// performs no validation, so the allow-list is the single gate.
 /// </remarks>
 [Experimental("CREDPROX001")]
 public sealed class DestinationResolutionFeature : IRequestFeature

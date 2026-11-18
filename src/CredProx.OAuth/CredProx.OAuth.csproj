@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Add-on for CredProx: the OAuth credential family (ADR-0005). OAuthClientCredentials, TokenExchange and JwtAssertion move out of the core with their options, validators and the OpenID Connect key-retrieval dependency; the host adds a package reference and calls AddCredProxOAuth. Same configuration keys (CredProx:Credentials:&lt;id&gt; with Type: OAuthClientCredentials / TokenExchange / JwtAssertion, CredProx:TokenEndpoint, CredProx:Connections), same guarantees — the M38 token-lifetime policy, the per-(credential, partition) cache through the core's shared token cache, and the inbound-token rules (docs/adr/0002, docs/adr/0003); the core carries the pipeline, the token cache, the named HttpClient and the shared connection transport.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CredProx\CredProx.csproj" />
+    <ProjectReference Include="..\CredProx.Abstractions\CredProx.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- JWKS retrieval for inbound-token validation (TokenExchangeAuthority / JwksUri). -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CredProx.Tests" />
+    <InternalsVisibleTo Include="CredProx.Fuzz" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- The add-on dogfoods the experimental plugin contract (plan §3.5 rule 2). -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+    <!-- New package: no published baseline exists yet, so baseline validation is skipped;
+         its rotation starts at 0.12.0 (ADR-0001). -->
+    <EnablePackageValidation>false</EnablePackageValidation>
+  </PropertyGroup>
+
+</Project>

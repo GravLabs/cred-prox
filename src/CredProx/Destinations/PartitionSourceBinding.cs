@@ -6,7 +6,7 @@ namespace CredProx;
 
 /// <summary>
 /// Thrown when a request's partition value is missing or not in the configured allow-list.
-/// The request pipeline turns it into the rejection the source declares (§3.4) without
+/// The request pipeline turns it into the rejection the source declares, without
 /// forwarding: <c>400 credprox.partition_not_allowed</c> for a requested value that was
 /// refused (the default), <c>403 credprox.operation_not_allowed</c> for a value derived
 /// from the caller's identity that has no mapping (the <c>caller:</c> source). The message
@@ -17,7 +17,7 @@ public sealed class PartitionNotAllowedException : Exception
 {
     /// <summary>Creates the exception for one partition source description.</summary>
     /// <param name="sourceDescription">What the partition was read from, for error text; never a secret.</param>
-    /// <param name="rejection">How the source's rejections answer the caller (§3.4).</param>
+    /// <param name="rejection">How the source's rejections answer the caller.</param>
     public PartitionNotAllowedException(
         string sourceDescription, PartitionRejection rejection = PartitionRejection.BadRequest)
         : base($"The request's partition value is missing or not allowed ({sourceDescription}).")
@@ -33,7 +33,7 @@ public sealed class PartitionNotAllowedException : Exception
     /// <summary>The HTTP status the pipeline answers with.</summary>
     public int StatusCode { get; }
 
-    /// <summary>The <c>credprox.*</c> error code (§3.4).</summary>
+    /// <summary>The <c>credprox.*</c> error code.</summary>
     public string Code { get; }
 
     /// <summary>The static, caller-safe problem title.</summary>
@@ -42,9 +42,8 @@ public sealed class PartitionNotAllowedException : Exception
 
 /// <summary>
 /// A partition source bound to its allow-list: it resolves the request's partition and
-/// admits it only by exact ordinal match against the configured <c>Allowed</c> values
-/// (see <c>docs/credprox-plan.md</c> §3.2/§3.4). This is the single gate the M2/M3 review
-/// carry demands: nothing downstream — destination template, secret-name expansion, token
+/// admits it only by exact ordinal match against the configured <c>Allowed</c> values.
+/// This is the single gate: nothing downstream — destination template, secret-name expansion, token
 /// endpoint template, token-cache key — ever sees a partition value that did not pass here.
 /// </summary>
 /// <remarks>
@@ -67,7 +66,7 @@ public sealed class PartitionSourceBinding
     /// <param name="source">The source that reads the partition.</param>
     /// <param name="allowed">The exact values admitted; must not be empty.</param>
     /// <param name="description">Where the partition comes from, for error text.</param>
-    /// <param name="rejection">How a rejection answers the caller (§3.4).</param>
+    /// <param name="rejection">How a rejection answers the caller.</param>
     public PartitionSourceBinding(
         IPartitionSource source,
         IReadOnlyCollection<string> allowed,
@@ -97,7 +96,7 @@ public sealed class PartitionSourceBinding
     /// <summary>Where the partition comes from, for error text; never a secret.</summary>
     public string Description { get; }
 
-    /// <summary>How a rejection of this binding's partition answers the caller (§3.4).</summary>
+    /// <summary>How a rejection of this binding's partition answers the caller.</summary>
     public PartitionRejection Rejection { get; }
 
     /// <summary>

@@ -6,8 +6,8 @@ namespace CredProx;
 
 /// <summary>
 /// Orders the registered features by their declared <see cref="Stage"/>, independently of
-/// the order they were registered in, and runs request features in that order
-/// (see <c>docs/credprox-plan.md</c> §3.5 rule 3). Features that declare the same stage
+/// the order they were registered in, and runs request features in that order.
+/// Features that declare the same stage
 /// keep their registration order.
 /// </summary>
 [Experimental("CREDPROX001")]
@@ -32,7 +32,7 @@ public sealed class CredProxPipeline
 
     /// <summary>
     /// Creates the pipeline from the registered features, including the response
-    /// features of M20 (plan §8.2). The order of the input sequences is irrelevant; the
+    /// features. The order of the input sequences is irrelevant; the
     /// declared <see cref="Stage"/> of each feature decides.
     /// </summary>
     /// <param name="requestFeatures">The registered request features.</param>
@@ -59,7 +59,7 @@ public sealed class CredProxPipeline
     /// <summary>The registered outbound pipeline features, in stage order.</summary>
     public IReadOnlyList<IPipelineFeature> PipelineFeatures => _pipelineFeatures;
 
-    /// <summary>The registered response features, in stage order (M20, plan §8.2).</summary>
+    /// <summary>The registered response features, in stage order.</summary>
     public IReadOnlyList<IResponseFeature> ResponseFeatures => _responseFeatures;
 
     /// <summary>
@@ -87,7 +87,7 @@ public sealed class CredProxPipeline
 
     /// <summary>
     /// Runs the response features in stage order against <paramref name="context"/>
-    /// (M20, plan §8.2), while the upstream response is still pre-copy: features can
+    /// , while the upstream response is still pre-copy: features can
     /// reshape headers and wrap the body stream before any byte reaches the caller.
     /// Unlike the request direction there is no short-circuit — the response is
     /// fail-closed: a feature failure propagates and the raw upstream bytes are never

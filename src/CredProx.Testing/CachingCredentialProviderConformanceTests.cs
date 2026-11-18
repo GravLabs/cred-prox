@@ -6,8 +6,7 @@ namespace CredProx.Testing;
 
 /// <summary>
 /// The conformance suite for providers that cache through <see cref="ITokenCache"/> —
-/// the OAuth-style contract (see <c>docs/credprox-plan.md</c> §5.2 "Token cache" and
-/// "Refresh-on-401"): concurrent acquires collapse to one token call, and the
+/// the OAuth-style contract: concurrent acquires collapse to one token call, and the
 /// invalidate-then-acquire pair the refresh-on-401 handler performs yields a fresh token.
 /// Inherit this instead of <see cref="CredentialProviderConformanceTests{TProvider,TOptions}"/>
 /// when your provider acquires vendor tokens.
@@ -21,7 +20,7 @@ public abstract class CachingCredentialProviderConformanceTests<TProvider, TOpti
     where TOptions : class
 {
     /// <summary>
-    /// §5.2 "Token cache": 100 concurrent requests perform a single token fetch and all
+    /// Token cache contract: 100 concurrent requests perform a single token fetch and all
     /// observe the same value.
     /// </summary>
     [Fact]
@@ -39,7 +38,7 @@ public abstract class CachingCredentialProviderConformanceTests<TProvider, TOpti
     }
 
     /// <summary>
-    /// §5.2 "Refresh-on-401" contract at the provider level: the handler's
+    /// Refresh-on-401 contract at the provider level: the handler's
     /// invalidate-then-refetch yields a fresh token value, not the cached one.
     /// </summary>
     [Fact]
@@ -56,7 +55,7 @@ public abstract class CachingCredentialProviderConformanceTests<TProvider, TOpti
     }
 
     /// <summary>
-    /// §5.2 "Token cache": one key's failure does not affect other keys — the same
+    /// Token cache contract: one key's failure does not affect other keys — the same
     /// credential under a different partition value acquires independently.
     /// </summary>
     [Fact]

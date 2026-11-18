@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 namespace CredProx;
 
 /// <summary>
-/// The built-in <c>caller:</c> partition source (§3.2, §4 Phase B "Per-caller credentials"):
+/// The built-in <c>caller:</c> partition source:
 /// the partition is the authenticated caller's id, so one credential serves every caller
 /// with each caller mapped — through the allow-list and the <c>{partition}</c> templates —
 /// to its own vendor account. An unauthenticated request (or an anonymous route) has no
@@ -14,8 +14,7 @@ namespace CredProx;
 /// <remarks>
 /// Rejection is <see cref="PartitionRejection.Forbidden"/>: the caller did not request a
 /// bad value — their identity simply has no mapping — so the answer is
-/// <c>403 credprox.operation_not_allowed</c>, not <c>400</c> (§3.4, §5.2 "Per-caller
-/// credentials").
+/// <c>403 credprox.operation_not_allowed</c>, not <c>400</c>.
 /// </remarks>
 [Experimental("CREDPROX001")]
 public sealed class CallerPartitionSource : IPartitionSource

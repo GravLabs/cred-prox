@@ -152,6 +152,33 @@ A deliberate 8 KB per-request allocation on a hot arm and a 1 ms delay on a hot
 micro method were each caught by the gate during development of the script
 (sabotage probes, not committed behaviour).
 
+## Accepted release-delta allocations — 0.12.0
+
+The 0.12.0 release-gate pass (against `baselines/0.11.0`, prep commit
+`e10f18c0a622d75c3af6313d2d75cc9234c2f25c`, 2026-11-18 UTC) compared 13 methods with
+`FAIL=3`. The three failures are the credential-attach arms, each beyond the flat
++32 B allowance:
+
+| Arm | 0.11.0 baseline | 0.12.0 prep | Delta |
+| --- | ---: | ---: | ---: |
+| `OAuthCacheHit` | 7,864 B | 7,976 B | +112 B |
+| `OAuthCacheHitScrub` | 9,735 B | 9,843 B | +108 B |
+| `StaticKeyAttach` | 7,457 B | 7,575 B | +118 B |
+
+Four passes on identical code (two full runs, two runs of just these three arms)
+measured `OAuthCacheHit` at +112…113 B and `OAuthCacheHitScrub` at +106…108 B, but
+`StaticKeyAttach` anywhere from +111 to +128 B, so that arm's allocation varies by up
+to 17 B between runs: wider than the echo-arm band in the table above, and not
+explained by anything measured so far. The drift itself is real in every pass and
+belongs to the release delta
+between `0.11.0` and `0.12.0` — chiefly the package-split seams, not the prep
+commits — and the other ten methods measured unchanged or better. The maintainer
+accepted the ~1.5% per-request allocation as the measured cost of the split for this
+release: the priority for it is the minimal core, not a byte budget. Root-causing
+which part of the split carries the +106…128 B, and why `StaticKeyAttach` varies, sits on the backlog and remains open
+as of 0.12.0, not in the release; the baseline rotates to the `0.12.0` bytes at the
+post-publish refresh below.
+
 ## Refreshing the baseline at each release
 
 1. Run a full pass on a quiet machine against the release commit (see above).

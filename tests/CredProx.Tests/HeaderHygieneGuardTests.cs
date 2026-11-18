@@ -1,4 +1,5 @@
 using CredProx;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace CredProx.Tests;
@@ -10,17 +11,17 @@ namespace CredProx.Tests;
 public sealed class HeaderHygieneGuardTests
 {
     [Fact]
-    public void Ctor_NullCallerKeyOptions_ThrowsArgumentNullNamingCallerKeyOptions()
+    public void Ctor_NullConfiguration_ThrowsArgumentNullNamingConfiguration()
     {
         var error = Assert.Throws<ArgumentNullException>(
             () => new HeaderHygieneFeature(new CredProxCoreOptions(), null!));
-        Assert.Equal("callerKeyOptions", error.ParamName);
+        Assert.Equal("configuration", error.ParamName);
     }
 
     [Fact]
     public async Task ApplyAsync_NullContext_ThrowsArgumentNullNamingContext()
     {
-        var feature = new HeaderHygieneFeature(new CredProxCoreOptions(), Array.Empty<CallerKeyOptions>());
+        var feature = new HeaderHygieneFeature(new CredProxCoreOptions(), new ConfigurationBuilder().Build());
 
         var error = await Assert.ThrowsAsync<ArgumentNullException>(
             () => feature.ApplyAsync(null!, default).AsTask());

@@ -178,18 +178,12 @@ public sealed class CallerAllowListProperties
                 "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Key))).ToLowerInvariant(),
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
-        var secretSource = new ConfigurationSecretSource(config);
-        var registryProvider = new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(secretSource)),
-            secretSource,
-            NullLogger<CallerRegistryProvider>.Instance);
 
         var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddOptions();
-        services.AddSingleton<ICallerStore>(new ConfigCallerStore(registryProvider, TimeProvider.System));
-        services.AddAuthentication()
-            .AddScheme<CallerKeyOptions, CallerKeyAuthenticationHandler>(CredProxAuth.CallerKeyScheme, _ => { });
+        // The keys package's public entry point wires scheme, rules, store and the caller
+        // policy exactly as a host does — SecurityTests holds no internals of the package.
+        services.AddCredProxConfigurationSecrets(config);
+        services.AddCredProxCallerAuthentication(config);
         context.RequestServices = services.BuildServiceProvider();
 
         await new CallerAuthenticationFeature().ApplyAsync(context, default);
@@ -219,7 +213,7 @@ public sealed class CallerAllowListProperties
 
         var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
         return new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config))),
+            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config)), []),
             new ConfigurationSecretSource(config),
             NullLogger<CallerRegistryProvider>.Instance);
     }

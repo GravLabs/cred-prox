@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// The credential-side <c>Partition</c> block of <c>docs/credprox-plan.md</c> §3.2:
+/// The credential-side <c>Partition</c> block:
 /// <c>{ "From": "header:X-API-Env", "Allowed": ["uat", "app"] }</c>. A credential that
 /// declares it gates <em>every</em> use of the partition value — the token-endpoint
 /// template, secret-name expansion and the token-cache key all run only after the value
@@ -40,7 +40,7 @@ public interface IHasPartitionConfig
 
 /// <summary>
 /// Implemented by credential options that reference a named connection
-/// (<c>"Connection": "adp"</c>, §3.2) whose client certificate the token call uses.
+/// (<c>"Connection": "adp"</c>) whose client certificate the token call uses.
 /// </summary>
 [Experimental("CREDPROX001")]
 public interface IHasConnection

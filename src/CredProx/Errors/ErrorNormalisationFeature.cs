@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 namespace CredProx;
 
 /// <summary>
-/// Vendor error normalisation (M24, plan §8.5): a vendor's 4xx/5xx error body becomes
+/// Vendor error normalisation: a vendor's 4xx/5xx error body becomes
 /// an RFC 7807 <c>application/problem+json</c> document so the caller speaks one error
 /// dialect for the whole endpoint — the proxy's own failures already did. The document
 /// is lossless: the vendor's payload rides along in the <c>vendor_detail</c> extension
@@ -43,7 +43,7 @@ namespace CredProx;
 [Experimental("CREDPROX001")]
 public sealed class ErrorNormalisationFeature : IResponseFeature
 {
-    /// <summary>The only route-metadata value that opts a route out (§8.5).</summary>
+    /// <summary>The only route-metadata value that opts a route out.</summary>
     public const string OptOutValue = "off";
 
     /// <summary>RFC 7807 <c>type</c> identifying a problem whose origin is the vendor.</summary>

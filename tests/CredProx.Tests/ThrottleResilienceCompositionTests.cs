@@ -3,6 +3,7 @@ using CredProx;
 using CredProx.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -95,6 +96,45 @@ public sealed class ThrottleResilienceCompositionTests
         Assert.Equal(Stage.Pipeline, throttle.Stage);
         Assert.Equal(Stage.Pipeline, resilience.Stage);
         Assert.True(resilience.Order < throttle.Order);
+    }
+
+    [Fact]
+    public void Split_KeepsSignBeforeThrottleOutsideResilience_AcrossPackages()
+    {
+        var (throttle, resilience) = BuiltInFeatures();
+
+        // The moved features keep their exact pipeline placement, now in their own
+        // assembly: throttle (Order 10) wraps resilience (Order 0), unchanged by ADR-0005.
+        Assert.Equal(Stage.Pipeline, throttle.Stage);
+        Assert.Equal(Stage.Pipeline, resilience.Stage);
+        Assert.Equal(10, throttle.Order);
+        Assert.Equal(0, resilience.Order);
+        Assert.Equal("CredProx.Operations", throttle.GetType().Assembly.GetName().Name);
+        Assert.Equal("CredProx.Operations", resilience.GetType().Assembly.GetName().Name);
+
+        // The Hmac sign stage still precedes the outbound pipeline, from its own package.
+        var configuration = TestConfig.Root(
+            ("CredProx:Credentials:signer:Type", "Hmac"),
+            ("CredProx:Credentials:signer:Secret", "secret:hmac-key"),
+            ("CredProx:Credentials:signer:SignatureHeader", "X-Signature"),
+            ("CredProx:Credentials:signer:Components:0", "method"),
+            ("CredProx:Credentials:signer:Components:1", "path"),
+            ("CredProx:Secrets:hmac-key", "shared-key-value"));
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxHmac();
+        services.AddCredProxCredentials(configuration);
+        var provider = services.BuildServiceProvider();
+        var sign = new HmacSignFeature(
+            provider.GetRequiredService<CredentialRegistryProvider>(),
+            new FakeTimeProvider(),
+            NullLogger<HmacSignFeature>.Instance);
+
+        Assert.Equal(Stage.Sign, sign.Stage);
+        Assert.Equal("CredProx.Hmac", sign.GetType().Assembly.GetName().Name);
+        Assert.True((int)sign.Stage < (int)throttle.Stage);
     }
 
     private sealed class PassThrough : DelegatingHandler

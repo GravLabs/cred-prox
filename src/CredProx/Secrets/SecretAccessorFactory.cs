@@ -6,8 +6,7 @@ namespace CredProx;
 
 /// <summary>
 /// Creates <see cref="ScopedSecretAccessor"/> instances whose allowed reference set is
-/// extracted from a plugin's own configuration section, enforcing the secret scoping rule
-/// (see <c>docs/credprox-plan.md</c> §3.5 rule 4).
+/// extracted from a plugin's own configuration section, enforcing the secret scoping rule.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class SecretAccessorFactory

@@ -1,7 +1,7 @@
 namespace CredProx;
 
 /// <summary>
-/// The live kill-switch state (M18, plan §8.4): which clusters and which callers are
+/// The live kill-switch state: which clusters and which callers are
 /// currently out of service. Ids match case-insensitively, like every other CredProx id;
 /// entries that name nothing existing are harmless (the id may arrive with a later
 /// reload), so nothing cross-checks them against the other registries.

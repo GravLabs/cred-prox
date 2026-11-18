@@ -123,14 +123,15 @@ public sealed class VendorSnippetValidationTests
     /// <summary>The registration half: this is where unknown-key refusal happens.</summary>
     private static ServiceProvider Register(IConfiguration config)
     {
-        // Same registration set a sample host runs (samples/MicrosoftGraph/Program.cs:84-91),
-        // minus the web host: cache, config secrets, built-in credential types, the
-        // config-bound credential registry, then the YARP + CredProx feature.
+        // Same registration set a sample host runs (samples/MicrosoftGraph/Program.cs:84-92),
+        // minus the web host: cache, config secrets, built-in credential types and the
+        // OAuth add-on, the config-bound credential registry, then the YARP + CredProx feature.
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(config);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
         services.AddCredProxCredentials(config);
         services.AddReverseProxy().LoadFromConfig(config.GetSection("ReverseProxy")).AddCredProx(config);
         return services.BuildServiceProvider();

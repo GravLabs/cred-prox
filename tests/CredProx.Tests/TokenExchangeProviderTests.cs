@@ -142,6 +142,46 @@ public sealed class TokenExchangeProviderTests
         Assert.Equal("Basic", request.Headers.Authorization!.Scheme);
     }
 
+    // Request-body client authentication: FormPost puts the expanded pair on the form and
+    // never sets Authorization. The omitted-secret shape differs structurally from Basic:
+    // Basic sends the "cid:" pair, FormPost omits the field entirely.
+    [Fact]
+    public async Task FormPost_SendsCredentialsInTheForm_NoAuthorizationHeader()
+    {
+        var (provider, handler) = CreateProvider();
+        var options = ExchangeOptions();
+        options.ClientAuthentication = OAuthClientAuthentication.FormPost;
+
+        await provider.GetCredentialAsync(
+            options, TestSecrets.AccessorFor([]), Context(IssueToken(IssuerRsa)), default);
+
+        var request = handler.Requests.Single(r => r.RequestUri!.AbsolutePath.Contains("/token"));
+        Assert.Null(request.Headers.Authorization);
+
+        var form = ExchangeBody(handler);
+        Assert.Equal("cid", form["client_id"]);
+        Assert.Equal("csec", form["client_secret"]);
+    }
+
+    [Fact]
+    public async Task FormPost_NullSecret_OmitsTheSecretField_KeepsClientId()
+    {
+        var (provider, handler) = CreateProvider();
+        var options = ExchangeOptions();
+        options.ClientAuthentication = OAuthClientAuthentication.FormPost;
+        options.ClientSecret = null;
+
+        await provider.GetCredentialAsync(
+            options, TestSecrets.AccessorFor([]), Context(IssueToken(IssuerRsa)), default);
+
+        var request = handler.Requests.Single(r => r.RequestUri!.AbsolutePath.Contains("/token"));
+        Assert.Null(request.Headers.Authorization);
+
+        var form = ExchangeBody(handler);
+        Assert.Equal("cid", form["client_id"]);
+        Assert.False(form.ContainsKey("client_secret"));
+    }
+
     [Fact]
     public async Task Rfc8693_OptionalFields_AreSentWhenConfigured()
     {
@@ -639,6 +679,34 @@ public sealed class TokenExchangeProviderTests
             .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
 
         Assert.Equal(2, ExchangeCalls(handler));
+    }
+
+    [Fact]
+    public async Task M38_LifetimeAboveOneDay_WarnsOnceAcrossRepeatedClampedMints()
+    {
+        // The notice side of the cap: two clamped mints of the same credential produce ONE
+        // over-24h warning naming the credential (the once-per-credential rule the empty-lifetime
+        // notice already carries; the pin above covers the clock side). The raw value and the
+        // served token stay out of the log line.
+        var time = new FakeTimeProvider();
+        var handler = new StubHttpHandler(Route(jwks: JwksJson(),
+            tokenBody: """{"access_token":"down-tok","expires_in":172800}"""));
+        var logger = new CollectingLogger();
+        var cache = new InMemoryTokenCache(Options.Create(new TokenCacheOptions()), time);
+        var provider = new TokenExchangeProvider(cache, new StubHttpClientFactory(handler), time, logger);
+        var inbound = IssueToken(IssuerRsa, lifetime: TimeSpan.FromHours(30));
+
+        Assert.Equal("down-tok", await provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+        time.Advance(TimeSpan.FromHours(20));               // past 80 % of 24 h -> second clamped mint
+        Assert.Equal("down-tok", await provider
+            .GetCredentialAsync(ExchangeOptions(), TestSecrets.AccessorFor([]), Context(inbound), default));
+        Assert.Equal(2, ExchangeCalls(handler));            // clamped, minted twice
+
+        var notice = Assert.Single(logger.Messages, static m => m.Contains("longer than 24 hours"));
+        Assert.Contains("test", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("down-tok", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("172800", notice, StringComparison.Ordinal); // never the raw value
     }
 
     [Theory]

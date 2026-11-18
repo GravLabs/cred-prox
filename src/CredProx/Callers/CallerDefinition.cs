@@ -3,47 +3,10 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// One active API key of a caller (§4 Phase B): an id for audit and rotation, the SHA-256
-/// hash of the key value (the value itself is never stored), and an optional expiry. A
-/// revoked key is simply removed from configuration — the reload drops it from the live
-/// registry.
-/// </summary>
-[Experimental("CREDPROX001")]
-public sealed class CallerKey
-{
-    /// <summary>Creates a key entry. Hash material stays internal to the core.</summary>
-    /// <param name="keyId">The key's identifier within its caller.</param>
-    /// <param name="hash">The 32-byte SHA-256 hash of the key value.</param>
-    /// <param name="expiresAt">When the key stops authenticating; <see langword="null"/> for never.</param>
-    public CallerKey(string keyId, byte[] hash, DateTimeOffset? expiresAt)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(keyId);
-        ArgumentNullException.ThrowIfNull(hash);
-        if (hash.Length != 32)
-        {
-            throw new ArgumentException("A caller key hash must be 32 bytes (SHA-256).", nameof(hash));
-        }
-
-        KeyId = keyId;
-        Hash = hash;
-        ExpiresAt = expiresAt;
-    }
-
-    /// <summary>The key's identifier within its caller; safe to log.</summary>
-    public string KeyId { get; }
-
-    /// <summary>When the key stops authenticating; <see langword="null"/> for never.</summary>
-    public DateTimeOffset? ExpiresAt { get; }
-
-    /// <summary>The SHA-256 hash of the key value; never leaves the core.</summary>
-    internal byte[] Hash { get; }
-}
-
-/// <summary>
-/// One operation-allow-list entry of a caller (§4 Phase B): which route (any when
+/// One operation-allow-list entry of a caller: which route (any when
 /// omitted), which methods (any when empty) and which path patterns (any when empty) the
 /// caller may use, optionally gated by a scope <see cref="CallerOperationRule.Name"/>
-/// (M39, ADR-0004). Patterns are matched against the decoded request path; <c>*</c> matches
+/// (ADR-0004). Patterns are matched against the decoded request path; <c>*</c> matches
 /// exactly one path segment, a trailing <c>**</c> matches the remaining segments (zero or
 /// more). Matching is ordinal and case-sensitive — the strictest reading, so case tricks
 /// and homoglyphs simply do not match.
@@ -56,7 +19,7 @@ public sealed class CallerOperationRule
     /// <param name="methods">The admitted HTTP methods; empty for any.</param>
     /// <param name="pathPatterns">The admitted path patterns; empty for any path.</param>
     /// <param name="name">
-    /// The scope name of this entry (M39, ADR-0004): on a request carrying a scope set
+    /// The scope name of this entry (ADR-0004): on a request carrying a scope set
     /// (a caller token's <c>roles</c>/<c>scp</c>) only named entries run, and only when
     /// their name is among the request's scopes. <see langword="null"/> means the entry
     /// admits keys but never a token — name your rules to give an agent caller scopes.
@@ -83,7 +46,7 @@ public sealed class CallerOperationRule
     public IReadOnlyList<string> PathPatterns { get; }
 
     /// <summary>
-    /// The scope name of this entry (M39, ADR-0004), compared ordinal to the request's
+    /// The scope name of this entry (ADR-0004), compared ordinal to the request's
     /// scope set; <see langword="null"/> for an unnamed entry, which no token request
     /// can match (the caller-key path ignores it). <see cref="Matches"/> ignores it —
     /// the allow-list stage applies it.
@@ -116,71 +79,46 @@ public sealed class CallerOperationRule
 }
 
 /// <summary>
-/// A configured caller: its identity, its active keys, its operation allow-list (an empty
-/// list means every operation is allowed — the allow-list is opt-in per caller) and its
-/// request budget (M15, plan §3.7 — <see langword="null"/> means unlimited, also opt-in).
+/// A configured caller: its identity, its operation allow-list (an empty list means every
+/// operation is allowed — the allow-list is opt-in per caller) and its request budget
+/// (<see langword="null"/> means unlimited, also opt-in). Authentication
+/// material — caller keys under <c>CredProx.CallerKeys</c>, token client ids under
+/// <c>CredProx.CallerTokens</c> — is read by the package that owns it, never by the core.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class CallerDefinition
 {
     /// <summary>Creates a caller definition.</summary>
     /// <param name="callerId">The configured caller id (the config key).</param>
-    /// <param name="keys">The active keys; together with <paramref name="tokenClientIds"/> must not be empty.</param>
     /// <param name="operations">The operation allow-list entries; empty means unrestricted.</param>
     /// <param name="limits">The request budget; <see langword="null"/> for unlimited.</param>
-    /// <param name="tokenClientIds">
-    /// Application (client) ids whose caller tokens authenticate as this caller (M39,
-    /// ADR-0004); <see langword="null"/> means none. A caller may take keys, token
-    /// clients, or both — keys only with none.
-    /// </param>
     public CallerDefinition(
         string callerId,
-        IReadOnlyList<CallerKey> keys,
         IReadOnlyList<CallerOperationRule> operations,
-        CallerLimits? limits = null,
-        IReadOnlyList<string>? tokenClientIds = null)
+        CallerLimits? limits = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(callerId);
-        ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(operations);
 
-        if (keys.Count == 0 && (tokenClientIds is null || tokenClientIds.Count == 0))
-        {
-            throw new ArgumentException($"Caller '{callerId}' must declare at least one key.", nameof(keys));
-        }
-
         CallerId = callerId;
-        Keys = keys;
         Operations = operations;
         Limits = limits;
-        TokenClientIds = tokenClientIds ?? [];
     }
 
     /// <summary>The configured caller id; also the value the <c>caller:</c> partition source yields.</summary>
     public string CallerId { get; }
 
-    /// <summary>The caller's active keys (multiple during rotation).</summary>
-    public IReadOnlyList<CallerKey> Keys { get; }
-
     /// <summary>The operation allow-list; empty means every operation is allowed.</summary>
     public IReadOnlyList<CallerOperationRule> Operations { get; }
 
-    /// <summary>The caller's request budget (§3.7); <see langword="null"/> means unlimited.</summary>
+    /// <summary>The caller's request budget; <see langword="null"/> means unlimited.</summary>
     public CallerLimits? Limits { get; }
-
-    /// <summary>
-    /// Application (client) ids whose caller tokens authenticate as this caller (M39,
-    /// ADR-0004); empty when the caller takes only API keys. Matching is
-    /// case-insensitive; one client id may be listed by at most one caller (the binder
-    /// rejects the ambiguity).
-    /// </summary>
-    public IReadOnlyList<string> TokenClientIds { get; }
 }
 
 /// <summary>
-/// One caller's request budget (§3.7): at most <see cref="PermitsPerInterval"/> requests per
+/// One caller's request budget: at most <see cref="PermitsPerInterval"/> requests per
 /// <see cref="Interval"/>, with per-cluster overrides keyed by YARP cluster id. The budget
-/// is per caller app — key rotation and delegated (M14) per-user tokens share it. Exceeding
+/// is per caller app — key rotation and delegated per-user tokens share it. Exceeding
 /// it answers <c>429 credprox.caller_throttled</c> with <c>Retry-After</c>; unlike the
 /// cluster throttle there is no queueing. Single-instance, in-memory scope.
 /// </summary>
@@ -197,7 +135,8 @@ public sealed class CallerLimits
 
     /// <summary>
     /// Per-cluster budget overrides keyed by YARP cluster id; a <see langword="null"/>
-    /// member inherits the caller default (same idiom as <c>ThrottleClusterOptions</c>).
+    /// member inherits the caller default (the idiom <c>CredProx.Operations</c> uses for
+    /// <c>ThrottleClusterOptions</c>).
     /// </summary>
     public Dictionary<string, CallerClusterLimits> Clusters { get; } = new(StringComparer.OrdinalIgnoreCase);
 }

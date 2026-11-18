@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace CredProx;
@@ -9,7 +10,8 @@ namespace CredProx;
 /// find their stashed state) are copied; the body comes from a buffer captured before the
 /// first attempt. Shared by refresh-on-401 and the resilience adapter.
 /// </summary>
-internal static class ProxyRequestCloner
+[Experimental("CREDPROX001")]
+public static class ProxyRequestCloner
 {
     private static readonly MethodInfo SetOptionMethod =
         typeof(HttpRequestOptions).GetMethod(nameof(HttpRequestOptions.Set))!;

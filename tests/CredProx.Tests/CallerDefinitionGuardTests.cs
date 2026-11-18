@@ -4,40 +4,13 @@ using Xunit;
 namespace CredProx.Tests;
 
 /// <summary>
-/// The configuration-model guards (§5.2 "Caller API keys"): a caller key is exactly a
-/// SHA-256 hash, a caller never exists without at least one key, and an operation entry
-/// with no methods and no patterns admits everything (the emptiness checks are what make
-/// the dimensions opt-in — they must not silently flip).
+/// The configuration-model guards (§5.2): an operation entry with no methods and no
+/// patterns admits everything (the emptiness checks are what make the dimensions opt-in —
+/// they must not silently flip). Caller-key entry shape (exactly-SHA-256 hash, key ids)
+/// belongs to the keys package now and is pinned by its own rules' cells.
 /// </summary>
 public sealed class CallerDefinitionGuardTests
 {
-    [Fact]
-    public void CallerKey_ShortHash_Throws()
-    {
-        var ex = Assert.Throws<ArgumentException>(
-            () => new CallerKey("k1", new byte[31], expiresAt: null));
-
-        Assert.Equal("hash", ex.ParamName);
-        Assert.Contains("32 bytes", ex.Message);
-    }
-
-    [Fact]
-    public void CallerKey_LongHash_Throws()
-    {
-        Assert.Throws<ArgumentException>(
-            () => new CallerKey("k1", new byte[33], expiresAt: null));
-    }
-
-    [Fact]
-    public void CallerDefinition_NoKeys_Throws_NamingTheCaller()
-    {
-        var ex = Assert.Throws<ArgumentException>(
-            () => new CallerDefinition("app-a", [], [], limits: null));
-
-        Assert.Equal("keys", ex.ParamName);
-        Assert.Contains("app-a", ex.Message);
-    }
-
     [Fact]
     public void Rule_NoMethodsNoPaths_MatchesAnything()
     {

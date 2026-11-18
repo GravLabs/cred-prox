@@ -63,6 +63,7 @@ public sealed class CredentialHealthTests
         services.AddCredProxTokenCache(configureCache);
         services.AddCredProxConfigurationSecrets(config);
         services.AddCredProxBuiltInCredentials();
+        services.AddCredProxOAuth();
         services.AddCredProxCredentials(config);
         services.AddCredProxCallerAuthentication(config); // registers the caller: partition scheme
         services.AddHttpClient(CredProxHttpClientNames.TokenClient)
@@ -223,6 +224,40 @@ public sealed class CredentialHealthTests
     }
 
     [Fact]
+    public async Task CertProbe_ConnectionWithoutLoadedCertificate_IsUnhealthy()
+    {
+        // The probe's defensive branch: reading the certificate can throw even though the
+        // binder loads at startup. The probe must name the connection Unhealthy with its
+        // own reason instead of letting the getter's exception escape the health round.
+        var unloaded = new ClientCertificateConnection(
+            "health-cert-unloaded",
+            TestSecrets.AccessorFor([]),
+            "secret:health-unloaded-pfx",
+            passwordReference: null,
+            NullLogger.Instance);
+        var registry = new ConnectionRegistry(new Dictionary<string, ClientCertificateConnection>
+        {
+            ["health-cert-unloaded"] = unloaded,
+        });
+        var provider = ConnectionsWithCert("health-cert-ok", DateTimeOffset.UtcNow.AddDays(365));
+        typeof(ConnectionRegistryProvider)
+            .GetField("_current", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(provider, registry);
+
+        var probe = new CertificateExpiryProbe(
+            provider,
+            new CredProxHealthOptions { CertWarningDays = 30 },
+            TimeProvider.System);
+
+        var result = await probe.CheckAsync(default);
+
+        Assert.NotNull(result);
+        Assert.Equal(CredProxHealthSeverity.Unhealthy, result!.Severity);
+        Assert.Contains("health-cert-unloaded", result.Description, StringComparison.Ordinal);
+        Assert.Contains("has no usable client certificate", result.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CertProbe_BeyondWindow_IsHealthy()
     {
         var probe = new CertificateExpiryProbe(
@@ -256,13 +291,15 @@ public sealed class CredentialHealthTests
     private static MeterListener ListenToCredProxMeter(
         ConcurrentQueue<(string Instrument, double Value, Dictionary<string, object?> Tags)> measurements)
     {
-        // The health instruments are static observable gauges on the shared meter; other
-        // parallel tests feed the same dictionaries, so assertions filter by unique names.
+        // The health instruments are static observable gauges on the CredProx.Operations
+        // meter (same "CredProx" scope name as the core's); other parallel tests feed the
+        // same dictionaries, so assertions filter by unique names.
         var listener = new MeterListener
         {
             InstrumentPublished = (instrument, l) =>
             {
-                if (instrument.Meter == CredProxDiagnostics.Meter)
+                if (instrument.Meter == CredProxDiagnostics.Meter
+                    || instrument.Meter == OperationsDiagnostics.Meter)
                 {
                     l.EnableMeasurementEvents(instrument);
                 }

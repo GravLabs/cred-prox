@@ -1,30 +1,49 @@
-# E11 — Operations: throttling, vendor back-off, circuit breaker, health
+# Operations: throttling, vendor back-off, circuit breaker, health
 
-What running CredProx in production looks like (plan §6 E11, §8.4): three clusters behind
-one host, each exercising one operational behaviour, all configured — no C# beyond the
-standard three registration lines in `Program.cs`. WireMock plays the vendor with three
-personalities (`wiremock/mappings/`). Needs Docker.
+What running CredProx in production looks like: three clusters behind one host, each
+exercising one operational behaviour, all configured — no C# beyond the standard
+registration lines in `Program.cs`. WireMock plays the vendor with three personalities
+(`wiremock/mappings/`). Needs Docker.
 
 ## Run it
 
 ```bash
-./smoke.sh
+cd samples/Operations
+docker compose up -d      # the three-personality WireMock vendor on :8091
+dotnet run &              # the host on :5091
+./load.sh                 # drives and asserts each behaviour, transcript below
+docker compose down
 ```
 
-That starts WireMock and the host, then runs `load.sh` — the shortened load script
-(the nightly NBomber suite holds the rigorous rate assertions) — which drives and
-asserts each behaviour:
+`load.sh` is the shortened load script (the nightly NBomber suite holds the rigorous
+rate assertions):
 
 ```
 == 1. Rate limit: 30-request burst against a 5 req/s cluster ==
   client saw: 7x200 23x429 | vendor saw: 7 requests
 == 2. Vendor 429 + Retry-After: the cluster pauses ==
-  r1=200 r2=429 r3=429 after 2003ms held r4=200
+  r1=200 r2=429 r3=200 held through the pause r4=200
 == 3. Circuit breaker: 500s open it, 503s answer, recovery closes it ==
   f1..f6: 500 500 500 500 503 503 | vendor saw: 4 requests
 == 4. Credential health ==
   /health: Healthy
 ```
+
+## Verify it
+
+One cell per behaviour, driving the real host over real sockets from
+`tests/CredProx.SampleSmokes` against WireMock's three personalities:
+
+```bash
+dotnet test tests/CredProx.SampleSmokes --filter Sample=Operations
+# or the one-line wrapper:
+cd samples/Operations && ./smoke.sh
+```
+
+The cells: the 30-request burst against `/limited` sheds to 429 and the vendor's counter
+proves it never saw the burst; the vendor 429 pauses the `/vendor` cluster for the
+advertised `Retry-After` and traffic recovers; four `/flaky` failures open the circuit
+(503s, counter frozen) and the half-open probe closes it; `/health` reports Healthy.
 
 ## What each cluster shows
 

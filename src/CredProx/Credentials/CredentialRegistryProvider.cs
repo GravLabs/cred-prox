@@ -8,16 +8,16 @@ namespace CredProx;
 
 /// <summary>
 /// Holds the live <see cref="CredentialRegistry"/> and rebinds it when the secret source's
-/// change token fires (see <c>docs/credprox-plan.md</c> §3.3: config reload). Rebinding
+/// change token fires (config reload). Rebinding
 /// recreates each credential's scoped <see cref="ISecretAccessor"/>, so a reload that adds
 /// a <c>secret:</c> reference to a credential's section takes effect without a restart —
-/// the accessor allow-lists are snapshots by design (M2 review carry). A rebind that fails
+/// the accessor allow-lists are snapshots by design. A rebind that fails
 /// keeps the previous registry and logs: a bad reload must not take down a running proxy.
 /// </summary>
 /// <remarks>
 /// The initial bind happens in the constructor — the startup validator resolves this
 /// service, so credential configuration is fully validated before the proxy serves
-/// traffic (M3 review carry: no lazy first-request binding).
+/// traffic (no lazy first-request binding).
 /// </remarks>
 [Experimental("CREDPROX001")]
 public sealed class CredentialRegistryProvider

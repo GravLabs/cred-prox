@@ -135,7 +135,9 @@ public sealed class WiringSurvivorTests
             .Any(d => d.ServiceType == typeof(T) && d.ImplementationType == implementation);
 
         Assert.True(Registered<IPartitionSourceFactory>(typeof(HeaderPartitionSourceFactory)));
-        Assert.True(Registered<IRequestFeature>(typeof(HmacSignFeature)));
+        // The signing feature rode the core until the CredProx.Hmac split (ADR-0005):
+        // AddCredProx alone must not bring it — only AddCredProxHmac registers it.
+        Assert.False(Registered<IRequestFeature>(typeof(HmacSignFeature)));
         Assert.True(Registered<IHttpMessageHandlerBuilderFilter>(typeof(CredProxTokenClientFilter)));
         Assert.True(Registered<IHostedService>(typeof(CredProxStartupValidator)));
     }

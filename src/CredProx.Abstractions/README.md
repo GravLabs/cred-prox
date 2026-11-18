@@ -31,7 +31,8 @@ URL as the problem's `authorize_url` member — anything else is the generic
 
 ## Start here
 
-[`samples/CustomPlugin`](https://github.com/GravLabs/cred-prox/tree/main/samples/CustomPlugin)
+This package registers nothing — it is contracts only; the registration calls live in
+`CredProx`. [`samples/CustomPlugin`](https://github.com/GravLabs/cred-prox/tree/main/samples/CustomPlugin)
 is a complete custom credential type in ~50 lines, registered explicitly and tested with
 the `CredProx.Testing` conformance suites — the template for community plugins.
 

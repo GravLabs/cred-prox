@@ -68,9 +68,8 @@ public sealed class CallerStoreTests
         var now = new DateTimeOffset(2026, 10, 14, 12, 0, 0, TimeSpan.Zero);
 
         // expired: now >= expiry
-        var match = await new ConfigCallerStore(
-            Registry(("caller-a", [("k1", KeyA, now)])),
-            new FixedTimeProvider(now)).ResolveKeyAsync(KeyA, default);
+        var match = await Store(new FixedTimeProvider(now), ("caller-a", [("k1", KeyA, now)]))
+            .ResolveKeyAsync(KeyA, default);
 
         Assert.Null(match);
     }
@@ -79,9 +78,7 @@ public sealed class CallerStoreTests
     public async Task KeyNotYetExpired_Resolves()
     {
         var now = new DateTimeOffset(2026, 10, 14, 12, 0, 0, TimeSpan.Zero);
-        var store = new ConfigCallerStore(
-            Registry(("caller-a", [("k1", KeyA, now.AddSeconds(1))])),
-            new FixedTimeProvider(now));
+        var store = Store(new FixedTimeProvider(now), ("caller-a", [("k1", KeyA, now.AddSeconds(1))]));
 
         Assert.NotNull(await store.ResolveKeyAsync(KeyA, default));
     }
@@ -123,16 +120,16 @@ public sealed class CallerStoreTests
     {
         var hex = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(KeyA))).ToLowerInvariant();
 
-        Assert.True(CallerBinder.TryParseHash($"sha256:{hex}", out var hash));
+        Assert.True(CallerKeyRules.TryParseHash($"sha256:{hex}", out var hash));
         Assert.Equal(32, hash.Length);
 
         // Case-insensitive prefix and hex.
-        Assert.True(CallerBinder.TryParseHash($"SHA256:{hex.ToUpperInvariant()}", out _));
+        Assert.True(CallerKeyRules.TryParseHash($"SHA256:{hex.ToUpperInvariant()}", out _));
 
-        Assert.False(CallerBinder.TryParseHash(hex, out _));                    // no prefix
-        Assert.False(CallerBinder.TryParseHash($"sha256:{hex[..62]}", out _));  // short
-        Assert.False(CallerBinder.TryParseHash($"sha256:{hex}00", out _));      // long
-        Assert.False(CallerBinder.TryParseHash($"sha256:{new string('z', 64)}", out _)); // non-hex
+        Assert.False(CallerKeyRules.TryParseHash(hex, out _));                    // no prefix
+        Assert.False(CallerKeyRules.TryParseHash($"sha256:{hex[..62]}", out _));  // short
+        Assert.False(CallerKeyRules.TryParseHash($"sha256:{hex}00", out _));      // long
+        Assert.False(CallerKeyRules.TryParseHash($"sha256:{new string('z', 64)}", out _)); // non-hex
     }
 
     [Fact]
@@ -156,12 +153,17 @@ public sealed class CallerStoreTests
         });
         using var config = new ConfigurationRoot(new IConfigurationProvider[] { source.Provider });
         var secretSource = new ConfigurationSecretSource(config);
+        var accessorFactory = new SecretAccessorFactory(secretSource);
         var registryProvider = new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(secretSource)),
+            new CallerBinder(config, accessorFactory, []),
+            [new CallerKeyTableContributor(config, accessorFactory)],
+            config,
             secretSource,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CallerRegistryProvider>.Instance);
 
-        var store = new ConfigCallerStore(registryProvider, new ReloadOnFirstCallTimeProvider(source.Provider));
+        var store = new ConfigCallerStore(
+            registryProvider,
+            new ReloadOnFirstCallTimeProvider(source.Provider));
 
         var match = await store.ResolveKeyAsync(KeyA, default);
 
@@ -210,7 +212,7 @@ public sealed class CallerStoreTests
         }
     }
 
-    private static CallerRegistryProvider Registry(params (string Caller, (string KeyId, string Value, DateTimeOffset? Expires)[] Keys)[] callers)
+    private static IConfiguration ConfigFor(params (string Caller, (string KeyId, string Value, DateTimeOffset? Expires)[] Keys)[] callers)
     {
         var entries = new Dictionary<string, string?>();
         foreach (var (caller, keys) in callers)
@@ -227,15 +229,52 @@ public sealed class CallerStoreTests
             }
         }
 
-        var config = new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
+        return new ConfigurationBuilder().AddInMemoryCollection(entries).Build();
+    }
+
+    [Fact]
+    public async Task Store_WithoutACommittedKeyTable_ThrowsInsteadOfServingEmpty()
+    {
+        // The wiring-error contract: a generation without the committed table means the
+        // feature was assembled without its contributor. Serving an empty table would
+        // silently authenticate nobody; the store throws instead.
+        var config = ConfigFor(("caller-a", [("k1", KeyA, null)]));
+        var secretSource = new ConfigurationSecretSource(config);
+        var provider = new CallerRegistryProvider(
+            new CallerBinder(config, new SecretAccessorFactory(secretSource), []),
+            secretSource,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CallerRegistryProvider>.Instance);
+        var store = new ConfigCallerStore(provider, TimeProvider.System);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => store.ResolveKeyAsync(KeyA, default).AsTask());
+
+        Assert.Contains("contributor", ex.Message, StringComparison.Ordinal);
+    }
+
+    private static CallerRegistryProvider Registry(IConfiguration config)
+    {
+        var secretSource = new ConfigurationSecretSource(config);
+        var accessorFactory = new SecretAccessorFactory(secretSource);
         return new CallerRegistryProvider(
-            new CallerBinder(config, new SecretAccessorFactory(new ConfigurationSecretSource(config))),
-            new ConfigurationSecretSource(config),
+            new CallerBinder(config, accessorFactory, []),
+            [new CallerKeyTableContributor(config, accessorFactory)],
+            config,
+            secretSource,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CallerRegistryProvider>.Instance);
     }
 
-    private static ConfigCallerStore Store(params (string Caller, (string KeyId, string Value, DateTimeOffset? Expires)[] Keys)[] callers) =>
-        new(Registry(callers), TimeProvider.System);
+    private static ConfigCallerStore Store(
+        params (string Caller, (string KeyId, string Value, DateTimeOffset? Expires)[] Keys)[] callers) =>
+        Store(TimeProvider.System, callers);
+
+    private static ConfigCallerStore Store(
+        TimeProvider timeProvider,
+        params (string Caller, (string KeyId, string Value, DateTimeOffset? Expires)[] Keys)[] callers)
+    {
+        var config = ConfigFor(callers);
+        return new ConfigCallerStore(Registry(config), timeProvider);
+    }
 
     private static string Hash(string keyValue) =>
         "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(keyValue))).ToLowerInvariant();

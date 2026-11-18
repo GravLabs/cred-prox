@@ -10,7 +10,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="CredProx" Version="0.11.0" />
+    <!-- $(Version) flows from build/Version.props through this host's props import:
+         the soak host always takes the repository's current version from the local
+         feed, so a version bump cannot strand it again. -->
+    <PackageReference Include="CredProx" Version="$(Version)" />
+    <!-- Throttling/Resilience/Health moved out of the core in this dev line, so the
+         host takes them from CredProx.Operations at the same version. -->
+    <PackageReference Include="CredProx.Operations" Version="$(Version)" />
     <!-- Fault 6 (design decision 2026-11-08): the REAL Key Vault config provider,
          same package + 1.3.x line the shipped ACA hosts use. Only the transport is swapped
          to the loopback stub (M29 reloadproof pattern); provider, SecretClient and the

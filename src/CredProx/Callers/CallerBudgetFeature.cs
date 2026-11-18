@@ -6,19 +6,19 @@ using Yarp.ReverseProxy.Model;
 namespace CredProx;
 
 /// <summary>
-/// The built-in <see cref="Stage.ApplyCallerBudget"/> feature (M15, plan §3.7): an
+/// The built-in <see cref="Stage.ApplyCallerBudget"/> feature: an
 /// authenticated caller that declares a <c>Limits</c> budget gets at most
 /// <c>PermitsPerInterval</c> requests per window per cluster; beyond it the request answers
 /// <c>429 credprox.caller_throttled</c> with <c>Retry-After</c> (time to the window reset)
 /// — before header shaping and credential attachment, so a rejected request never touches a
-/// token endpoint or the upstream (§3.4). Unlike the cluster throttle there is no queueing:
+/// token endpoint or the upstream. Unlike the cluster throttle there is no queueing:
 /// the budget protects the other callers from this one, so waiting would hold the shared
 /// resource it exists to protect.
 /// </summary>
 /// <remarks>
 /// The budget is per caller app: the key id never enters the budget key (rotation must not
-/// reset it) and neither does any end-user or partition value (post-M14 per-user tokens
-/// share the app's budget, §3.7). Runs after <see cref="Stage.AuthorizeOperation"/> (a
+/// reset it) and neither does any end-user or partition value (per-user tokens
+/// share the app's budget). Runs after <see cref="Stage.AuthorizeOperation"/> (a
 /// blocked operation never consumes budget) and after
 /// <see cref="Stage.ResolveDestination"/> (per-cluster overrides key on the resolved
 /// cluster). Single-instance, in-memory scope.
@@ -83,7 +83,7 @@ internal sealed class CallerBudgetFeature(CallerRegistryProvider registryProvide
     }
 
     // Per-cluster override replaces the caller default field by field (null inherits —
-    // the ThrottleClusterOptions idiom); 0 permits disables for that cluster (§3.7).
+    // the CredProx.Operations ThrottleClusterOptions idiom); 0 permits disables for that cluster (§3.7).
     internal static (int Permits, TimeSpan Interval) Effective(CallerLimits limits, string? clusterId)
     {
         if (clusterId is not null && limits.Clusters.TryGetValue(clusterId, out var cluster))

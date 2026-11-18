@@ -1,52 +1,51 @@
-# CredProx examples (plan §6)
+# CredProx examples
 
 Each example is a small, runnable ASP.NET Core host with its own README: what it
 demonstrates, what you need, the exact config, and a `curl` showing the request **without**
 a credential going in and the upstream receiving one. Vendor integrations are **config
 only**, with no vendor-specific C#.
 
-**Start here:** AgentTokens (E19) for AI agents on Entra, then AgentEgress (E15), AiGateway
-(E13), MicrosoftGraph (E5), OAuthKeycloak (E2), ADP (E6), TokenExchange (E14) and
-CallerApiKey (E18). QuickStart (E1) is the smallest host. The README's "Start here" table
-maps each one to the problem it solves.
+**Start here:** AgentTokens for AI agents on Entra, then AgentEgress, AiGateway,
+MicrosoftGraph, OAuthKeycloak, ADP, TokenExchange and CallerApiKey. QuickStart is the
+smallest host. The README's "Start here" table maps each one to the problem it solves.
+Every host is production-shaped: a short config-driven `Program.cs`, offline settings in
+`appsettings`, a `StubApi/` stand-in project where the vendor is stood in locally, and a
+`smoke.sh` that runs the sample's cells from `tests/CredProx.SampleSmokes`.
 
-| # | Project | Demonstrates | Needs | Verified by |
-|---|---------|--------------|-------|-------------|
-| E1 | [QuickStart](QuickStart/README.md) | Smallest host; `StaticKey` into a public echo service | Nothing | `-- --smoke` (in-process) or `./smoke.sh` (WireMock) |
-| E2 | [OAuthKeycloak](OAuthKeycloak/README.md) | `OAuthClientCredentials` end to end; cache, single-flight, refresh-on-401 | Docker | `./smoke.sh` |
-| E3 | [MutualTls](MutualTls/README.md) | Client certificate per cluster + live rotation; BadSSL variant | Docker (local) / nothing (badssl) | `./smoke.sh` |
-| E5 | [MicrosoftGraph](MicrosoftGraph/README.md) | Entra client credentials in explicit config **and** secretless `TokenCredential`; Key Vault secret source | Entra app (+Azure for identity) | build (offline smoke planned: M41) |
-| E6 | [ADP](ADP/README.md) | ADP's shape as config, the original certificate arrangement: OAuth client credentials (Basic auth, query-string grant kept verbatim) + **one named mTLS connection on both the token call and the API calls**, certificate as a base64 passwordless PFX (the Key Vault certificate backing-secret format); nginx enforces the certificate offline; Key Vault variant with an offline live-rotation witness; measured wire shape recorded | Docker (nginx mTLS + WireMock + offline KV stub) | `./smoke.sh` |
-| E7 | [PerCallerCredentials](PerCallerCredentials/README.md) | Caller keys, per-caller credential/operation allow-lists, audit redaction | Docker (Keycloak) | `./smoke.sh` |
-| E8 | [GitHubApp](GitHubApp/README.md) | `JwtAssertion` in `BearerExchange` mode, all in config: app JWT → installation token → GitHub REST | Nothing (stub mode) / GitHub App (live) | `-- --smoke` (in-process stubs) |
-| E9 | [HmacSigning](HmacSigning/README.md) | `Hmac` request signing: canonical-string config, buffering cap → 413 | Nothing | `-- --smoke` (in-process verifier stub) |
-| E10 | [CustomPlugin](CustomPlugin/README.md) | A custom credential type in ~50 lines, registered explicitly, passing the `CredProx.Testing` conformance suites | Nothing | `./smoke.sh` (selftest + in-process stubs) |
-| E11 | [Operations](Operations/README.md) | Throttling under load, vendor 429 + `Retry-After` pause, circuit breaker → 503, credential health checks | Docker (WireMock) | `./smoke.sh` (shortened load script) |
-| E12 | [LoginExchange](LoginExchange/README.md) | Vendor-neutral session login: `LoginExchange` + `{partition}` per-environment partitions + the partition allow-list | Docker (WireMock stub) | `./smoke.sh` |
-| E13 | [AiGateway](AiGateway/README.md) | AI provider gateway: caller keys in, provider key injected (`StaticKey`), per-caller operation allow-lists, cluster throttling, audit — SSE streaming passthrough proven by timing | Nothing (in-process provider stub) | `-- --smoke` (in-process) |
-| E14 | [TokenExchange](TokenExchange/README.md) | `TokenExchange` (Rfc8693) against real Keycloak: inbound user token validated (signature/issuer/audience/lifetime), exchanged per user for a downstream-audience token; the downstream's audience check proves the inbound token never reaches it; forged inbound → 401 | Docker (Keycloak 26.2) | `./smoke.sh` |
-| E15 | [AgentEgress](AgentEgress/README.md) | AI agent egress (MCP shape): per-agent caller keys, allow-lists as tool boundaries, Salesforce `FormPost` client auth, one shared cached session token across agents, response scrubbing removing the token the stub echoes back | Nothing (in-process Salesforce stub) | `-- --smoke` (in-process) |
-| E16 | [SessionCookie](SessionCookie/README.md) | Session-cookie login (the generic Cayuse shape): form login → `Set-Cookie` replayed via `Location: Cookie` (caller cookies replaced, never merged), `{partition}` per-environment accounts/secrets with a strict `X-API-Env` allow-list, transparent refresh through server-side expiry, scrubbed session echo, vendor 404 normalised to `problem+json` (with a per-route opt-out) | Nothing (in-process CRM stub) | `-- --smoke` (in-process) |
-| E17 | [AzureContainerApps](AzureContainerApps/README.md) | Round-2 live Azure host, one image three modes (proxy / counterparty / battery, zero public listeners); offline in-process smoke plus a real-provider vault-reload proof against a loopback Key Vault stub | Nothing offline; Azure resources for the live run, driven only through the maintainer's gate | `docker run --rm <image> --mode proxy --smoke` |
-| E18 | [CallerApiKey](CallerApiKey/README.md) | Caller API keys as config: `X-API-Key` validated against a secret-backed SHA-256 store, 401 missing == 401 wrong with nothing echoed, key stripped before forwarding (journal-proven) | Docker (WireMock stub) | `./smoke.sh` |
-| E19 | [AgentTokens](AgentTokens/README.md) | AI agents with no stored secret: the agent gets a short-lived Microsoft Entra access token (managed identity / workload identity federation, Azure.Identity). CredProx validates it, maps the client (`azp`) to a caller and admits only the operations its app roles name (named rules, never wider); `MaxTokenAge` refuses stale tokens and the bearer is stripped before forwarding. Includes the Entra setup | Docker (locally signed OIDC issuer + upstream stub, offline); an Entra tenant for a live run | `./smoke.sh` |
+| Project | Demonstrates | Needs | Verified by |
+|---------|--------------|-------|-------------|
+| [QuickStart](QuickStart/README.md) | Smallest host; `StaticKey` into a public echo service | Nothing | `./smoke.sh` |
+| [OAuthKeycloak](OAuthKeycloak/README.md) | `OAuthClientCredentials` end to end; cache, single-flight, refresh-on-401 | Docker | `./smoke.sh` |
+| [MutualTls](MutualTls/README.md) | Client certificate per cluster + live rotation; BadSSL variant | Docker (local) / nothing (badssl) | `./smoke.sh` |
+| [MicrosoftGraph](MicrosoftGraph/README.md) | Entra client credentials in explicit config **and** secretless `TokenCredential`, one host with the style chosen by config; Key Vault secret source | Entra app (+Azure for identity); Docker for the offline check | `./smoke.sh` |
+| [ADP](ADP/README.md) | ADP's shape as config, the original certificate arrangement: OAuth client credentials (Basic auth, query-string grant kept verbatim) + **one named mTLS connection on both the token call and the API calls**, certificate as a base64 passwordless PFX (the Key Vault certificate backing-secret format); nginx enforces the certificate offline; Key Vault variant with an offline live-rotation witness; measured wire shape recorded | Docker (nginx mTLS + WireMock + offline KV stub) | `./smoke.sh` |
+| [PerCallerCredentials](PerCallerCredentials/README.md) | Caller keys, per-caller credential/operation allow-lists, audit redaction | Docker (Keycloak) | `./smoke.sh` |
+| [GitHubApp](GitHubApp/README.md) | `JwtAssertion` in `BearerExchange` mode, all in config: app JWT → installation token → GitHub REST; the vendor stand-in verifies the minted JWT independently, the raw token is witnessed at the vendor while the caller sees it redacted | Nothing (stub project) / GitHub App (live) | `./smoke.sh` |
+| [HmacSigning](HmacSigning/README.md) | `Hmac` request signing: canonical-string config, buffering cap → 413 | Nothing | `./smoke.sh` |
+| [CustomPlugin](CustomPlugin/README.md) | A custom credential type in ~50 lines, registered explicitly, passing the `CredProx.Testing` conformance suites (run as a cell) | Nothing (stub project) | `./smoke.sh` |
+| [Operations](Operations/README.md) | Throttling under load, vendor 429 + `Retry-After` pause, circuit breaker → 503, credential health checks | Docker (WireMock) | `./smoke.sh` (shortened load script) |
+| [LoginExchange](LoginExchange/README.md) | Vendor-neutral session login: `LoginExchange` + `{partition}` per-environment partitions + the partition allow-list | Docker (WireMock stub) | `./smoke.sh` |
+| [AiGateway](AiGateway/README.md) | AI provider gateway: caller keys in, provider key injected (`StaticKey`), per-caller operation allow-lists and budgets, cluster throttling, audit — SSE streaming passthrough proven by timing, the echoed key redacted inside the stream | Nothing (stub project) | `./smoke.sh` |
+| [TokenExchange](TokenExchange/README.md) | `TokenExchange` (Rfc8693) against real Keycloak: inbound user token validated (signature/issuer/audience/lifetime), exchanged per user for a downstream-audience token; the downstream's audience check proves the inbound token never reaches it; forged inbound → 401 | Docker (Keycloak 26.2) | `./smoke.sh` |
+| [AgentEgress](AgentEgress/README.md) | AI agent egress (MCP shape): per-agent caller keys, allow-lists as tool boundaries, Salesforce `FormPost` client auth, one shared cached session token across agents, response scrubbing removing the token the stand-in echoes back | Nothing (stub project) | `./smoke.sh` |
+| [SessionCookie](SessionCookie/README.md) | Session-cookie login (the generic Cayuse shape): form login → `Set-Cookie` replayed via `Location: Cookie` (caller cookies replaced, never merged), `{partition}` per-environment accounts/secrets with a strict `X-API-Env` allow-list, transparent refresh through server-side expiry, scrubbed session echo, vendor 404 normalised to `problem+json` (with a per-route opt-out) | Nothing (stub project) | `./smoke.sh` |
+| [AzureContainerApps](AzureContainerApps/README.md) | Container Apps deployment host: the managed identity reaches Key Vault (stock provider, explicit reload) and feeds the caller-key hash and the vendor `StaticKey` — nothing secret on disk; caller keys at an internal ingress, health probes, scrubbed vendor echo; the live-gate harness (one image, four roles, its own in-image smoke) lives at `tools/aca-live-harness` | Nothing (stub project); Azure (managed identity + Key Vault) for the live run | `./smoke.sh` |
+| [CallerApiKey](CallerApiKey/README.md) | Caller API keys as config: `X-API-Key` validated against a secret-backed SHA-256 store, 401 missing == 401 wrong with nothing echoed, key stripped before forwarding (journal-proven) | Docker (WireMock stub) | `./smoke.sh` |
+| [AgentTokens](AgentTokens/README.md) | AI agents with no stored secret: the agent gets a short-lived Microsoft Entra access token (managed identity / workload identity federation, Azure.Identity). CredProx validates it, maps the client (`azp`) to a caller and admits only the operations its app roles name (named rules, never wider); `MaxTokenAge` refuses stale tokens and the bearer is stripped before forwarding. Includes the Entra setup | Docker (locally signed OIDC issuer + upstream stub, offline); an Entra tenant for a live run | `./smoke.sh` |
 
-The library ships **no built-in vendor presets** (0.4.0): every vendor above is one
+The library ships **no built-in vendor presets**: every vendor above is one
 isolated sample whose full setup is plain config. A community preset
 (`CredProx:Presets` or a custom `IPresetSource`) can package a sample's fixed facts for
 reuse; see CONTRIBUTING.md.
 
 ## Before you build: pack the packages
 
-Examples consume CredProx **as NuGet packages** (plan §6 quality bar — this is what catches
+Examples consume CredProx **as NuGet packages** (the quality bar — this is what catches
 packaging mistakes), restored from the local feed `artifacts/packages` via
 `samples/nuget.config`:
 
 ```bash
-dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
-dotnet pack src/CredProx -c Release -o artifacts/packages
-dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
-dotnet pack src/CredProx.Testing -c Release -o artifacts/packages
+for p in src/*/; do dotnet pack "$p" -c Release -o artifacts/packages; done
 ```
 
 (Or just run the CI `examples` job's first step. Once a version is published to a real
@@ -55,5 +54,6 @@ feed, `samples/nuget.config` drops the local source.)
 ## No real secrets, ever
 
 Examples read secrets from environment variables or user-secrets and fail at startup naming
-the exact missing value. Demo values that do appear (E1's static key, E2's container-local
-Keycloak client, E6's WireMock stubs) are throwaway and only ever talk to local stubs.
+the exact missing value. Demo values that do appear (QuickStart's static key,
+OAuthKeycloak's container-local Keycloak client, ADP's WireMock stubs) are throwaway
+and only ever talk to local stubs.

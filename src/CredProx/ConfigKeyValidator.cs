@@ -7,13 +7,13 @@ using Microsoft.Extensions.Options;
 namespace CredProx;
 
 /// <summary>
-/// The fail-closed unknown-key walker behind the M14a/M16/M17 rule: a configuration key the
+/// The fail-closed unknown-key walker: a configuration key the
 /// binder does not consume is silently dropped, so a misspelled or foreign key must refuse
 /// startup (and the reload, where the section rebinds — the previous registry keeps serving)
 /// instead of quietly disabling the setting it was meant to control.
 /// </summary>
 /// <remarks>
-/// Allowed keys come from an options type by reflection (the same rule M16 established for
+/// Allowed keys come from an options type by reflection (the same rule used for
 /// credentials): public settable properties, plus get-only collections, dictionaries and
 /// complex objects the binder populates in place — so a plugin declares its own keys simply
 /// by having them on its options type. Binders that consume a fixed key set (connections)

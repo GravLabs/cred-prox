@@ -3,8 +3,8 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// Options for the add-on <c>TokenCredential</c> credential type (see
-/// <c>docs/credprox-plan.md</c> §4): an <c>Azure.Core.TokenCredential</c> (for example a
+/// Options for the add-on <c>TokenCredential</c> credential type: an
+/// <c>Azure.Core.TokenCredential</c> (for example a
 /// managed identity) exchanged for a token scoped to <see cref="Scope"/>, attached as a
 /// bearer header.
 /// </summary>

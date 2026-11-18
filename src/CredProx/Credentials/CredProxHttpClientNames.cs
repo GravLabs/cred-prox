@@ -4,7 +4,7 @@ namespace CredProx;
 
 /// <summary>
 /// Names of the named <see cref="IHttpClientFactory"/> clients CredProx registers and
-/// providers use for token/login calls (see <c>docs/credprox-plan.md</c> §3.2: a
+/// providers use for token/login calls: a
 /// credential's <c>Connection</c> makes the token call present that connection's client
 /// certificate). A credential with a connection gets the per-connection client, whose
 /// primary handler carries the certificate; custom credential types can use this helper

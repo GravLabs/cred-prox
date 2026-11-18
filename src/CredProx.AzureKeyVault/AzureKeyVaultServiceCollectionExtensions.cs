@@ -6,8 +6,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Registers the Azure add-on credential types. Explicit registration only, like the core
-/// (see <c>docs/credprox-plan.md</c> §3.5 rule 6).
+/// Registers the Azure add-on credential types. Explicit registration only, like the core.
 /// </summary>
 [Experimental("CREDPROX001")]
 public static class AzureKeyVaultServiceCollectionExtensions

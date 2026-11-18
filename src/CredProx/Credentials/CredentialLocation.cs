@@ -3,8 +3,8 @@ using System.Diagnostics.CodeAnalysis;
 namespace CredProx;
 
 /// <summary>
-/// Where an obtained credential value is placed on the outbound request
-/// (see <c>docs/credprox-plan.md</c> §4, StaticKey "header or query").
+/// Where an obtained credential value is placed on the outbound request:
+/// header or query.
 /// </summary>
 [Experimental("CREDPROX001")]
 public enum CredentialLocation
