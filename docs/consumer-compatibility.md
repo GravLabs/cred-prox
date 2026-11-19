@@ -22,10 +22,11 @@ projects default to `artifacts/consumer-compat/` in the repo (override with
 scratch and clears the per-run HTTP cache, so a published package can be
 re-verified the same day it changes.
 
-Results below were measured on 2026-11-17 against **CredProx 0.12.0** built from
-the release-prep commit `e10f18c0a622d75c3af6313d2d75cc9234c2f25c` from
+Results below were measured on 2026-11-19 against **CredProx 0.13.0** built from
+the release-prep commit `dc097b3ae16b7d4878817bb44f7733f8937abae8` from
 the local feed (all fifteen cells, cold caches), linux-x64, .NET SDK 10.0.115 —
-the same matrix passed at 0.8.2 on 2026-11-07. Every smoke asserts the
+the same matrix passed at 0.12.0 on 2026-11-17 (`e10f18c0a622d75c3af6313d2d75cc9234c2f25c`)
+and at 0.8.2 on 2026-11-07. Every smoke asserts the
 credential contract end to end: the caller-side echo shows `[redacted]` while
 the raw credential is proven vendor-side in the WireMock request journal.
 

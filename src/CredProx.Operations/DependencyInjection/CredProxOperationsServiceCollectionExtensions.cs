@@ -51,8 +51,16 @@ public static class CredProxOperationsServiceCollectionExtensions
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<ICredentialHealthProbe, CertificateExpiryProbe>());
         services.TryAddSingleton<CredentialHealthSnapshot>();
-        services.AddHostedService<CredentialHealthProbeService>();
-        services.AddHealthChecks().AddCheck<CredProxHealthCheck>("credprox");
+        // ADR-0006 item 5: a switch that says off is off. With CredProx:Health:Enabled=false
+        // neither the probe loop nor the "credprox" check is registered — a disabled host
+        // gets no "credprox" entry reporting Healthy without ever probing. The options, the
+        // built-in probes and the snapshot stay registered so a host can still resolve them.
+        if (options.Enabled)
+        {
+            services.AddHostedService<CredentialHealthProbeService>();
+            services.AddHealthChecks().AddCheck<CredProxHealthCheck>("credprox");
+        }
+
         return services;
     }
 

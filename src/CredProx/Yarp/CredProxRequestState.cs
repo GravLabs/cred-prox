@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Net.Http;
 using Microsoft.AspNetCore.Http;
 
@@ -22,22 +23,23 @@ public sealed class CredProxRequestState
     internal CredProxRequestState(
         HttpContext httpContext,
         HttpRequestMessage proxyRequest,
-        Action<byte[]>? outgoingBodyRewriter = null)
+        bool forwarderBodyShape = false)
     {
         HttpContext = httpContext;
         ProxyRequest = proxyRequest;
-        OutgoingBodyRewriter = outgoingBodyRewriter;
+        _forwarderBodyShape = forwarderBodyShape;
     }
 
-    /// <summary>
-    /// How a feature that has fully read the request body hands the measured bytes to
-    /// the outbound pipeline. The core sets it when it builds the state: on the
-    /// forwarder the copy configures the inbound request the forwarder pumps at send
-    /// time (replacing the forwarded <c>Content</c> after the transforms is refused);
-    /// hosts built without it keep the replace-the-content shape, where
-    /// <see cref="ProxyRequest"/>.<c>Content</c> becomes the measured copy.
-    /// </summary>
-    internal Action<byte[]>? OutgoingBodyRewriter { get; }
+    // How a feature that has fully read the request body hands the measured bytes to
+    // the outbound pipeline (see MeasureOutgoingBodyAsync). The core sets the shape
+    // when it builds the state: on the forwarder the copy configures the inbound
+    // request the forwarder pumps at send time (replacing the forwarded Content after
+    // the transforms is refused); hosts built without it keep the replace-the-content
+    // shape, where ProxyRequest.Content becomes the measured copy. A flag, never a
+    // delegate: a per-request delegate here costs every CredProx-routed request a
+    // closure it never used (~113 B), and CredProxRequestStateShapeTests fails the
+    // battery if a delegate ever rides this state again.
+    private readonly bool _forwarderBodyShape;
 
     /// <summary>
     /// The measured-body hand-off seam for features that need the whole outbound body
@@ -68,16 +70,24 @@ public sealed class CredProxRequestState
     public async Task<byte[]?> MeasureOutgoingBodyAsync(long maxBytes, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
-        if (OutgoingBodyRewriter is { } rewriteBody)
+        if (_forwarderBodyShape)
         {
             // Forwarder host: the outgoing content belongs to the forwarder and is
             // serialized exactly once, so the read takes — and the copy re-installs on —
-            // the stream the forwarder pumps at send time.
+            // the stream the forwarder pumps at send time. The exact hashed bytes flow
+            // to the upstream and the measured length goes on the forwarder's own
+            // content, which travels as the outbound Content-Length; framing headers
+            // live on the message, which the forwarder already owns, and the content
+            // reference stays the forwarder's, so its guard holds.
             var measured = await ReadUpToCapAsync(HttpContext.Request.Body, maxBytes, cancellationToken)
                 .ConfigureAwait(false);
             if (measured is not null)
             {
-                rewriteBody(measured);
+                HttpContext.Request.Body = new MemoryStream(measured);
+                if (ProxyRequest.Content is { } outgoing)
+                {
+                    outgoing.Headers.ContentLength = measured.LongLength;
+                }
             }
 
             return measured;

@@ -14,7 +14,8 @@ Operations add-on for [CredProx](https://github.com/GravLabs/cred-prox):
 - **Credential health probes** (`CredProx:Health`) — token obtainable (through the core's
   token cache, so a valid cached token costs no vendor call) and certificate expiry, on a
   background loop feeding the `credprox` ASP.NET Core health check, the `CredProx` meter's
-  health gauges and transition warnings.
+  health gauges and transition warnings. With `CredProx:Health:Enabled=false` neither the
+  probe loop nor the `credprox` check is registered — off is off.
 
 Pipeline order is unchanged: the features keep their `Stage.Pipeline` placement with
 resilience innermost (`Order 0`) inside one throttle permit (`Order 10`), after signing

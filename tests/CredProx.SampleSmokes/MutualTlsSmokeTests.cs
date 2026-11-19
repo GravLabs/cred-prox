@@ -23,4 +23,15 @@ public sealed class MutualTlsSmokeTests
         Assert.Equal(200, status);
         Assert.Contains(MutualTlsFixture.ClientSubject, body, StringComparison.Ordinal);
     }
+
+    [Fact]
+    [Trait("Sample", "MutualTls")]
+    public async Task ConnectionWithoutClientCert_IsRefused()
+    {
+        // The negative witness that keeps the echo cell from being vacuous: nginx
+        // answers 400 to a TLS connection carrying no client certificate, so the
+        // 200 above is granted only to a connection that presented the key-per-file
+        // material — not because the listener admits anyone.
+        Assert.Equal(400, await _stub.GetNginxWithoutClientCertAsync());
+    }
 }

@@ -11,11 +11,15 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-17): `0.12.0` prep is **complete, awaiting its check** — the M42 package split
-(ADR-0005) ships **ten packages at one version**, six of them (`CredProx.CallerKeys`,
-`CredProx.CallerTokens`, `CredProx.Hmac`, `CredProx.LoginExchange`, `CredProx.OAuth`,
-`CredProx.Operations`) reaching the registry for the first time; the publish ceremony is
-the maintainer's and has not run yet. Previously: `0.11.0` is **published on the registry** — the M39 agent tokens:
+Current state (2026-11-18): `0.12.0` is **published on the registry** — the minimal core
+with one package per optional feature (ADR-0005): **ten packages at one version**, six of
+them (`CredProx.CallerKeys`, `CredProx.CallerTokens`, `CredProx.Hmac`,
+`CredProx.LoginExchange`, `CredProx.OAuth`, `CredProx.Operations`) on the registry for the
+first time. GitHub `main` and tag `0.12.0` sit on one squashed commit
+`5cc1a7edbdd50c1ad66a89c002ea8a69f4eac90c` (noreply author, tree identical to the internal
+release commit `682a676`), appended on the previous public tip `f239384`; see the `0.12.0`
+history entry. The baseline rotation to the published `0.12.0` bytes ran with the
+`0.13.0` prep (ADR-0001). Previously: `0.11.0` was **published on the registry** — the M39 agent tokens:
 an agent presents a short-lived Microsoft Entra (or any OIDC) access token instead of a stored
 secret, and Entra app roles narrow it to named rules — a token gets exactly the operations its
 roles name, and a caller without named rules admits no token (sample E19 `samples/AgentTokens`;
@@ -50,10 +54,10 @@ plus the feature package), additive for everyone else — the CHANGELOG `[0.12.0
 entries are that contract; the CHANGELOG entries remain the consumer
 contract. The `0.7.1` known issues stay resolved (F1: CI-path-mapped PDBs; F2: packed from a
 publicly resident commit); the `0.7.0`/`0.7.1` published packages keep their historical
-metadata (immutable). The baseline rotation **ran with the `0.12.0` prep**: `build/baselines/`
-holds the published `0.11.0` bytes (sha256-verified; ADR-0001); the six first-ship
-packages have no baseline yet and start validation at the rotation that follows the
-`0.12.0` publication; the next rotation runs at the next release prep per the rule below.
+metadata (immutable). The baseline rotation **ran with the `0.13.0` prep**: `build/baselines/`
+holds the published `0.12.0` bytes (all ten, sha256-verified; ADR-0001); every pack now
+validates all ten packages against them — the six that first shipped at `0.12.0` entered
+the folder at that rotation; the next rotation runs at the next release prep per the rule below.
 
 ## What gets published
 
@@ -114,13 +118,9 @@ dotnet pack src/CredProx.Testing      -c Release -o artifacts/publish -p:Continu
 ```
 
 Packing also runs the APICompat baseline check against `build/baselines` — it must exit 0.
-`CredProx.CallerTokens`, `CredProx.CallerKeys`, `CredProx.Hmac`, `CredProx.LoginExchange`,
-`CredProx.OAuth` and `CredProx.Operations`
-carry no baseline yet — each ships first at
-the version these steps produce (`0.12.0`) — so their package validation is off
-(`EnablePackageValidation=false` in each project) and all six start validation at the
-baseline rotation that follows the `0.12.0` publication, when their own published bytes
-enter `build/baselines/`.
+All ten packages validate: each package's own previously published bytes are its baseline,
+and the six that first shipped at `0.12.0` entered that folder at the `0.13.0`-prep
+rotation, where their temporary `EnablePackageValidation=false` overrides were removed.
 
 Sanity-check the symbols before pushing (the CI step asserts the same on every build).
 The path-form assertions are not decoration: `0.7.1` shipped with local build paths in
@@ -157,6 +157,32 @@ for f in artifacts/publish/*.nupkg; do
   dotnet nuget push "$f" --source credprox
 done
 ```
+
+## After publishing: reopen the dev line and evict the machine cache
+
+Right after the last push, two actions on `main`:
+
+1. **Reopen the version line.** Set `<Version>` in `build/Version.props` to
+   `<next>-dev` (after the `0.13.0` publish: `0.14.0-dev`) and move the `CredProx*`
+   pins in `Directory.Packages.props` with it. A plain released number left on
+   `main` labels every later candidate pack with the published version id — the
+   `0.12.0` development window produced ten `CredProx.0.12.0.nupkg` candidates and
+   left the machine cache holding unreleased bytes under the released version id —
+   so anything that resolves by version alone (a consumer-compat scratch, a
+   byte-identity check against the published bytes) can silently take dev bytes
+   for the release.
+2. **Evict the machine cache for that id**, so the stale dir cannot serve again:
+
+```bash
+rm -rf ~/.nuget/packages/credprox*
+```
+
+   The next restore repopulates it from the registry — which now has the real
+   published bytes under that id.
+
+Do not add a test for the reopen: prep legitimately writes the plain number at
+tag time, so no in-repo cell can tell prep-time plainness from post-publish
+plainness. The two actions are ceremony steps, not gates.
 
 ## Verify as a consumer
 
@@ -265,7 +291,7 @@ dotnet nuget locals http-cache --clear
   Consumer matrix: 15/15 PASS against the local `0.12.0` feed at the prep commit. ACA
   harness: image built, offline proxy smoke `SMOKE OK`. Bench vs `baselines/0.11.0`:
   13 methods compared, `FAIL=3` — the three credential-attach arms measure +108…118 B
-  per request at the gate, and +106…128 B across four passes on identical code
+  per request at the gate, and +105…128 B across six passes on identical code
   (`StaticKeyAttach` varies by up to 17 B between runs); **accepted
   by the maintainer**
   as the measured cost of the release delta (docs/benchmarks.md, "Accepted release-delta
@@ -273,8 +299,55 @@ dotnet nuget locals http-cache --clear
   post-publish refresh. Disclosure scans over the tracked tree, the release diff and the
   commit messages: zero hits (the private-key-marker matches in the tree are the
   detector's own code).
-  Ceremony facts — pack-once, sanity loop, push round, consumer verify,
-  GitHub squash + tag, CI — are filled by the maintainer at publish: [CEREMONY-PENDING].
+  Ceremony (2026-11-18): a text-only fold after the check (`682a676`, the measured
+  attach-arm spread replacing a noise-band claim) is the internal release commit. GitHub:
+  ONE squashed commit `5cc1a7e` on the previous public tip `f239384`, noreply author and
+  committer, tree identical to `682a676`; the annotated tag built with `git mktag` from
+  explicit text (noreply tagger, `+0000`, header `tag 0.12.0`) and checked with
+  `git cat-file -p` before the push (zero private-email hits); a regular append, no tag
+  deletions. CI on the public commit, Actions run 44213003116: attempt 1 failed one sample
+  cell (`AgentEgressSmokeTests.Audit_RecordsCallsPerAgent_NoCredentialValueAnywhere`), a
+  test-side race in which the cell waits for the first audit line naming the caller and can
+  assert before the proxied call's line is written; attempt 2 green on all three jobs. The
+  packages carry no test code; the race fix follows on `main`. Packed **once** from a clean
+  detached worktree at the public commit, `-p:ContinuousIntegrationBuild=true`, fresh obj,
+  isolated package cache: ten packages, zero CP diagnostics, APICompat run on the four
+  baselined packages. Sanity loop ×10: SourceLink carries the full public SHA and the `/_/`
+  mapping in every symbol package, no builder-home paths in any pdb or dll, lib shape
+  `net10.0`-only, every dll `0.12.0+5cc1a7e…`, every nuspec naming the public commit;
+  member-wise disclosure scan over all twenty packages (71 members) zero hits. The registry
+  served nothing at `0.12.0` before the push. Push round: ten nupkgs (the client
+  auto-routes the adjacent snupkgs), each exactly once; every PUT answered `201 Created`.
+  Nupkg sha256: `CredProx` `cb274794c0091aa26a304ac67c1bbf6f89cb19089e7be0fc9e6b90014312b72a`,
+  `CredProx.Abstractions` `edc724067e25f639e2a632285ca85f5dbd52699aa0ef4ea8ced8fefc0d7928fe`,
+  `CredProx.AzureKeyVault` `482a8ccf16533757d05021236e211bb9957c916aded83f157b1b89fd5fb21e92`,
+  `CredProx.CallerKeys` `6cc70ea28f752818424347c2687df301244eab2a1335024434484ce8aa08b193`,
+  `CredProx.CallerTokens` `6055e4df26af6b8c71b6190ee47a2044abd33b77be981db83dcd272c9073df53`,
+  `CredProx.Hmac` `751803b79eeb2999477ff73a69e01ff0f008f7be0a9cbc4052fc612eec0d5754`,
+  `CredProx.LoginExchange` `a9084150ca7ae1facdd1c8282249327514331516af27a337cf6cde7df399dd17`,
+  `CredProx.OAuth` `6f15280b82b38814741cbc706b5c5a480fc6567729988b83408e40ea1cb42994`,
+  `CredProx.Operations` `59db2380dfa8f6f9ac8553036f0ee55aa40cb67762792848e2c79031c5a96e35`,
+  `CredProx.Testing` `7b987ece983ba1245efb77a1436559eb9df705541298e10685eed404f35499d5`.
+  Consumer verify: http-cache cleared, out-of-repo scratch project, isolated package cache,
+  all ten downloads byte-identical to the pushed artifacts; `samples/QuickStart` smoke green
+  (3/3, loaded-library stamp gate on) with its loaded `CredProx.dll` byte-identical to the
+  downloaded one. **Not verified at publish:** the SourceLink debugger step-through (CI
+  asserts the path form instead), the consumer-side `.snupkg` download path, and the
+  post-publish benchmark refresh (runs next, on a quiet machine). The refresh ran
+  (2026-11-18): a full pass at main `0feb05a` — src identical to the release tree
+  (`git diff --stat 682a676 0feb05a -- src` empty) — on a quiet machine, gated against
+  `baselines/0.11.0`: `bench-compare: 13 methods compared, FAIL=3 WARN=0` (compare exit 1)
+  — the three FAILs are exactly the accepted credential-attach arms at their recorded cost
+  (+113/+105/+117 B, each inside its arm's spread of +112…113, +105…108 and +111…128 B
+  across six identical-code passes; docs/benchmarks.md,
+  "Accepted release-delta allocations"), the other ten arms unchanged or inside their
+  documented allowances — `SseCredProx`, `SsePlain` and `TokenCacheBenchmarks.SingleFlight`
+  rose, each inside its allowance — and statistics depth `N=13` on `OAuthCacheHit`, `N=14`
+  on `OAuthCacheHitScrub`, `N=15` on the other eleven, all above the floor of 10;
+  `baselines/0.12.0/MACHINE.md` records the environment and the measured line, and the
+  baseline folder now holds the `0.12.0` bytes. Gate: full-solution Release build
+  0 Warning(s) / 0 Error(s); doc-snippet tests 21/21 (both classes, measured at the
+  pre-commit tree equal to this content).
 
 - `0.11.0` (GitHub `f23938405d797f4dfc6564faaa7bdfb5dff2599a`, internal release commit
   `1fa3b6b`): published 2026-11-16 — agent tokens (M39, ADR-0004; sample E19): an agent

@@ -420,3 +420,6 @@ infra/azure/*.json
 
 # Stryker.NET mutation-run output (plan 5.4; rerun per area)
 StrykerOutput/
+
+# Nightly fuzz findings (tests/CredProx.Fuzz/nightly-fuzz.sh output dir)
+.fuzz-nightly-findings/

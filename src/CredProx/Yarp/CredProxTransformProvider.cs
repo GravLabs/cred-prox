@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Yarp.ReverseProxy.Transforms;
@@ -71,7 +70,7 @@ public sealed class CredProxTransformProvider : ITransformProvider
             var state = new CredProxRequestState(
                 httpContext,
                 transformContext.ProxyRequest,
-                outgoingBody => RewriteForwarderRequestBody(httpContext, transformContext.ProxyRequest, outgoingBody));
+                forwarderBodyShape: true);
             httpContext.Features.Set(state);
 
             // The response direction runs at the end of the outbound pipeline (M20,
@@ -121,21 +120,5 @@ public sealed class CredProxTransformProvider : ITransformProvider
                 transformContext.DestinationPrefix = prefix;
             }
         });
-    }
-
-    // The forwarder refuses a replaced request content after the transforms and pumps
-    // the inbound request body at send time, so the measured copy configures the
-    // request itself: the exact hashed bytes flow to the upstream, and the measured
-    // length goes on the forwarder's own content, which then travels as the outbound
-    // Content-Length. Framing headers live on the message, not the content — the
-    // forwarder already owns them. The content reference stays the forwarder's, so its
-    // guard holds.
-    private static void RewriteForwarderRequestBody(HttpContext httpContext, HttpRequestMessage proxyRequest, byte[] body)
-    {
-        httpContext.Request.Body = new MemoryStream(body);
-        if (proxyRequest.Content is { } content)
-        {
-            content.Headers.ContentLength = body.LongLength;
-        }
     }
 }

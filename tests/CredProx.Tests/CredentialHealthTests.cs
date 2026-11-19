@@ -12,6 +12,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
@@ -552,5 +553,50 @@ public sealed class CredentialHealthTests
             "No CredProx health probes have run yet",
             report.Entries["credprox"].Description,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddCredProxHealthProbes_Disabled_RegistersNeitherProbeLoopNorCheck()
+    {
+        // ADR-0006 item 5: a switch that says off is off. With Enabled=false the probe
+        // loop and the "credprox" check are not registered at all — a disabled host must
+        // not get a "credprox" entry reporting Healthy without ever probing. The options,
+        // the built-in probe descriptors and the snapshot stay registered so a host can
+        // still resolve them.
+        //
+        // What the health pipeline actually reads is IOptions<HealthCheckServiceOptions>
+        // .Value.Registrations, not a service descriptor, so both halves assert on that
+        // list in the host's own shape — the host calls AddHealthChecks() itself first.
+        // The enabled control in the same cell keeps the disabled assert honest: it proves
+        // the instrument sees "credprox" there when the feature is on, so the absence in
+        // the disabled provider is the switch and not an instrument that matches nothing.
+        var control = new ServiceCollection();
+        control.AddHealthChecks();
+        control.AddCredProxHealthProbes(TestConfig.Root());
+        var controlRegistrations = control.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations;
+        Assert.Contains(controlRegistrations, r => r.Name == "credprox");
+
+        var config = TestConfig.Root(("CredProx:Health:Enabled", "false"));
+        var services = new ServiceCollection();
+        services.AddHealthChecks();
+        services.AddCredProxHealthProbes(config);
+
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(IHostedService)
+            && d.ImplementationType == typeof(CredentialHealthProbeService));
+
+        var provider = services.BuildServiceProvider();
+        Assert.DoesNotContain(
+            provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations,
+            r => r.Name == "credprox");
+
+        // Still there: options (Enabled=false bound), both built-in probe descriptors, snapshot.
+        Assert.Contains(services, d => d.ServiceType == typeof(CredProxHealthOptions));
+        Assert.Contains(services, d => d.ServiceType == typeof(ICredentialHealthProbe)
+            && d.ImplementationType == typeof(TokenObtainableProbe));
+        Assert.Contains(services, d => d.ServiceType == typeof(ICredentialHealthProbe)
+            && d.ImplementationType == typeof(CertificateExpiryProbe));
+        Assert.Contains(services, d => d.ServiceType == typeof(CredentialHealthSnapshot));
+        Assert.False(provider.GetRequiredService<CredProxHealthOptions>().Enabled);
     }
 }

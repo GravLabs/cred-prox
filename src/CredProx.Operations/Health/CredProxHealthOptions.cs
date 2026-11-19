@@ -11,7 +11,12 @@ public sealed class CredProxHealthOptions
     private TimeSpan _probeInterval = TimeSpan.FromMinutes(5);
     private int _certWarningDays = 30;
 
-    /// <summary>Whether the background probe loop runs. Default <see langword="true"/>.</summary>
+    /// <summary>
+    /// Whether credential health monitoring is registered at all. With
+    /// <see langword="false"/> neither the background probe loop nor the <c>credprox</c>
+    /// health check is registered (ADR-0006); the options, built-in probes and snapshot
+    /// remain resolvable. Default <see langword="true"/>.
+    /// </summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>

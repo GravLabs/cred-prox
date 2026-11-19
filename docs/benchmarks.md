@@ -23,7 +23,8 @@ All suites live in `tests/CredProx.Benchmarks` (BenchmarkDotNet).
 dotnet run -c Release --project tests/CredProx.Benchmarks -- --filter "*"
 ```
 
-Results land in `BenchmarkDotNet.Artifacts/results/`: a GitHub-markdown report and a
+Results land in `BenchmarkDotNet.Artifacts/results/` — relative to wherever the run
+command executes, the repository root for the command below: a GitHub-markdown report and a
 full JSON per suite. The job (1 launch, 5 warm-up, 15 × 250 ms iterations) is pinned
 in `Program.cs` so the committed baseline and every comparison run execute under
 identical settings. A full pass takes roughly 3–5 minutes; run it only when the
@@ -71,7 +72,7 @@ inline-vs-scheduled completion: unchanged-src reruns measured 23,444 / 23,481 /
 
 ```bash
 scripts/bench-compare.sh tests/CredProx.Benchmarks/baselines/0.9.3 \
-    tests/CredProx.Benchmarks/BenchmarkDotNet.Artifacts/results
+    BenchmarkDotNet.Artifacts/results
 ```
 
 Exits non-zero on a regression. Per method:
@@ -165,19 +166,37 @@ The 0.12.0 release-gate pass (against `baselines/0.11.0`, prep commit
 | `OAuthCacheHitScrub` | 9,735 B | 9,843 B | +108 B |
 | `StaticKeyAttach` | 7,457 B | 7,575 B | +118 B |
 
-Four passes on identical code (two full runs, two runs of just these three arms)
-measured `OAuthCacheHit` at +112…113 B and `OAuthCacheHitScrub` at +106…108 B, but
+Six passes on identical code (four full runs, two runs of just these three arms)
+measured `OAuthCacheHit` at +112…113 B and `OAuthCacheHitScrub` at +105…108 B, but
 `StaticKeyAttach` anywhere from +111 to +128 B, so that arm's allocation varies by up
 to 17 B between runs: wider than the echo-arm band in the table above, and not
 explained by anything measured so far. The drift itself is real in every pass and
 belongs to the release delta
 between `0.11.0` and `0.12.0` — chiefly the package-split seams, not the prep
-commits — and the other ten methods measured unchanged or better. The maintainer
+commits — and the other ten methods measured unchanged, inside their documented allowances, or better. The maintainer
 accepted the ~1.5% per-request allocation as the measured cost of the split for this
 release: the priority for it is the minimal core, not a byte budget. Root-causing
-which part of the split carries the +106…128 B, and why `StaticKeyAttach` varies, sits on the backlog and remains open
+which part of the split carries the +105…128 B, and why `StaticKeyAttach` varies, sits on the backlog and remains open
 as of 0.12.0, not in the release; the baseline rotates to the `0.12.0` bytes at the
 post-publish refresh below.
+
+### The carried allocation found and removed (post-0.12.0)
+
+A first-parent bisect of `0.11.0..0.12.0` on the `StaticKeyAttach` allocation later
+located the drift in one commit, `160460d`: the measured-body hand-off installed a
+delegate — a display class plus an `Action<byte[]>` — on every CredProx-routed
+request, whether or not anything measures a body, and every attach-arm request paid
+it (the live endpoints of that bisect straddled the committed baselines to ±5 B).
+The hand-off shape now travels as a flag on the request state and the rewrite lives
+inside `MeasureOutgoingBodyAsync`, so nothing is built per request; the bytes
+flowing onward are unchanged. `0.12.0` itself shipped carrying the allocation — the
+section above stands as the record of what was accepted and why. A structural pin in
+the core battery (`CredProxRequestStateShapeTests`) fails if a delegate-typed instance
+field rides `CredProxRequestState` again — exactly the shape `160460d` installed — and
+every attach arm routes through that state, so one check stands in for all three arms.
+A per-request closure created and invoked inline elsewhere on the transform path stays
+green here; the out-of-process bench gate is its numeric net. Why `StaticKeyAttach`
+varied by up to 17 B between gate passes stayed unexplained.
 
 ## Refreshing the baseline at each release
 

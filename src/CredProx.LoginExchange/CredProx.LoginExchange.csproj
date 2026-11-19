@@ -17,9 +17,6 @@
   <PropertyGroup>
     <!-- The add-on dogfoods the experimental plugin contract (plan §3.5 rule 2). -->
     <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
-    <!-- New package: no published baseline exists yet, so baseline validation is skipped;
-         its rotation starts at 0.12.0 (ADR-0001). -->
-    <EnablePackageValidation>false</EnablePackageValidation>
   </PropertyGroup>
 
 </Project>

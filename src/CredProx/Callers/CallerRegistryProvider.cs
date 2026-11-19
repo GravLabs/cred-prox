@@ -176,7 +176,11 @@ public sealed class CallerRegistryProvider
     }
 
     // A change-detector stamp over what a rebind reads from configuration: the raw values
-    // under CredProx:Callers that the binder and every contributor consume. The hash keeps
+    // under CredProx:Callers that the binder and every contributor consume. Sections are
+    // read case-insensitively and an environment source delivers its keys upper-cased, so
+    // the section filter ignores case too: matching one spelling only would freeze the
+    // stamp while the values every consumer reads move, and the rotation would never
+    // rebind. The hash keeps
     // raw config (which can hold key material) out of the retained record, and the stamp
     // itself is never logged. Secret VALUES are deliberately absent: a rotated secret is
     // invisible to configuration but fires the source's change token, tracked separately.
@@ -189,7 +193,7 @@ public sealed class CallerRegistryProvider
 
         using var sha = SHA256.Create();
         foreach (var pair in _configuration.AsEnumerable(true)
-                     .Where(pair => pair.Key.StartsWith("CredProx:Callers", StringComparison.Ordinal))
+                     .Where(pair => pair.Key.StartsWith("CredProx:Callers", StringComparison.OrdinalIgnoreCase))
                      .OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
             var bytes = Encoding.UTF8.GetBytes(string.Concat(pair.Key, "=", pair.Value, "\n"));

@@ -128,6 +128,35 @@ public sealed class OperationAllowListFeatureTests
     }
 
     [Fact]
+    public async Task PathBaseStrippingIgnoresCase_TheOperationPortionNeverDoes()
+    {
+        // Two case regimes in one path, split exactly where the server's declaration
+        // ends: the base is a server-declared prefix and is stripped the way ASP.NET
+        // Core reads prefixes - segment-wise, case-insensitive. What remains is the
+        // operation, and it matches the configured pattern ordinally: a differently
+        // cased operation is a different operation, and an unlisted one is refused.
+        var (stripped, stripContext) = Setup(
+            operations: [new Rule(null, ["GET"], ["/send"])],
+            identity: new CallerIdentity("app-a", "k1"),
+            path: "/API/send");
+        stripContext.Request.PathBase = "/api";
+
+        await stripped.ApplyAsync(stripContext, default);
+
+        Assert.False(Aborted(stripContext));
+
+        var (cased, caseContext) = Setup(
+            operations: [new Rule(null, ["GET"], ["/send"])],
+            identity: new CallerIdentity("app-a", "k1"),
+            path: "/api/Send");
+        caseContext.Request.PathBase = "/api";
+
+        await cased.ApplyAsync(caseContext, default);
+
+        Assert.True(Aborted(caseContext));
+    }
+
+    [Fact]
     public async Task NullContext_Throws()
     {
         var provider = Registry([("app-a", null)]);

@@ -113,8 +113,8 @@ internal static class ConfigKeyValidator
             {
                 // A value-only key (Type and Preset at a credential root, the connection's
                 // certificate keys): the binder consumes them as values, not blocks — a block
-                // under one is dropped exactly like under any other scalar (M16 review F1 class;
-                // a nested Type is already caught by the no-Type error before the walker).
+                // under one is dropped exactly like under any other scalar
+                // (a nested Type is already caught by the no-Type error before the walker).
                 if (child.GetChildren().Any())
                 {
                     AddScalarNestingError(errors, entity, childPath, child);

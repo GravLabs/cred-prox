@@ -190,10 +190,64 @@ public sealed class EventScrubbingStreamFramingTests
         await stream.CopyToAsync(output);
         var written = output.ToArray();
 
+        // This cell once failed with no geometry in its message, so the run could not say
+        // what the flush actually did. Two diagnostics carry that now: the failure line
+        // names the planned straddle and where the secret landed, and the byte-exact
+        // comparison below pins the whole output — the scrubbed secret is a substitution,
+        // so any half-emission or split marker shows up as a named mismatch position
+        // instead of a bare "secret survived".
+        var secretAt = new ReadOnlySpan<byte>(written).IndexOf(secretBytes);
         Assert.True(
-            new ReadOnlySpan<byte>(written).IndexOf(secretBytes) < 0,
-            "secret split by the overflow flush edge survived — hold-back tail lost");
-        Assert.Contains(Redacted, Encoding.UTF8.GetString(written));
+            secretAt < 0,
+            $"secret split by the overflow flush edge survived — hold-back tail lost; "
+            + $"planned: secretStart={head} secretLength={secretBytes.Length} firstOverflowPending={FirstOverflowPending} fill={Fill}; "
+            + $"secretAtInWritten={secretAt} writtenLength={written.Length}");
+
+        var redactedBytes = Encoding.UTF8.GetBytes(Redacted);
+        var expected = new byte[data.Length - secretBytes.Length + redactedBytes.Length];
+        data.AsSpan(0, head).CopyTo(expected);
+        redactedBytes.CopyTo(expected.AsSpan(head));
+        data.AsSpan(head + secretBytes.Length).CopyTo(expected.AsSpan(head + redactedBytes.Length));
+        Assert.Equal(expected, written);
+    }
+
+    // The hold-back window itself: a secret whose head sits in the last maxPatternLength-1
+    // bytes of pending has no complete match yet, so no scrub of the current pending can
+    // remove it — only NOT emitting those bytes can. Emitting the whole pending at the
+    // overflow flush leaks this head while the tail lands on the next fill; this is the
+    // shape the straddling-edge cell above cannot see.
+    [Fact]
+    public async Task Overflow_SecretHeadAtHoldBackEdge_TailArrivesNextFill_IsStillRedacted()
+    {
+        const int Fill = 16 * 1024;
+        const int FirstOverflowPending = 80 * 1024;
+        var secretBytes = Encoding.UTF8.GetBytes(Secret);
+        // Head starts 4 bytes before the pending edge: 4 bytes present, 3 not yet filled.
+        var head = FirstOverflowPending - 4;
+        var data = NonLineBytes(FirstOverflowPending + 4 * Fill);
+        for (var i = 0; i < secretBytes.Length; i++)
+        {
+            data[head + i] = secretBytes[i];
+        }
+
+        await using var stream = new EventScrubbingStream(new ChunkedStream(data, Fill), [Secret]);
+        using var output = new MemoryStream();
+        await stream.CopyToAsync(output);
+        var written = output.ToArray();
+
+        var secretAt = new ReadOnlySpan<byte>(written).IndexOf(secretBytes);
+        Assert.True(
+            secretAt < 0,
+            $"hold-back window leaked a partial secret head at the overflow flush; "
+            + $"planned: secretStart={head} secretLength={secretBytes.Length} firstOverflowPending={FirstOverflowPending} fill={Fill}; "
+            + $"secretAtInWritten={secretAt} writtenLength={written.Length}");
+
+        var redactedBytes = Encoding.UTF8.GetBytes(Redacted);
+        var expected = new byte[data.Length - secretBytes.Length + redactedBytes.Length];
+        data.AsSpan(0, head).CopyTo(expected);
+        redactedBytes.CopyTo(expected.AsSpan(head));
+        data.AsSpan(head + secretBytes.Length).CopyTo(expected.AsSpan(head + redactedBytes.Length));
+        Assert.Equal(expected, written);
     }
 
     // A registered secret longer than the event cap makes safeEmit negative on the

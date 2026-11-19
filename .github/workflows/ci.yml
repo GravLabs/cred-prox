@@ -10,6 +10,8 @@ jobs:
   build-test:
     name: Build, test and coverage
     runs-on: ubuntu-latest
+    # Measured 160 s (green run 44213003116, attempt 1); bound ~4x.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -118,6 +120,8 @@ jobs:
   e2e:
     name: Container end-to-end (Keycloak, nginx mTLS)
     runs-on: ubuntu-latest
+    # Measured 62 s (same run); bound ~5x for container pull variance.
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,6 +148,14 @@ jobs:
   examples:
     name: Examples build and smoke
     runs-on: ubuntu-latest
+    # PROVISIONAL bound, to be resized from the first green public run of the
+    # current shape: the green figure for this job is 619 s (run 44213003116
+    # attempt 2 - attempt 1's 407 s leg FAILED mid-job), measured at the 0.12.0
+    # tag. Two steps added since are its heaviest: the whole unfiltered Sample
+    # Smokes project (296 s measured in a fresh tree) and the ACA harness smoke
+    # (a docker build + run, unmeasured). Lower bound ~915 s sits over the old
+    # 900 s cap, so 30 m; resize when a current-shape run is green.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -231,7 +243,8 @@ jobs:
         run: samples/SessionCookie/smoke.sh
 
       # Config-secrets path against the in-process stand-in; the live-gate harness
-      # under tools/aca-live-harness (which proves the Key Vault path) is not built here.
+      # under tools/aca-live-harness (which proves the Key Vault path) is built and
+      # offline-smoked as an image in the last step below — never on the host.
       - name: Smoke AzureContainerApps (in-process stubs)
         run: samples/AzureContainerApps/smoke.sh
 
@@ -248,3 +261,19 @@ jobs:
       # in-process stubs (three cells in the shared smoke project).
       - name: Smoke MicrosoftGraph (in-process stubs)
         run: samples/MicrosoftGraph/smoke.sh
+
+      # Order-dependence pass: the whole smoke project, unfiltered, in one process.
+      # A single-process run starts every fixture side by side, so a stack or host
+      # one fixture leaves behind for the next fails CI here instead of staying a
+      # local duty. Same shape as each sample's smoke.sh minus the filter; building
+      # the test project also builds the samples' vendor stub projects.
+      - name: Smoke project whole (unfiltered)
+        run: dotnet test tests/CredProx.SampleSmokes
+
+      # The Azure live-gate harness's offline proof (G1): the image route the
+      # harness README prescribes — the test CA needs a root trust store, so the
+      # smoke runs in the image, never on the runner host. Exit 0 prints `SMOKE OK:`.
+      - name: ACA harness offline proxy smoke
+        run: |
+          docker build -f tools/aca-live-harness/Dockerfile -t credprox-ci:smoke .
+          docker run --rm credprox-ci:smoke --mode proxy --smoke

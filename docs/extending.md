@@ -19,6 +19,68 @@ example is [`samples/CustomPlugin`](../samples/CustomPlugin) — a credential ty
 | Pipeline feature | `IPipelineFeature` (plus the request / connection / response flavours) | register the feature; stages run in a fixed order, and `AbortAsync` short-circuits the pipeline |
 | Body hand-off | `CredProxRequestState` | read-only: features that need the whole outbound body buffer through this measured seam, with a byte cap |
 
+## Replacing or turning off a built-in
+
+The contract is in [ADR-0006](adr/0006-replace-or-turn-off-a-built-in.md): a single
+service is replaced **host-first** — register your implementation before the
+`AddCredProx…` call and yours is the one used; a pipeline stage is **extend-only** —
+you add a stage beside the built-ins, you do not replace or remove one, because the
+stages are what lets CredProx promise a credential never reaches the upstream and a
+secret never reaches the caller; and an optional stage is turned off **only by its
+named switch**.
+
+The single services, and how to replace each:
+
+| Built-in | What it does | Replace how | Turn off |
+|---|---|---|---|
+| `ITokenCache` (in-memory) | Caches vendor tokens, one flight per key, early refresh | Register your `ITokenCache` before `AddCredProx` | No switch — the credential path needs a cache; replace it rather than remove it |
+| `ISecretSource` (configuration-backed) | Resolves `secret:` references from `CredProx:Secrets` and reloads on config change | Register your `ISecretSource` before `AddCredProx` (your source owns its own reload) | No switch — it is the core's secret plumbing |
+| `TimeProvider.System` | The clock everything time-based reads | Register your `TimeProvider` before `AddCredProx` (a test clock just works) | No switch |
+| `ICallerStore` (CallerKeys) | Maps a presented caller key to its caller | Register your `ICallerStore` before `AddCredProxCallerAuthentication` | The caller-key feature is opt-in: without its call and callers in config there is nothing to turn off |
+| `ICallerTokenMapper` | Turns an authenticated caller token into a caller | Register your mapper before `AddCredProxCallerTokenAuthentication` | No switch — a caller token that maps to nobody is refused |
+| The caller-token validation handler | Validates the caller token (issuer, audience, expiry) | Pass `registerScheme` to `AddCredProxCallerTokenAuthentication` — your handler owns the scheme; the `MaxTokenAge` bound still applies | The caller-token feature is opt-in |
+| The forwarder client factory | Builds the outbound `HttpClient` | Subclass `CredProxForwarderHttpClientFactory` and `Replace` it after the CredProx calls | No switch — outbound always goes through it |
+| `IAuditSink` registrations | Where audit records go | Add your sinks; the recorder itself is not replaceable (that is deliberate) | `CredProx:Audit:Enabled=false` |
+
+The pipeline stages — header hygiene, credential attach, operation allow-list,
+scrubbing, error normalisation, the kill switch, refresh-on-401, the startup guards —
+are **extend-only**: register your feature and it runs alongside them; removing a
+built-in stage's registration is unsupported. Only these have an off switch:
+
+| Switch | What it stops |
+|---|---|
+| `CredProx:Scrubbing:Enabled=false` | Response scrubbing |
+| `CredProx:Errors:Enabled=false`; route metadata `CredProx.ErrorNormalisation="off"` | Error normalisation, globally or per route |
+| `CredProx:Audit:Enabled=false` | Audit records |
+| `CredProx:Health:Enabled=false` | Health monitoring entirely — neither the probe loop nor the `credprox` health check is registered |
+| Route metadata `"CredProx.Caller": "anonymous"` | Caller authentication for that one route |
+
+Everything else fail-closes and has no off switch by design: header hygiene strips,
+credential attach, the operation allow-list, the kill switch, refresh-on-401, the
+startup validators and the unknown-key refusal. If you genuinely need to replace a
+stage, open an issue — the answer is an ADR discussion, not a hidden flag.
+
+Four interactions worth knowing before you flip a switch:
+
+- **Scrubbing off while error normalisation stays on:** the normaliser runs after the
+  scrubber, so an error body's `vendor_detail` can embed vendor bytes that scrubbing
+  would have removed. Turn both off, or keep scrubbing on.
+- **A pre-registered `CallerKeyOptions`:** the caller-key extension adds its
+  config-bound options with `TryAdd`, so an instance you registered earlier wins — and
+  the `CredProx:CallerAuth` configuration section is then never read.
+- **A pre-registered `CredProxHealthOptions`:** health is the one named switch decided at
+  registration time — `CredProx:Health:Enabled` in configuration decides whether the probe
+  loop and the `credprox` check are registered, and an instance you registered earlier does
+  not change that decision. It still governs the probe interval and the expiry-warning
+  window used by the probes that are registered. The scrubbing, error-normalisation and
+  audit switches are read from the registered instance at run time, so there an instance
+  you registered earlier does flip the feature.
+- **A pre-registered `CallerTokenOptions`:** the caller-token extension is the deliberate
+  exception to the `TryAdd` rule — it adds its config-bound options with `AddSingleton`,
+  so the last registration wins and the fail-closed `MaxTokenAge` bound always comes from
+  configuration; an instance you registered earlier is superseded
+  ([ADR-0004](adr/0004-short-lived-scoped-caller-tokens.md)).
+
 ## The rules that make a package first-class
 
 - **No `InternalsVisibleTo`.** The built-in packages open their internals only to their

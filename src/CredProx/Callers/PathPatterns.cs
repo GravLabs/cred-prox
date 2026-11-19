@@ -65,7 +65,7 @@ internal static class PathPatterns
             }
         }
 
-        // Empty segments are refused outright (explicit decision, M6 review): Matches
+        // Empty segments are refused outright, deliberately: Matches
         // collapses them, so /allowed//admin would match /allowed/* while being
         // forwarded with the double slash intact — a decoded-vs-forwarded disagreement
         // surface an upstream that normalizes '//' resolves differently. A legitimate

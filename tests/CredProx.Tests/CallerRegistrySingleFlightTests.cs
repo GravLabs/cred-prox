@@ -145,6 +145,33 @@ public sealed class CallerRegistrySingleFlightTests
         }
     }
 
+    /// <summary>A secret source whose reads either answer or throw cancellation, switched
+    /// by the test between reloads — the realistic shape of a provider whose in-bind
+    /// request was cancelled while the configuration watch stays healthy.</summary>
+    private sealed class CancellingSecretSource(string hashRefValue) : ISecretSource
+    {
+        public bool CancelBinds { get; set; }
+
+        public string Scheme => "canceltest";
+
+        public IChangeToken GetChangeToken() => new CancellationChangeToken(CancellationToken.None);
+
+        public ValueTask<string?> GetSecretAsync(string name, CancellationToken cancellationToken)
+        {
+            if (name != "hashref")
+            {
+                return new ValueTask<string?>((string?)null);
+            }
+
+            if (CancelBinds)
+            {
+                throw new OperationCanceledException("the bind's secret read was cancelled", new CancellationToken(true));
+            }
+
+            return new ValueTask<string?>(hashRefValue);
+        }
+    }
+
     /// <summary>A contributor that holds one bind open — inside the bind, before the key
     /// table is built — until the test releases it, so the test can fire a secret-source
     /// signal mid-bind. Registered before the keys package, so it runs first in Commit.</summary>
@@ -309,6 +336,85 @@ public sealed class CallerRegistrySingleFlightTests
         Assert.True(rotatedServes && oldStops, "the accepted edit must take effect exactly once");
         Assert.Equal(1, logs.Count(l => l.Contains(RebindPhrase)));
         Assert.Equal(0, logs.Count(l => l.Contains(DropPhrase)));
+    }
+
+    [Fact]
+    public async Task LiteralKeyHashRotation_EnvVarCasedCallerKeys_RebindsAndRotates()
+    {
+        // A host that feeds the caller list through an environment-shaped source carries the
+        // section keys upper-cased (CREDPROX:CALLERS:…). Every consumer still binds them —
+        // configuration sections are read case-insensitively — so the attempt stamp, the
+        // half that decides a rebind while the secret source stays silent, must cover those
+        // keys in any casing. Frozen to one spelling it never moves for a rotated literal
+        // KeyHash, the trigger drops, and the retired hash keeps serving.
+        var entries = new Dictionary<string, string?>
+        {
+            ["CredProx:Destinations:acme:Template"] = "http://upstream.example/",
+            ["CREDPROX:CALLERS:acme:Keys:0:KeyId"] = "k1",
+            ["CREDPROX:CALLERS:acme:Keys:0:KeyHash"] = Hash(KeyA),
+        };
+        var silent = new SignalableSecretSource([], []);
+        var (host, logs, provider) = BuildHost(entries, secretSource: silent);
+        await host.StartAsync(default);
+        var store = host.Services.GetRequiredService<ICallerStore>();
+        var admittedInitially = await store.ResolveKeyAsync(KeyA, default) is not null;
+        Assert.True(
+            admittedInitially,
+            "the initial bind must read the caller section in the casing the source delivered");
+        provider.Set("CREDPROX:CALLERS:acme:Keys:0:KeyHash", Hash(KeyA + "-rotated"));
+        provider.Reload();
+        await WaitForLog(logs, RebindPhrase);
+        var rotatedServes = await store.ResolveKeyAsync(KeyA + "-rotated", default) is not null;
+        var oldStops = await store.ResolveKeyAsync(KeyA, default) is null;
+        await host.StopAsync();
+        Assert.True(rotatedServes, "the rotated hash must serve after the reload");
+        Assert.True(oldStops, "the retired hash must stop serving after the reload");
+    }
+
+    [Fact]
+    public async Task CancellationEscapingTheBind_KeepsEveryLaterReloadLive()
+    {
+        // Providers let OperationCanceledException escape their bind - only it - on the
+        // standing that a cancelled bind is not a refused config. What that hands to the
+        // framework's reload watcher has never been exercised here: an exception leaving
+        // the change callback propagates through the reload dispatch, and if the watcher
+        // re-arm depended on the callback returning, every LATER reload would be silent -
+        // rotations would stop landing with no error line at all. Pin the liveness: a
+        // bind that throws cancellation, then an ordinary rotation, must still take
+        // effect.
+        var source = new CancellingSecretSource(Hash(KeyA));
+        var entries = new Dictionary<string, string?>
+        {
+            ["CredProx:Destinations:acme:Template"] = "http://upstream.example/",
+            ["CredProx:Callers:acme:Keys:0:KeyId"] = "k1",
+            ["CredProx:Callers:acme:Keys:0:KeyHash"] = "secret:hashref",
+        };
+        var (host, logs, provider) = BuildHost(entries, secretSource: source);
+        await host.StartAsync(default);
+        var store = host.Services.GetRequiredService<ICallerStore>();
+        Assert.NotNull(await store.ResolveKeyAsync(KeyA, default));
+
+        source.CancelBinds = true;
+        provider.Set("CredProx:Callers:acme:Keys:0:KeyId", "k2");
+        try
+        {
+            provider.Reload();
+        }
+        catch (Exception)
+        {
+            // Whether the escaping cancellation surfaces through the reload dispatch is
+            // the framework's shape; what this cell owns is what happens NEXT.
+        }
+
+        source.CancelBinds = false;
+        provider.Set("CredProx:Callers:acme:Keys:0:KeyHash", Hash(KeyA + "-rotated"));
+        provider.Reload();
+        await WaitForLog(logs, RebindPhrase);
+        var rotatedServes = await store.ResolveKeyAsync(KeyA + "-rotated", default) is not null;
+        await host.StopAsync();
+        Assert.True(
+            rotatedServes,
+            "a bind cancelled mid-flight must not silence the watcher for later reloads");
     }
 
     [Fact]

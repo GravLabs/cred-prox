@@ -1,5 +1,6 @@
-# Nightly layer (plan §5.1): load tests with real clocks and threads, and a compile
-# check of the fuzz harness. No live vendor-account smokes run here.
+# Nightly layer (plan §5.1): load tests with real clocks and threads, a compile
+# check of the fuzz harness, and a time-boxed fuzz pass over every target.
+# No live vendor-account smokes run here.
 #
 # GitHub fires schedule triggers on the default branch only; `workflow_dispatch`
 # (Actions → Run workflow) works from any branch, so the nightly layer can always
@@ -15,6 +16,10 @@ jobs:
   load:
     name: Load tests (§5.1 nightly)
     runs-on: ubuntu-latest
+    # Measured on public Nightly runs 17/18/19 (fired on schedule after slice C
+    # merged): 20, 27, 49 s. The 15 m bound keeps room for the real-clock load
+    # scenarios; these numbers do not pressure it.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,6 +46,9 @@ jobs:
   fuzz-build:
     name: Fuzz harness compiles (§5.4 rot check)
     runs-on: ubuntu-latest
+    # One-project restore+build: measured 25, 26, 32 s on public Nightly runs
+    # 17/18/19 - below the 160 s full build-test. 5 m leaves that ample headroom.
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,3 +63,50 @@ jobs:
 
       - name: Build
         run: dotnet build tests/CredProx.Fuzz/CredProx.Fuzz.csproj --configuration Release --no-restore
+
+  # Time-boxed fuzz pass (owner, 2026-11-16; proof-and-keeps requirement 2026-11-18):
+  # every target gets its own matrix job - FUZZ_SECONDS of afl, then the script's
+  # pass/fail line prints that target's executions and coverage edges and fails on
+  # zero of either, on a run that never reached its time-box, or on any crash or
+  # hang. Crashing and hanging inputs are uploaded by name, per target.
+  fuzz-run:
+    name: Fuzz ${{ matrix.target }} (time-boxed §5.4)
+    needs: fuzz-build
+    runs-on: ubuntu-latest
+    # afl itself is bounded by `timeout` inside the container; this bounds the
+    # rest (publish, a hung docker daemon) well under the 360-min job default.
+    # Local measurement 2026-11-18: the per-job --no-cache image build of the
+    # 11.85 GB spike image runs ~42 s and publish+docker overhead ~30 s on top
+    # of the time-box; no public duration for the image build yet (revisit after
+    # the first scheduled fires).
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [pathpatterns, headerattach, scrub, sse, configkeys, parsers]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build the fuzz container image
+        run: docker build -t credprox-fuzz-spike:1 -f tests/CredProx.Fuzz/Dockerfile tests/CredProx.Fuzz
+
+      - name: Run the time-boxed pass
+        run: bash tests/CredProx.Fuzz/nightly-fuzz.sh ${{ matrix.target }}
+        env:
+          FUZZ_SECONDS: "240"
+
+      - name: Keep crashing and hanging inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-inputs-${{ matrix.target }}
+          path: |
+            .fuzz-nightly-findings/${{ matrix.target }}/default/crashes/*
+            .fuzz-nightly-findings/${{ matrix.target }}/default/hangs/*
+          if-no-files-found: warn

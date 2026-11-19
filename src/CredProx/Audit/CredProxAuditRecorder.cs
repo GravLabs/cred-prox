@@ -104,7 +104,7 @@ public sealed class CredProxAuditRecorder
 
         // Begin runs once per request: an already-wrapped body means a second Begin on the
         // same context (e.g. a future feature re-running the transform), which must not
-        // double-count bytes or schedule a second record (M7 review note d).
+        // double-count bytes or schedule a second record.
         if (context.Response.Body is CountingResponseBodyStream)
         {
             return;

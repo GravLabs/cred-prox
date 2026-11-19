@@ -211,7 +211,7 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
         string credentialName,
         OAuthClientCredentialsProvider provider)
     {
-        // M37 A1: the string arm parses with the canonical JSON-number grammar only. The
+        // The string arm parses with the canonical JSON-number grammar only. The
         // old double.TryParse(string, out _) overload was CurrentCulture with AllowThousands:
         // "1,000" parsed or not depending on the machine, and the non-finite names arrived
         // host-dependently - "Infinity"/"-Infinity" parse only under the invariant culture (an
@@ -235,11 +235,11 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
             JsonValueKind.String when double.TryParse(
                 text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
             // Unmistakably meant as a number, parseable only via thousands grouping; accepting
-            // it would make the cached lifetime culture-dependent. Reject (M37 A1 decision,
-            // rationale in the CHANGELOG).
+            // it would make the cached lifetime culture-dependent. Reject (rationale
+            // in the CHANGELOG).
             JsonValueKind.String when IsGroupedNumber(text) => throw new InvalidExpiresInRejectedException(
                 $"The OAuth token endpoint for credential '{credentialName}' returned a thousands-grouped 'expires_in' value; the token response was rejected."),
-            // M38 B: a non-empty string that is not a JSON number in any culture ("abc", "0x10",
+            // A non-empty string that is not a JSON number in any culture ("abc", "0x10",
             // non-ASCII digits) is a protocol violation, not a silent DefaultLifetime. This was
             // the last silent-fallback hole in the string arm.
             JsonValueKind.String => throw new InvalidExpiresInRejectedException(
@@ -262,7 +262,7 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
             {
                 // RFC 6749 defines expires_in as a lifetime in seconds: a negative value is a
                 // protocol violation, and caching the token it stamps serves a guaranteed
-                // vendor 401 (M33 fault 7, 0.9.0: it silently degraded to DefaultLifetime).
+                // vendor 401 (in 0.9.0 it silently degraded to DefaultLifetime).
                 // Reject the response through the documented IdP-failure path - callers get
                 // credential_unavailable (502) and nothing is cached. The message names the
                 // field and the credential id, never the value and never the token.
@@ -324,8 +324,8 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
 
     private void LogEmptyLifetime(string credentialName)
     {
-        // Present-but-empty is how some gateways render "no stated expiry" (M38 B ruling): it
-        // means absent - DefaultLifetime - but the credential deserves one loud notice, the
+        // Present-but-empty is how some gateways render "no stated expiry": it means
+        // absent - DefaultLifetime - but the credential deserves one loud notice, the
         // zero-lifetime rule beside it mirrored.
         if (_logger is null || !_emptyLifetimeLogged.TryAdd(credentialName, 0))
         {

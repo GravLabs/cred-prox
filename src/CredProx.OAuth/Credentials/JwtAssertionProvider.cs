@@ -187,18 +187,18 @@ public sealed class JwtAssertionProvider : ICredentialProvider<JwtAssertionOptio
             var root = document.RootElement;
             accessToken = ReadRequiredString(root, options.TokenField);
 
-            // M37 fold 2 (architect rulings 02:18Z/02:19Z/02:20Z): ExpiresAtField is consulted
-            // when ExpiresInField is absent OR unusable (zero, negative, non-finite,
-            // unparseable) - the documented precedence, now stated. A negative expires_in is
-            // UNUSABLE, not an instant throw: it still gives way to a valid expires_at, and
-            // only rejects - M33 fault 7 mirrored from OAuth, nothing cached - when nothing
-            // usable remains, because the only path left would be the fault-7 DefaultLifetime.
-            // M38 A+B extend the same defer-then-reject treatment to every
-            // unusable expires_in: non-finite, thousands-grouped, and any other non-empty
-            // non-numeric string (InvalidExpiresInRejectedException).
+            // ExpiresAtField is consulted when ExpiresInField is absent OR unusable
+            // (zero, negative, non-finite, unparseable) - the documented precedence. A
+            // negative expires_in is UNUSABLE, not an instant throw: it still gives way
+            // to a valid expires_at, and only rejects - nothing cached - when nothing
+            // usable remains, because the only path left would cache on DefaultLifetime
+            // with nothing in the response supporting that lifetime. The same
+            // defer-then-reject treatment covers every unusable expires_in: non-finite,
+            // thousands-grouped, and any other non-empty non-numeric string
+            // (InvalidExpiresInRejectedException).
             // Zero and the empty string are the two branches that never reject: zero falls to a
             // valid expires_at, else DefaultLifetime (JwtAssertionProviderTests pins both); "" is
-            // absent-with-notice - the same fallback plus one warning per credential (M38 B).
+            // absent-with-notice - the same fallback plus one warning per credential.
             var resolvedExpiry = false;
             var negativeExpiresIn = false;
             var invalidExpiresIn = false;
@@ -259,9 +259,9 @@ public sealed class JwtAssertionProvider : ICredentialProvider<JwtAssertionOptio
                     var now = _time.GetUtcNow();
                     if (absolute <= now)
                     {
-                        // M38: an absolute expiry already at or before now is UNUSABLE
-                        // — the same class as a negative expires_in (M33 fault 7: never act on a
-                        // token whose stated expiry is already dead). Defer like the unusable
+                        // An absolute expiry already at or before now is UNUSABLE
+                        // — the same class as a negative expires_in: never act on a
+                        // token whose stated expiry is already dead. Defer like the unusable
                         // expires_in values: a usable one upstream already won the precedence,
                         // and if nothing else resolves below this faults the response.
                         pastExpiresAt = true;
@@ -286,9 +286,9 @@ public sealed class JwtAssertionProvider : ICredentialProvider<JwtAssertionOptio
             }
             if (!resolvedExpiry && invalidExpiresIn)
             {
-                // M38 A+B: a non-finite, thousands-grouped or non-numeric
-                // expires_in is a protocol violation like the negative case, but the M37
-                // precedence stands - it only rejects once no usable expires_at resolved the
+                // A non-finite, thousands-grouped or non-numeric
+                // expires_in is a protocol violation like the negative case, but the
+                // precedence above stands - it only rejects once no usable expires_at resolved the
                 // expiry. Nothing cached; the message names the field and the credential id,
                 // never the value or the token.
                 throw new OAuthClientCredentialsProvider.InvalidExpiresInRejectedException(

@@ -13,7 +13,7 @@ internal sealed class TokenExchangeOptionsValidator : IValidateOptions<TokenExch
     {
         var failures = new List<string>();
 
-        // M27 review N1 (docs/adr/0002): the binder refuses the NAME of a removed enum
+        // Per docs/adr/0002: the binder refuses the NAME of a removed enum
         // member but accepts any NUMBER, so Mode: 1 (the old EntraObo value) would bind to
         // the undefined enum and silently run the Rfc8693 exchange. IsDefined - not
         // != Rfc8693 - so a future member would bind and validate cleanly; the failure
@@ -69,7 +69,7 @@ internal sealed class TokenExchangeOptionsValidator : IValidateOptions<TokenExch
         if (hasJwks && !hasAuthority && string.IsNullOrEmpty(options.Issuer))
         {
             // Nothing discovers the issuer in explicit-JWKS mode; ValidIssuer=null would
-            // reject every token at runtime — fail at startup instead (M14 review).
+            // reject every token at runtime — fail at startup instead.
             failures.Add("Issuer is required with JwksUri (with Authority the issuer is discovered).");
         }
 

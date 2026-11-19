@@ -13,7 +13,7 @@ namespace CredProx;
 /// Singleton like the CredProx.Operations throttle registry. Each key holds one immutable record
 /// pairing the limiter with the limits that produced it, so a first concurrent burst against
 /// a fresh key converges on a single limiter: <c>GetOrAdd</c> is atomic and the replace block
-/// is entered only when the configured limits genuinely differ (review F1 — the earlier
+/// is entered only when the configured limits genuinely differ (the earlier
 /// two-dictionary shape let every thread in a first burst replace a live limiter, which both
 /// disposed a limiter another thread held and over-admitted the budget). A config rebind that
 /// changes a caller's limits replaces that pair's record (fresh window — the design states

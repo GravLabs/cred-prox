@@ -230,6 +230,90 @@ public sealed class InMemoryTokenCacheTests
     }
 
     [Fact]
+    public async Task Invalidate_DuringFailingFetch_LeavesNoNegativeCache()
+    {
+        // The generation guard also fronts the negative-cache store: a fetch that fails
+        // after a concurrent Invalidate predates it, and caching that failure would make
+        // every following caller eat a negative entry for a provider state that the
+        // invalidation already declared past.
+        var cache = CreateCache();
+        var fetchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fetchRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+
+        var inFlight = cache.GetTokenAsync(
+            "cred",
+            null,
+            async ct =>
+            {
+                Interlocked.Increment(ref calls);
+                fetchStarted.TrySetResult();
+                await fetchRelease.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                throw new InvalidOperationException("provider down mid-flight");
+            },
+            CancellationToken.None).AsTask();
+
+        await fetchStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        cache.Invalidate("cred", null);
+        fetchRelease.SetResult();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => inFlight);
+
+        ValueTask<(string, DateTimeOffset)> RetryAcquire(CancellationToken ct)
+        {
+            calls++;
+            return ValueTask.FromResult(("retry-ok", T0 + TimeSpan.FromSeconds(3600)));
+        }
+
+        Assert.Equal("retry-ok", await cache.GetTokenAsync("cred", null, RetryAcquire, default));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task Invalidate_DuringInFlightFetch_QueuedWaiterRefetches()
+    {
+        // The waiter queued behind a fetch that an Invalidate invalidates must not inherit
+        // the discarded result: it re-checks after the gate, finds the slot cleared, and
+        // fetches its own. Serving it the discarded token would re-add exactly what the
+        // guard dropped.
+        var cache = CreateCache();
+        var fetchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fetchRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+
+        var first = cache.GetTokenAsync(
+            "cred",
+            null,
+            async ct =>
+            {
+                Interlocked.Increment(ref calls);
+                fetchStarted.TrySetResult();
+                await fetchRelease.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                return ("discarded-token", T0 + TimeSpan.FromSeconds(3600));
+            },
+            CancellationToken.None).AsTask();
+
+        await fetchStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var second = cache.GetTokenAsync(
+            "cred",
+            null,
+            ct =>
+            {
+                Interlocked.Increment(ref calls);
+                return ValueTask.FromResult(("after-invalidate-token", T0 + TimeSpan.FromSeconds(3600)));
+            },
+            CancellationToken.None).AsTask();
+        await Task.Delay(50); // let the second caller park on the gate
+
+        cache.Invalidate("cred", null);
+        fetchRelease.SetResult();
+
+        Assert.Equal("discarded-token", await first);
+        Assert.Equal("after-invalidate-token", await second);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
     public async Task CancellationOfOneWaiter_DoesNotCancelTheSharedFetch()
     {
         var cache = CreateCache();

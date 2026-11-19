@@ -117,9 +117,21 @@ public class AgentEgressSmokeTests(AgentEgressFixture fixture)
             $"setup calls failed: crmRead={(int)crmRead.StatusCode} crmWrite={(int)crmWrite.StatusCode} supportRead={(int)supportRead.StatusCode} supportWrite={(int)supportWrite.StatusCode}\n{host.Stderr}");
 
         // Audit records land on the gateway's console (Information under CredProx.Audit).
+        // Each audit line is written when its own response completes, so the two
+        // support-agent lines (rejected read, proxied write) reach stdout in arbitrary
+        // order: waiting for the first caller=support-agent line can pass while the
+        // proxied one is still in flight, and the assert below then races it. Wait until
+        // all four asserted lines are present, using the asserts' own predicates.
+        static bool HasAuditLine(string stdout, string evt, string caller) =>
+            stdout.Split('\n').Any(l => l.Contains(evt, StringComparison.Ordinal)
+                && l.Contains(caller, StringComparison.Ordinal));
         await AgentEgressFixture.WaitUntilAsync(
-            () => Task.FromResult(host.Stdout.Contains("caller=support-agent", StringComparison.Ordinal)),
-            $"audit line for support-agent never appeared:\n{host.Stdout}");
+            () => Task.FromResult(
+                HasAuditLine(host.Stdout, "credprox.proxied_call", "caller=crm-agent")
+                && HasAuditLine(host.Stdout, "credprox.proxied_call", "caller=support-agent")
+                && HasAuditLine(host.Stdout, "credprox.rejected_call", "caller=crm-agent")
+                && HasAuditLine(host.Stdout, "credprox.rejected_call", "caller=support-agent")),
+            $"expected audit lines never all appeared:\n{host.Stdout}");
         var lines = host.Stdout.Split('\n');
         Assert.Contains(lines, l => l.Contains("credprox.proxied_call", StringComparison.Ordinal)
             && l.Contains("caller=crm-agent", StringComparison.Ordinal));

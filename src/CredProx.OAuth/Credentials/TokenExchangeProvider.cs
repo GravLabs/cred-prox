@@ -493,7 +493,7 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         string credentialName,
         TokenExchangeProvider provider)
     {
-        // M38 A+B: OAuth's rule verbatim (M37 A1 + M33 fault 7 + M38 B). Parse
+        // OAuth's rule verbatim. Parse
         // with the canonical JSON-number grammar — invariant culture, no thousands grouping — and
         // reject the protocol violations through the IdP-failure path: non-finite, thousands-grouped
         // and any other non-empty non-numeric string throw InvalidExpiresInRejectedException,
@@ -515,10 +515,10 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
             JsonValueKind.String when double.TryParse(
                 text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) => parsed,
             // Unmistakably meant as a number, parseable only via thousands grouping; accepting it
-            // would make the cached lifetime culture-dependent (the OAuth M37 A1 decision, mirrored).
+            // would make the cached lifetime culture-dependent (the OAuth rule, mirrored).
             JsonValueKind.String when IsGroupedNumber(text) => throw new OAuthClientCredentialsProvider.InvalidExpiresInRejectedException(
                 $"The token-exchange endpoint for credential '{credentialName}' returned a thousands-grouped 'expires_in' value; the token response was rejected."),
-            // M38 B: a non-empty string that is not a JSON number in any culture ("abc", "0x10",
+            // A non-empty string that is not a JSON number in any culture ("abc", "0x10",
             // non-ASCII digits) is a protocol violation, not a silent DefaultLifetime.
             JsonValueKind.String => throw new OAuthClientCredentialsProvider.InvalidExpiresInRejectedException(
                 $"The token-exchange endpoint for credential '{credentialName}' returned an unusable 'expires_in' string; the token response was rejected."),

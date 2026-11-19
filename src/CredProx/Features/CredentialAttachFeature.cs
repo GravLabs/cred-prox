@@ -209,7 +209,7 @@ public sealed class CredentialAttachFeature : IRequestFeature
             // final assembly unchanged (host-proven by QueryPlacement_LivePipeline_*
             // below), so building it from the state's final parts is exact, not a guess.
             // Inside the try: a malformed prefix that survives startup validation must
-            // answer the credential problem, not the catch-all 500 (M9 review nit).
+            // answer the credential problem, not the catch-all 500.
             if (state.ProxyRequest.RequestUri is null
                 && binding.Options is IHasAttachment { Location: CredentialLocation.Query })
             {

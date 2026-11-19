@@ -203,13 +203,21 @@ public class AiGatewaySmokeTests(AiGatewayFixture fixture)
             $"setup calls failed: chat={(int)chatCall.StatusCode} blocked={(int)blockedCall.StatusCode} ops={(int)opsCall.StatusCode}\n{host.Stderr}");
 
         // Audit records land on the gateway's console (Information under CredProx.Audit).
+        // Audit lines are written as their own responses complete, in arbitrary order, so
+        // one caller's line cannot vouch for the lines the asserts below consume. Wait
+        // until every asserted line is present, using the asserts' own predicates.
         await AiGatewayFixture.WaitUntilAsync(
-            () => Task.FromResult(host.Stdout.Contains("caller=ops-app", StringComparison.Ordinal)),
-            $"audit line for ops-app never appeared:\n{host.Stdout}");
+            () => Task.FromResult(
+                host.Stdout.Contains("credprox.proxied_call", StringComparison.Ordinal)
+                && host.Stdout.Contains("caller=chat-app", StringComparison.Ordinal)
+                && host.Stdout.Contains("credprox.rejected_call", StringComparison.Ordinal)
+                && host.Stdout.Contains("caller=ops-app", StringComparison.Ordinal)),
+            $"expected audit lines never all appeared:\n{host.Stdout}");
 
         Assert.Contains("credprox.proxied_call", host.Stdout, StringComparison.Ordinal);
         Assert.Contains("caller=chat-app", host.Stdout, StringComparison.Ordinal);
         Assert.Contains("credprox.rejected_call", host.Stdout, StringComparison.Ordinal);
+        Assert.Contains("caller=ops-app", host.Stdout, StringComparison.Ordinal);
         var output = host.Stdout + host.Stderr;
         Assert.DoesNotContain(AiGatewayFixture.ProviderKey, output, StringComparison.Ordinal);
         Assert.DoesNotContain(AiGatewayFixture.ChatAppKey, output, StringComparison.Ordinal);

@@ -51,9 +51,16 @@ public sealed class LoginExchangeSmokeTests
     [Trait("Sample", "LoginExchange")]
     public async Task ProdPartition_IsBlockedBeforeAnyVendorCall()
     {
-        // The Partition allow-list refuses prod; the 400 body names the machine token.
-        var (status, body) = await _stub.GetTimeoffAsync("prod");
+        // The Partition allow-list refuses prod before anything reaches the vendor:
+        // the journal — the stub's own record — shows no prod login and no vendor
+        // call. The 400 body then names the machine token.
+        await _stub.ResetJournalAsync();
 
+        var (status, body) = await _stub.GetTimeoffAsync("prod");
+        var journal = await _stub.GetJournalAsync();
+
+        Assert.DoesNotContain("/acme/prod/login", journal, StringComparison.Ordinal);
+        Assert.DoesNotContain("/acme/api/v1/timeoff", journal, StringComparison.Ordinal);
         Assert.Equal(400, status);
         Assert.Contains("credprox.partition_not_allowed", body, StringComparison.Ordinal);
     }

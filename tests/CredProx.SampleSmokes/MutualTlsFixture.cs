@@ -128,6 +128,11 @@ public sealed class MutualTlsFixture : IAsyncLifetime
         return ((int)response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
+    // nginx directly, with no client certificate — the same no-cert probe the
+    // readiness loop uses, exposed so a cell can assert the refusal itself.
+    public async Task<int> GetNginxWithoutClientCertAsync() =>
+        int.Parse(await RunCurlAsync("https://localhost:8444/"), System.Globalization.CultureInfo.InvariantCulture);
+
     public async Task DisposeAsync()
     {
         if (_sample is not null)

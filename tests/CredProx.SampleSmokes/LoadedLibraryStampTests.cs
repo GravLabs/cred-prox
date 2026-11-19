@@ -57,9 +57,17 @@ public sealed class LoadedLibraryStampTests
             .Select(p => (p, ReadEmbeddedStamp(p))));
         foreach (var bin in expectedBins)
         {
-            stamps.AddRange(Directory.EnumerateFiles(bin, "CredProx*.dll")
+            var binDlls = Directory.EnumerateFiles(bin, "CredProx*.dll")
                 .OrderBy(p => p, StringComparer.Ordinal)
-                .Select(p => (p, ReadEmbeddedStamp(p))));
+                .ToList();
+
+            // A bin that exists but holds no CredProx*.dll is the same silent shrink as
+            // an absent one: the sample would smoke without the libraries the gate exists
+            // to pin, and the run would read as a pass over fewer bytes.
+            Assert.True(binDlls.Count > 0,
+                $"sample bin {Path.GetRelativePath(repoRoot, bin)} exists but holds no CredProx*.dll — " +
+                "its smokes would run without the CredProx libraries this gate pins");
+            stamps.AddRange(binDlls.Select(p => (p, ReadEmbeddedStamp(p))));
         }
         foreach (var (dll, stamp) in stamps)
         {

@@ -7,6 +7,41 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-19
+
+This release makes the health switch really turn health off, fixes caller-key
+rotation so a rotated key stops working from an upper-cased configuration
+source immediately instead of at restart (the published 0.12.0 carries the
+defective gate), and removes the per-request allocation the credential-attach
+arms picked up in 0.12.0.
+
+### Changed
+
+- `CredProx:Health:Enabled=false` now means off: the probe loop and the `credprox`
+  ASP.NET Core health check are no longer registered at all. Previously the switch
+  stopped the probes but the `credprox` check stayed on the endpoint reporting Healthy
+  with "No CredProx health probes have run yet" — a host that turned health monitoring
+  off could not tell it apart from monitoring that had simply not run its first round.
+  The health options, built-in probes and snapshot stay registered and resolvable
+  (ADR-0006).
+
+### Fixed
+
+- The forwarder's measured-body hand-off no longer installs a per-request delegate
+  on every CredProx-routed request. The hand-off shape travels as a flag on
+  `CredProxRequestState` and the rewrite lives inside
+  `CredProxRequestState.MeasureOutgoingBodyAsync`, removing the ~113 B per request
+  the credential-attach arms carried since 0.12.0 (docs/benchmarks.md, "Accepted
+  release-delta allocations"). The bytes flowing onward are unchanged.
+- A host that feeds its caller configuration through an upper-cased source — an
+  environment (`CREDPROX:CALLERS:…` keys arrive upper-cased) or a key-per-file
+  mount — and rotates a caller's literal `KeyHash` without the configuration
+  secret source firing kept admitting the retired key until restart: the rebind
+  gate filtered caller keys case-sensitively while every consumer binds them
+  case-insensitively, so the gate never saw the change. The rebind now sees it
+  in any key casing. The published 0.12.0 carries the defective gate; upgrading
+  fixes it.
+
 ## [0.12.0] - 2026-11-17
 
 This release splits single features out of the `CredProx` package into small add-on

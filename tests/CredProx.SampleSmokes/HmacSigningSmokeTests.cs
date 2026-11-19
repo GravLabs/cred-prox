@@ -26,10 +26,10 @@ public sealed class HmacSigningSmokeTests
 
     [Fact]
     [Trait("Sample", "HmacSigning")]
-    public async Task BodyOverCap_413BeforeForwarding()
+    public async Task BodyOverCap_Refused413WithMachineCode()
     {
-        // The signer-small credential's MaxBodyBytes is 16; a 100-byte body is refused
-        // with the documented code before anything is forwarded.
+        // The signer-small credential's MaxBodyBytes is 16; a 100-byte body is
+        // refused with the documented code.
         var (status, body) = await _host.PostSignedAsync("/small/verify", new string('x', 100));
 
         Assert.Equal(413, status);

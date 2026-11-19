@@ -47,10 +47,14 @@ breaking change (PUBLISHING.md rule).
 | Consumer-compat, plain default run | `scripts/consumer-compat.sh` | no |
 
 Every sample also has a one-line `smoke.sh` that runs its own cells from the test
-project — CI runs each sample's cells as its own filtered process. Run the whole
-project once as well (`dotnet test tests/CredProx.SampleSmokes`): only a
+project. CI runs each sample's cells as its own filtered process **and** one
+unfiltered whole-project run (`dotnet test tests/CredProx.SampleSmokes`): only a
 single-process run starts every fixture side by side, which catches a stack or host
-that one fixture leaves behind for the next.
+that one fixture leaves behind for the next. A whole-project run needs the samples'
+vendor stub projects, which are not in `CredProx.slnx`: building
+`dotnet build tests/CredProx.SampleSmokes -c <configuration>` builds them, so run it
+first in the configuration you smoke in (never pair the whole-project run with
+`--no-build` on a tree where they were not built).
 
 Coverage gates run from the repo root:
 
@@ -68,7 +72,7 @@ the definition of "tested".
 
 ## Versions
 
-`main` carries the next version with a `-dev` suffix (say `0.13.0-dev`). Release prep
+`main` carries the next version with a `-dev` suffix (say `0.14.0-dev`). Release prep
 sets the real number at tag time; until then nothing on `main` is publishable. The
 public API is stable within a minor version (`0.x.*`); API still settling carries
 `[Experimental("CREDPROX001")]` until 1.0.
