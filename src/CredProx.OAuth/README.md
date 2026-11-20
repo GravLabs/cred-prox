@@ -36,6 +36,14 @@ and [`GitHubApp`](https://github.com/GravLabs/cred-prox/tree/main/samples/GitHub
 samples). A credential naming one of these types without this package fails startup
 naming the package to add — the core keeps no type knowledge here beyond that hint.
 
+## Install
+
+```bash
+dotnet add package CredProx.OAuth
+```
+
+Installs beside `CredProx`; the core package README carries the package map.
+
 ## License
 
 MIT

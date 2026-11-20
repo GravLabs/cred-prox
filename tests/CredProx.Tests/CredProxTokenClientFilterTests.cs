@@ -137,4 +137,30 @@ public sealed class CredProxTokenClientFilterTests
             () => Build(filter, "credprox-token:contoso", services));
         Assert.Contains("AddCredProx", ex.Message);
     }
+
+    [Fact]
+    public void ConnectionClient_NeverFollowsRedirects()
+    {
+        // M45 security finding F-1: a per-connection credential mint must never believe a
+        // redirect target's response, so the handler the filter builds carries the refusal
+        // itself — not the BCL default of following.
+        var (provider, _) = ProviderWithContoso(out _);
+        var filter = new CredProxTokenClientFilter();
+
+        var (handler, _) = Build(filter, "credprox-token:contoso", Services(provider.Current));
+        Assert.False(handler.AllowAutoRedirect);
+    }
+
+    [Fact]
+    public void ConnectionClient_CarriesRedirectGuard()
+    {
+        // Defense in depth for the same finding: even a primary handler that follows is
+        // refused by the guard the filter appends to every credprox-token:<name> client.
+        var (provider, _) = ProviderWithContoso(out _);
+        var filter = new CredProxTokenClientFilter();
+
+        var builder = Builder("credprox-token:contoso", Services(provider.Current));
+        filter.Configure(static _ => { })(builder);
+        Assert.NotEmpty(builder.AdditionalHandlers);
+    }
 }

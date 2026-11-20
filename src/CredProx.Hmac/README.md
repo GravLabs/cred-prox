@@ -28,6 +28,14 @@ Configuration keeps `Type: Hmac` unchanged (see the
 A credential naming `Type: Hmac` without this package fails startup naming the package
 to add — the core keeps no type knowledge here beyond that hint.
 
+## Install
+
+```bash
+dotnet add package CredProx.Hmac
+```
+
+Installs beside `CredProx`; the core package README carries the package map.
+
 ## License
 
 MIT

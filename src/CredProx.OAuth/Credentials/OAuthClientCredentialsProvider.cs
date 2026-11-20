@@ -158,7 +158,27 @@ public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthCl
         request.Content = new FormUrlEncodedContent(form);
 
         var client = _httpClientFactory.CreateClient(CredProxHttpClientNames.ForConnection(options.Connection));
+        var configured = request.RequestUri;
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if ((int)response.StatusCode is >= 300 and < 400 || CredProxRedirectGuard.WasRedirected(request, configured))
+        {
+            // M45 security finding F-1: a redirect off the configured token endpoint is a
+            // refusal — the status is named, never a target URL or the response body.
+            throw new InvalidOperationException(
+                $"The OAuth token endpoint for credential '{credentialName}' answered with a redirect "
+                + $"(HTTP {(int)response.StatusCode}); CredProx never follows redirects for credential acquisition.");
+        }
+
+        if (CredProxRedirectGuard.EndsElsewhere(response, configured))
+        {
+            // M45 security finding R-1: the response stamps an effective request URI
+            // at another address than the configured endpoint — the status is named,
+            // never a target URL or body.
+            throw new InvalidOperationException(
+                $"The OAuth token endpoint for credential '{credentialName}' did not end at its configured address "
+                + $"(HTTP {(int)response.StatusCode}); CredProx never accepts a credential response from another address.");
+        }
 
         if (!response.IsSuccessStatusCode)
         {

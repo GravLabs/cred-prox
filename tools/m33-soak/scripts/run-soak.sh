@@ -61,15 +61,15 @@ mkdir -p "$RUN/logs"
 docker compose logs --no-color soakhost > "$RUN/logs/soakhost.log" 2>/dev/null
 curl -fsS http://127.0.0.1:18081/__admin/requests > "$RUN/journal/wiremock.json" 2>/dev/null
 bash "$HERE/scripts/secret-scan.sh" "$RUN" || { echo "RUN FAILED: secret hygiene"; exit 1; }
-# Load gate: a green marker must mean the workload actually worked (smoke #5 lesson:
-# upstream refused every request yet the run reported DONE). k6-line.csv cols:
-# ts,med,p95,p99,failed_rate,scrub_sum from handleSummary.
+# Load gate: a green marker must mean the workload actually ran the PROXIED path
+# (smoke #5 lesson: upstream refused every request yet the run reported DONE;
+# 2026-11-19 lesson: a run where every request was a 401 refusal also reported
+# LOAD-GATE-OK, because http_req_failed is transport-only). The gate lives in
+# load-gate.sh and reads the k6 summary, the host log and the WireMock journal.
+# k6-line.csv cols: ts,med,p95,p99,failed_rate,scrub_sum,checks_pass,checks_fail.
 [ -s "$RUN/k6-line.csv" ] || { echo "RUN FAILED: k6-line.csv empty"; exit 1; }
-FAILED=$(awk -F, 'END{print $5}' "$RUN/k6-line.csv")
-SCRUB=$(awk -F, 'END{print $6}' "$RUN/k6-line.csv")
 # empty cols would coerce to 0 and lie green - the summary line must be complete
-[ -n "$FAILED" ] && [ -n "$SCRUB" ] || { echo "RUN FAILED: k6-line.csv cols empty (failed='$FAILED' scrub='$SCRUB')"; exit 1; }
-awk -v f="$FAILED" 'BEGIN{exit !(f+0<=0.01)}' || { echo "RUN FAILED: error rate $FAILED > 1%"; exit 1; }
-[ "$SCRUB" = "0" ] || { echo "RUN FAILED: scrub witness sum $SCRUB"; exit 1; }
-echo "LOAD-GATE-OK failed=$FAILED scrub=$SCRUB"
+awk -F, 'END{exit !(NF>=8 && $5!="" && $6!="" && $7!="" && $8!="")}' "$RUN/k6-line.csv" \
+  || { echo "RUN FAILED: k6-line.csv cols incomplete"; exit 1; }
+bash "$HERE/scripts/load-gate.sh" "$RUN" || exit 1
 echo "SOAK-RUN-DONE dir=$RUN"

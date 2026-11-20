@@ -423,6 +423,39 @@ public sealed class CredentialHealthTests
     }
 
     [Fact]
+    public async Task ProbeLoop_ThrowingProbe_DescriptionCarriesExceptionType_NotTheMessage()
+    {
+        // A probe's exception message may carry provider secret values; the published
+        // description reports only the exception type. M45 security finding R-2.
+        const string Marker = "kv-READ-FAILED-MARKER-9c41e7";
+        var time = new FakeTimeProvider();
+        var probe = new FakeProbe("leaking-probe", () =>
+            throw new CryptographicException($"keystore read failed for {Marker} value"));
+        var snapshot = new CredentialHealthSnapshot();
+        using var factory = LoggerFactory.Create(b => { });
+        var service = new CredentialHealthProbeService(
+            [probe], snapshot, new CredProxHealthOptions { ProbeInterval = TimeSpan.FromMinutes(5) },
+            time, factory.CreateLogger<CredentialHealthProbeService>());
+
+        using var cts = new CancellationTokenSource();
+        try
+        {
+            await service.StartAsync(cts.Token);
+            await WaitForAsync(() => snapshot.Results.Length >= 1, "first round");
+
+            var result = Assert.Single(snapshot.Results);
+            Assert.Equal(2, result.Severity);
+            Assert.Contains("CryptographicException", result.Description, StringComparison.Ordinal);
+            Assert.DoesNotContain(Marker, result.Description, StringComparison.Ordinal);
+        }
+        finally
+        {
+            cts.Cancel();
+            await service.StopAsync(default);
+        }
+    }
+
+    [Fact]
     public async Task ProbeLoop_Disabled_RunsNoRounds()
     {
         var probe = new FakeProbe("disabled-probe", () => null);

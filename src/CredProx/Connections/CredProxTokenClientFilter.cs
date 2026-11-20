@@ -58,8 +58,13 @@ public sealed class CredProxTokenClientFilter : IHttpMessageHandlerBuilderFilter
             connection.Refresh();
             builder.PrimaryHandler = new SocketsHttpHandler
             {
+                // Credential acquisition never follows redirects (M45 security finding F-1):
+                // a 3xx from a token/metadata endpoint must reach the provider as a refusal,
+                // not as some other host's response.
+                AllowAutoRedirect = false,
                 SslOptions = { ClientCertificates = new X509Certificate2Collection(connection.Certificate) },
             };
+            builder.AdditionalHandlers.Add(new CredProxRedirectGuard());
         };
     }
 }

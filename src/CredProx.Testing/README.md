@@ -30,6 +30,15 @@ promises against your implementation:
 shows a ~50-line credential type conformance-tested with this package — the template for
 community plugins.
 
+## Install
+
+```bash
+dotnet add package CredProx.Testing
+```
+
+Add it to your test project; it carries the fakes and the conformance suites the
+built-ins themselves are tested with.
+
 ## License
 
 MIT

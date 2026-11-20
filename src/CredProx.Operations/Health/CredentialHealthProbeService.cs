@@ -82,10 +82,11 @@ internal sealed class CredentialHealthProbeService : BackgroundService
             }
             catch (Exception ex)
             {
-                // A broken probe is an Unhealthy result, not a dead loop. Messages are
-                // value-free by the provider discipline they break out of.
+                // A broken probe is an Unhealthy result, not a dead loop. The message is not
+                // relayed: a provider's exception text can carry the very values the provider
+                // discipline protects. The description reports the exception type only.
                 failure = new CredProxHealthResult(
-                    CredProxHealthSeverity.Unhealthy, $"the probe threw: {ex.Message}");
+                    CredProxHealthSeverity.Unhealthy, $"the probe threw ({ex.GetType().Name})");
             }
 
             var severity = failure is null

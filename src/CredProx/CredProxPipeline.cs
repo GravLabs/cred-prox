@@ -8,7 +8,10 @@ namespace CredProx;
 /// Orders the registered features by their declared <see cref="Stage"/>, independently of
 /// the order they were registered in, and runs request features in that order.
 /// Features that declare the same stage
-/// keep their registration order.
+/// keep their registration order, with one pinned exception: the secret scrubber always
+/// runs first inside its stage, so no host-registered response feature — including a
+/// pre-registered error normaliser — can observe or embed unscrubbed bytes
+/// (M45 security finding F-7).
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class CredProxPipeline
@@ -50,7 +53,15 @@ public sealed class CredProxPipeline
         // OrderBy is a stable sort, so features with the same stage keep registration order.
         _requestFeatures = requestFeatures.OrderBy(feature => feature.Stage).ToArray();
         _pipelineFeatures = pipelineFeatures.OrderBy(feature => feature.Stage).ToArray();
-        _responseFeatures = responseFeatures.OrderBy(feature => feature.Stage).ToArray();
+        // The scrubber is pinned to the front of its stage (M45 security finding F-7): a
+        // host that registers ErrorNormalisationFeature before AddCredProx deduplicates the
+        // built-in away, and that host instance would otherwise sort ahead of the scrubber
+        // in a stable stage sort — embedding unscrubbed bytes in vendor_detail. Every other
+        // feature keeps registration order among itself and its same-stage peers.
+        _responseFeatures = responseFeatures
+            .OrderBy(feature => feature.Stage)
+            .ThenBy(feature => feature is ResponseScrubFeature ? 0 : 1)
+            .ToArray();
     }
 
     /// <summary>The registered request features, in stage order.</summary>

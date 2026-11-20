@@ -142,8 +142,10 @@ public sealed class HmacSignFeature : IRequestFeature
         }
         catch (Exception ex)
         {
+            // M45 security finding F-5: the signing provider may be a third party; the
+            // log names the exception type, never its text.
             await AbortSigningErrorAsync(state, name,
-                $"The HMAC credential '{name}' could not be obtained for this request: {ex.Message}")
+                $"The HMAC credential '{name}' could not be obtained for this request ({ex.GetType().Name}).")
                 .ConfigureAwait(false);
             return;
         }

@@ -23,8 +23,16 @@ public sealed class HealthSurvivorTests
     private sealed class Handler(Func<CancellationToken, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(respond(cancellationToken));
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            // A real transport stamps the response with the request that produced it
+            // and the fake does the same: the guard accepts an unstamped response on
+            // that term alone, so a stampless fake would dodge the stamp term
+            // instead of exercising it (see StubHttpHandler).
+            var response = respond(cancellationToken);
+            response.RequestMessage ??= request;
+            return Task.FromResult(response);
+        }
     }
 
     private static CredentialRegistryProvider TokenRegistry(
@@ -230,7 +238,7 @@ public sealed class HealthSurvivorTests
 
             Assert.NotNull(result);
             Assert.Contains(
-                "credential 'surv-flat' could not be obtained:",
+                "credential 'surv-flat' could not be obtained (",
                 result.Description!,
                 StringComparison.Ordinal);
             Assert.DoesNotContain("(partition", result.Description!, StringComparison.Ordinal);

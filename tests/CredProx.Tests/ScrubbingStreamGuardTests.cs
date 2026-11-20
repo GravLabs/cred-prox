@@ -187,7 +187,7 @@ public sealed class ScrubbingStreamGuardTests
             var body = new string('x', 40 * 1024) + Secret; // pending + live batch at dispose
             using var inner = new MemoryStream(Encoding.UTF8.GetBytes(body));
             var pool = new TrackingPool();
-            var scrubbing = new ScrubbingStream(inner, [Secret], pool);
+            var scrubbing = new ScrubbingStream(inner, [Secret], pool: pool);
 
             var buffer = new byte[64];
             var read = await scrubbing.ReadAsync(buffer); // batch rented, far from drained

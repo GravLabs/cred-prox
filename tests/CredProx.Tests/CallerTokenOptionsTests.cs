@@ -1,3 +1,4 @@
+using System.Net.Http;
 using CredProx;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -57,6 +58,23 @@ public sealed class CallerTokenOptionsTests
 
         Assert.Equal("https://login.microsoftonline.com/tenant-id/v2.0", bearer.Authority);
         Assert.Equal("api://credprox", bearer.Audience);
+    }
+    [Fact]
+    public void TokenScheme_BackchannelHandler_NeverFollowsRedirects()
+    {
+        // M45 security finding F-1: discovery and the JWKS fetch ride this backchannel,
+        // and a redirect there hands the validation path another host's key set. The
+        // post-configure decision (R-4) ships a primary that refuses redirects when the
+        // host supplied none; a host handler is kept and wrapped — see
+        // CallerTokenBackchannelTests.
+        var services = new ServiceCollection();
+        services.AddCredProxCallerTokenAuthentication(ValidConfig());
+        using var provider = services.BuildServiceProvider();
+        var bearer = provider
+            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(CallerTokenOptions.Scheme);
+        var primary = Assert.IsType<SocketsHttpHandler>(bearer.BackchannelHttpHandler);
+        Assert.False(primary.AllowAutoRedirect);
     }
 
     [Fact]

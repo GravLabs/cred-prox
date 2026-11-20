@@ -22,13 +22,25 @@ owner's OK.
 
 ## Before the first run
 
-1. `dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages && dotnet pack
-   src/CredProx -c Release -o artifacts/packages` (feed for the host — Abstractions is a
-   transitive package the feed must carry, or the restore fails NU1101 on it; same flow as
-   `samples/nuget.config`, and CI packs every package before building).
+1. Pack every package the host consumes into the feed: `dotnet pack src/CredProx.Abstractions
+   -c Release -o artifacts/packages`, then the same for `src/CredProx`, `src/CredProx.Operations`,
+   `src/CredProx.OAuth` and `src/CredProx.LoginExchange` (Abstractions is a transitive package the
+   feed must carry, or the restore fails NU1101 on it; Operations/OAuth/LoginExchange are the
+   packages the host's registrations and its credential Types name — ADR-0005 moved them out of
+   the core, and startup validation refuses a config that names a Type without its package;
+   `SoakHostCredentialPackagePinTests` keeps this list and the config from drifting apart).
+   Same flow as `samples/nuget.config`, and CI packs every package before building.
 2. Publish on the host, then build the runtime-only image (host NuGet cache carries the
-   Azure KV provider closure; the image is a pinned aspnet copy of the publish output):
-   `dotnet publish tools/m33-soak/SoakHost -c Release -o tools/m33-soak/build/publish`
+   Azure KV provider closure; the image is a pinned aspnet copy of the publish output).
+   For release-shape runs, isolate the restore: a `credprox*` id+version already unpacked
+   under `~/.nuget/packages` counts as installed, so a repacked `.nupkg` on the feed is
+   silently ignored and the host would run bytes this tree did not pack. An EMPTY
+   `RestorePackagesPath` is not the lever — the centrally-pinned dependencies cannot
+   restore from the feed alone, so the publish fails. Clone the warm cache and delete just
+   the packages under test (hardlinks leave the real cache untouched), then point the
+   restore at the clone:
+   `cp -al ~/.nuget/packages/. <clone> && rm -rf <clone>/credprox*`
+   `dotnet publish tools/m33-soak/SoakHost -c Release -o tools/m33-soak/build/publish -p:RestorePackagesPath=<clone>`
    `docker build -f tools/m33-soak/SoakHost/Dockerfile -t credprox-soakhost:local .`
 3. Pull the pinned proxies once if absent: `docker compose -f compose/docker-compose.yml pull` (run from this dir with `SOAK_RUN_DIR` set to any scratch dir just for validation).
 

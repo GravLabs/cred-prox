@@ -53,7 +53,13 @@ internal sealed class StubHttpHandler : HttpMessageHandler
         Bodies.Add(CaptureBodies && request.Content is not null
             ? await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false)
             : null);
-        return _responder(request, index);
+        var response = _responder(request, index);
+        // A real transport stamps every response with the request that produced it;
+        // M45 finding R-1's guard refuses a response that cannot show its effective
+        // address, so the stub must be as honest as the BCL here. Responders that
+        // stamp deliberately (the redirect pins) keep their own stamp.
+        response.RequestMessage ??= request;
+        return response;
     }
 }
 

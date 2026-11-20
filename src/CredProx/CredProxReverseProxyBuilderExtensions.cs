@@ -180,9 +180,10 @@ public static class CredProxReverseProxyBuilderExtensions
 
         // The built-in response features: secret scrubbing (M20, §8.2), then vendor
         // error normalisation (M24, §8.5). The pipeline orders response features by
-        // declared stage, same rule as the request side, and its sort is stable — so
-        // within Stage.ShapeResponse the normaliser runs after the scrubber and can
-        // only ever embed already-scrubbed bytes in vendor_detail.
+        // declared stage and pins the scrubber first inside its stage — so within
+        // Stage.ShapeResponse the normaliser runs after the scrubber and can only ever
+        // embed already-scrubbed bytes in vendor_detail, whatever order these
+        // registrations land in (M45 security finding F-7).
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IResponseFeature, ResponseScrubFeature>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IResponseFeature, ErrorNormalisationFeature>());
 

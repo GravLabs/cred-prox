@@ -29,6 +29,14 @@ The core keeps the caller policy — the caller registry, operation allow-lists,
 budgets and the kill switch — and reads no key values: a host that never
 references this package ignores `Keys` entirely.
 
+## Install
+
+```bash
+dotnet add package CredProx.CallerKeys
+```
+
+Installs beside `CredProx`; the core package README carries the package map.
+
 ## License
 
 MIT

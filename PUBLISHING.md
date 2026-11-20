@@ -11,7 +11,16 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-18): `0.12.0` is **published on the registry** — the minimal core
+Current state (2026-11-19): `0.13.0` is **published on the registry** — ten packages at
+one version; it fixes caller-key rotation under upper-cased configuration sources (0.12.0
+is affected), makes `CredProx:Health:Enabled=false` really off, removes the 0.12.0
+per-request attach allocation, and documents how to replace or turn off each built-in
+(ADR-0006). No public API was removed; package validation runs on all ten packages
+against the published `0.12.0` bytes. GitHub `main` and tag `0.13.0` sit on one squashed
+commit `4ac539bd5d00ae42fa11032a4f0d09294381b19e` (noreply author, tree identical to the
+internal release commit `9b23040`), appended on the previous public tip `5cc1a7e`; see the
+`0.13.0` history entry. The next baseline rotation, to the published `0.13.0` bytes, runs
+at the next release prep (ADR-0001). Previously: `0.12.0` was **published on the registry** — the minimal core
 with one package per optional feature (ADR-0005): **ten packages at one version**, six of
 them (`CredProx.CallerKeys`, `CredProx.CallerTokens`, `CredProx.Hmac`,
 `CredProx.LoginExchange`, `CredProx.OAuth`, `CredProx.Operations`) on the registry for the
@@ -206,6 +215,75 @@ pre-publish version listing — the 0.6.0 release proved it. Clear it and retry:
 dotnet nuget locals http-cache --clear
 ```
 
+## The nuget.org route (parallel to the registry route)
+
+The registry route above stays the default until the owner opens the nuget.org account.
+Everything below is the whole delta for publishing to nuget.org; the pack commands, the
+CI-path-mapping rule and the symbols sanity loop are shared with the registry route.
+
+**Prerequisites unique to nuget.org:**
+
+1. **The account and its API key.** A Microsoft-account-backed nuget.org account, then a
+   **push-only API key** scoped by glob pattern to `CredProx*` and to the *Push*
+   operation only (the scoping UI also offers "Push new packages and package versions",
+   "Push existing package versions only" and "Unlist" — a release key needs push, not
+   unlist). Keep it where the registry key lives: the machine-local user-level NuGet
+   config or the `NUGET_API_KEY` environment variable (NuGet 7.6 / SDK 10.0.300+),
+   never in the repo.
+2. **Prefix reservation.** Apply for the `CredProx` prefix (it covers the `CredProx.*`
+   naming pattern) by emailing account@nuget.org with the owner display name, from the
+   nuget.org account; the criteria are already met by the metadata audit
+   (consistent author across the ten, `license` expression, no `licenseUrl`/`iconUrl`).
+   This is the owner's action alongside the first publish — it grants the "reserved
+   prefix" indicator, not publish permission.
+3. **The version question** (see the M44 audit): if any packed byte changed since the
+   `0.13.0` pack, the first nuget.org version is `0.13.1` — never a re-pack of the
+   published `0.13.0` under the same id.
+
+**Push loop** — same shape as the registry loop, explicit source, and the V3 endpoint is
+required because symbol pushes only work over V3:
+
+```bash
+for f in artifacts/publish/*.nupkg; do
+  dotnet nuget push "$f" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY"
+done
+```
+
+**Snupkg delivery witness.** The adjacent `.snupkg` rides each nupkg push (same
+auto-push as the registry route). nuget.org accepts only `.snupkg` symbols, via the V3
+API; after validation the symbols are indexed at `https://symbols.nuget.org/download/symbols`.
+Witness it as a consumer, not by trusting the push output: in the scratch project below,
+attach a debugger and add that symbol source — stepping into a CredProx call must load
+the `.pdb` from the symbol server and pull source from GitHub via SourceLink.
+
+**Validation and indexing delay.** Every push runs nuget-side validations (virus check
+among them); until they pass the package shows as **unlisted**, and indexing into search
+then takes time — usually under 15 minutes, watch status.nuget.org if longer, and the
+owner's account gets the success email. The consumer check below must therefore run
+*after* the email, not right after the last push.
+
+**Versions cannot be deleted, only unlisted** — the nuget.org Terms are explicit that
+uploaded content cannot be guaranteed permanently deleted; unlisting hides the package
+from search for new consumers while existing consumers keep resolving it. A bad version
+is therefore permanent: unlist it and (if consumers should move) deprecate it pointing
+at the replacement; forward-bump only. This makes the pack-identity rules above not
+tidiness but irreversibility containment.
+
+**Consumer check from a clean machine-shaped cache** — fresh `HOME`, fresh global
+packages folder, so nothing can ride the publishing machine's cache:
+
+```bash
+export HOME=/tmp/m44-consumer-home   # fresh dir, no user-level config: nuget.org only
+mkdir -p "$HOME"
+dotnet new classlib -n M44Consumer -o m44-consumer && cd m44-consumer
+dotnet add package CredProx -v <version>    # resolves from nuget.org alone
+dotnet build
+```
+
+The M44 readiness gate pre-proved this exact route at pack time (isolated restore of
+all ten packages against nuget.org alone, per-package provenance asserted from each
+`.nupkg.metadata`); at publish time repeat it once, against the real feed.
+
 ## Rules
 
 - **Versions are immutable** on the registry: never repack a published version; bump
@@ -269,8 +347,68 @@ dotnet nuget locals http-cache --clear
 
 ## Release history
 
-- `0.12.0` (internal release commit TBD at the ceremony; GitHub mirror TBD): **prepared
-  2026-11-17; publish pending the maintainer's ceremony** — the M42 package split
+- `0.13.0` (GitHub `4ac539bd5d00ae42fa11032a4f0d09294381b19e`, internal release commit
+  `9b23040`, the merge of `release-0.13.0` at `302219d`): **published 2026-11-19** — M43.
+  Fixed: caller-key rotation under upper-cased configuration sources (the published `0.12.0`
+  carries the defective rebind gate); the per-request attach-arm delegate. Changed:
+  `CredProx:Health:Enabled=false` registers neither the probe loop nor the `credprox` check
+  (ADR-0006). Additive only. Prep (`a6557e2`..`302219d`): the baseline rotation to the ten
+  published `0.12.0` nupkgs, sha256-verified 10/10 against the `0.12.0` entry, with package
+  validation turned on for the six packages that first shipped in `0.12.0` and the `0.11.0`
+  suppression files removed; version `0.13.0` with the nine `CredProx*` pins; the CHANGELOG
+  `[0.13.0]` entry. Gates at the prep candidate `dc097b3`, run by the builder and re-derived
+  independently by the checker with planted-break controls: APICompat 10/10, the build
+  0W/0E, the battery and coverage green, doc guards 29/29, all 18 sample smokes and
+  `CredProx.SampleSmokes` 86/86 with every stamp `0.13.0+dc097b3…`, consumer matrix 15/15
+  against the prep commit, disclosure scans zero hits. Bench vs `baselines/0.12.0`:
+  `13 methods compared, FAIL=0 WARN=2`, both timing-only warn-mode on a shared machine
+  (`OAuthCacheHitScrub` ratio 1.41; the plain-YARP control moved ×1.44 in the same run);
+  the attach arms recovered 108–110 B per request. The two commits after `dc097b3` are
+  text-only (`b41f510`, `302219d`).
+  Ceremony (2026-11-19): GitHub ONE squashed commit `4ac539b` on the previous public tip
+  `5cc1a7e`, noreply author and committer, tree identical to `9b23040`; the annotated tag
+  built with `git mktag` from explicit text (noreply tagger, `+0000`, header `tag 0.13.0`)
+  and checked with `git cat-file -p` before the push (zero private-email hits); a regular
+  append. CI on the public commit, Actions run 44453961849: green on all three jobs, first
+  attempt. Packed **once** from a clean detached worktree at the public commit,
+  `-p:ContinuousIntegrationBuild=true`, fresh obj, isolated package cache: ten packages,
+  every pack `cp=0 unnecessary=0`, and the APICompat success line on all ten. Sanity over
+  all twenty packages (121 members): SourceLink carries the full public SHA and the `/_/`
+  mapping in every symbol package, every nuspec names the public commit, every dll reads
+  `0.13.0+4ac539b…`, lib shape `net10.0`-only, zero private-path, private-mail,
+  internal-host or key-material hits. The registry served nothing at `0.13.0` before the
+  push. Push round: ten nupkgs, each exactly once (the client auto-routed the snupkgs);
+  all twenty PUTs answered `201 Created`. Nupkg sha256:
+  `CredProx` `2757236c83ccdae7806b17582c915ed796bc1001fa974af39cea3933df1ffaa7`,
+  `CredProx.Abstractions` `3886cd5af1354534fdb745c28e4ed8ade5e843fcc9645f7085c48ee9b98c285f`,
+  `CredProx.AzureKeyVault` `b261e72341ca9f0909221131ee802d7cecee6e0b27e23ffdd3ada0d59efca6f8`,
+  `CredProx.CallerKeys` `3008e32c648f161b53c1274c344821c3885d10e7a169e744130ca24a932284de`,
+  `CredProx.CallerTokens` `c09d2d4b3e494b464670b88cdecbfb64b6641d409002d78ad11edb338144b5e4`,
+  `CredProx.Hmac` `de50dc14f99d617425c317791cdbfb877427591b210b00fb9c62fcf72478cccf`,
+  `CredProx.LoginExchange` `8c93886972074198934fc659f199685661a022114f3c15bc9b60f220bbe12081`,
+  `CredProx.OAuth` `8dcbc8ed487d1a693f03813e78898c4a2352e97aa251dc9613da29e4880f126b`,
+  `CredProx.Operations` `57242801a9eb10a39b6728fa42ab8c4e8f3efc078168b89d8815c7f3ee9be3ff`,
+  `CredProx.Testing` `95edf261c1fbf316c430d1cd93832a6b55f799d330ea722849e0ff61473b4b65`.
+  Consumer verification: an isolated package cache with a cleared http-cache restored all
+  ten from the registry, byte-identical 10/10 to the pushed files; the QuickStart smoke
+  passed on those downloaded bytes (3/3, loaded `CredProx` `0.13.0+4ac539b…`). **Not
+  verified at publish:** the SourceLink debugger step-through (CI asserts the path form),
+  the consumer-side `.snupkg` download path, and the post-publish benchmark refresh to
+  `baselines/0.13.0` (runs next). The refresh ran (2026-11-19): a full pass at main
+  `f46ca3d` — src identical to the release tree (`git diff --stat 9b23040 f46ca3d -- src`
+  empty; `9b23040`'s src equals the release candidate `302219d`) — on a quiet machine (the
+  1-minute load was waited below 1.5 before launch), gated against `baselines/0.12.0`:
+  `bench-compare: 13 methods compared, FAIL=0 WARN=2` (compare exit 0) — both WARNs are
+  warn-mode timing-only arms whose allocations came in lower than 0.12.0, inside the
+  documented noise bands (docs/benchmarks.md); the three credential-attach arms recovered
+  their pre-0.12.0 allocations (7,977→7,864, 9,840→9,731, 7,574→7,457 B), every other arm
+  flat or better, `N=13–15`; `baselines/0.13.0/MACHINE.md` records the environment and the
+  measured line, and the baseline folder now holds the `0.13.0` bytes. Gate: full-solution
+  Release build 0 Warning(s) / 0 Error(s); doc guards 29/29 (measured at `f46ca3d`, whose
+  src equals the measured release bytes).
+
+- `0.12.0` (GitHub `5cc1a7edbdd50c1ad66a89c002ea8a69f4eac90c`, internal release commit
+  `682a676`): **prepared 2026-11-17, published 2026-11-18** — the M42 package split
   (ADR-0005): ten packages at one version. The core keeps the pipeline, the configuration
   secret stack, `StaticKey`, caller policy, header hygiene, audit and problem responses;
   OAuth, LoginExchange, Hmac, the Operations features, caller keys and agent tokens ship

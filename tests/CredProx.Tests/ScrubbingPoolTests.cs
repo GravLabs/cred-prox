@@ -100,7 +100,7 @@ public sealed class ScrubbingPoolTests
 
         await using var inner = new MemoryStream(Encoding.UTF8.GetBytes(body));
         var pool = new TrackingPool();
-        var scrubbing = new ScrubbingStream(inner, [Secret], pool);
+        var scrubbing = new ScrubbingStream(inner, [Secret], pool: pool);
 
         var emitted = await ReadAllAsync(scrubbing, 4099); // ragged reads across batches
 
@@ -120,7 +120,7 @@ public sealed class ScrubbingPoolTests
         var body = new string('x', 64 * 1024) + Secret; // one big batch, never drained
         using var inner = new MemoryStream(Encoding.UTF8.GetBytes(body));
         var pool = new TrackingPool();
-        var scrubbing = new ScrubbingStream(inner, [Secret], pool);
+        var scrubbing = new ScrubbingStream(inner, [Secret], pool: pool);
 
         var buffer = new byte[4096];
         var read = await scrubbing.ReadAsync(buffer);
@@ -192,7 +192,7 @@ public sealed class ScrubbingPoolTests
         // read path must refuse, and nothing may re-rent or double-return.
         using var inner = new MemoryStream(new byte[64]);
         var pool = new TrackingPool();
-        var scrubbing = new ScrubbingStream(inner, [Secret], pool);
+        var scrubbing = new ScrubbingStream(inner, [Secret], pool: pool);
         await scrubbing.DisposeAsync();
 
         var buffer = new byte[16];
@@ -274,7 +274,7 @@ public sealed class ScrubbingPoolTests
         // cleared return.
         await using var inner = new ParkedReadStream();
         var pool = new TrackingPool();
-        var scrubbing = new ScrubbingStream(inner, [Secret], pool);
+        var scrubbing = new ScrubbingStream(inner, [Secret], pool: pool);
 
         var buffer = new byte[4096];
         var readTask = scrubbing.ReadAsync(buffer).AsTask();
@@ -462,7 +462,7 @@ public sealed class ScrubbingPoolTests
                 var inner = new MemoryStream(victimBody);
                 var stream = eventStream
                     ? (Stream)new EventScrubbingStream(inner, [Secret], pool)
-                    : new ScrubbingStream(inner, [Secret], pool);
+                    : new ScrubbingStream(inner, [Secret], pool: pool);
 
                 // Target reads that land mid-drain: the live batch is partially
                 // copied out at every one of them, which is the R1 window.

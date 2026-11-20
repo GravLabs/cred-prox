@@ -36,6 +36,14 @@ Configuration is unchanged from the core era (`CredProx:Throttling`,
 sample). Configuring one of those sections without this package registered fails startup
 naming the package to add — a configured limit never sits inert.
 
+## Install
+
+```bash
+dotnet add package CredProx.Operations
+```
+
+Installs beside `CredProx`; the core package README carries the package map.
+
 ## License
 
 MIT

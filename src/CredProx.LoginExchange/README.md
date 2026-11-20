@@ -27,6 +27,14 @@ Configuration keeps `Type: LoginExchange` unchanged (see the
 whose WireMock mappings stand in for the vendor). A credential naming
 `Type: LoginExchange` without this package fails startup naming the package to add.
 
+## Install
+
+```bash
+dotnet add package CredProx.LoginExchange
+```
+
+Installs beside `CredProx`; the core package README carries the package map.
+
 ## License
 
 MIT

@@ -106,7 +106,14 @@ public sealed class FakeTokenServer : HttpMessageHandler
                 : callNumber => Responder?.Invoke(request, callNumber) ?? DefaultToken(callNumber);
         }
 
-        return answer(call);
+        var response = answer(call);
+        // A real transport stamps every response with the request that produced it;
+        // the fake is as honest as the BCL it stands in for (M45 finding R-1): the
+        // guard accepts an unstamped response on that term alone, so a stampless fake
+        // would dodge the stamp term instead of exercising it. Scripts that stamp
+        // deliberately (the redirect pins) keep their own stamp.
+        response.RequestMessage ??= request;
+        return response;
     }
 
     private static HttpResponseMessage DefaultToken(int callNumber) => new(HttpStatusCode.OK)

@@ -48,7 +48,9 @@ public sealed class CredProxAuditOptions
     /// <summary>
     /// Additional header names whose captured values are masked (case-insensitive), on
     /// top of the built-in sensitive set (authorization, cookie and the configured
-    /// caller-key headers).
+    /// caller-key headers). Masking is by name only — in captured headers and in captured
+    /// JSON fields alike — so a secret presented under a name outside the set is recorded
+    /// as it arrived; list every name that can carry one.
     /// </summary>
     public IList<string> RedactHeaders { get; set; } = [];
 

@@ -2,6 +2,7 @@ using System.Net.Http;
 using CredProx;
 using CredProx.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace CredProx.Tests;
@@ -190,5 +191,45 @@ public class StageOrderingTests
         // Same rule as the request side: stage order wins; equal stages keep
         // registration order (the two ShapeResponse ones).
         Assert.Equal(["early-escape-hatch", "second", "third-default"], log);
+    }
+
+    // ---- M45 security finding F-7: scrub-before-normalise must not rest on
+    // registration order. A host that registers ErrorNormalisationFeature itself
+    // before AddCredProx deduplicates the built-in away, and the host's instance
+    // lands FIRST in the resolved sequence — with a stable sort by stage alone it
+    // would run before the scrubber and embed an unscrubbed vendor body in
+    // vendor_detail. The pipeline pins the scrubber to the front of its stage.
+
+    [Fact]
+    public void ScrubberRunsFirst_EvenWhenTheNormaliserIsRegisteredBeforeIt()
+    {
+        var scrubber = new ResponseScrubFeature(
+            new CredProxScrubbingOptions(), NullLogger<ResponseScrubFeature>.Instance);
+        var normaliser = new ErrorNormalisationFeature(
+            new CredProxErrorsOptions(), NullLogger<ErrorNormalisationFeature>.Instance);
+
+        // The host-first shape: DI resolves the normaliser ahead of the scrubber.
+        var pipeline = new CredProxPipeline([], [], [normaliser, scrubber]);
+
+        Assert.Same(scrubber, Assert.IsType<ResponseScrubFeature>(pipeline.ResponseFeatures[0]));
+        Assert.Same(normaliser, pipeline.ResponseFeatures[1]);
+    }
+
+    [Fact]
+    public void ScrubberPin_LeavesEveryOtherSameStageFeatureInRegistrationOrder()
+    {
+        var log = new List<string>();
+        var scrubber = new ResponseScrubFeature(
+            new CredProxScrubbingOptions(), NullLogger<ResponseScrubFeature>.Instance);
+        var normaliser = new ErrorNormalisationFeature(
+            new CredProxErrorsOptions(), NullLogger<ErrorNormalisationFeature>.Instance);
+        var hostFeature = new RecordingResponseFeature(Stage.ShapeResponse, "host-feature", log);
+
+        var pipeline = new CredProxPipeline([], [], [normaliser, hostFeature, scrubber]);
+
+        // Scrubber first; everyone else keeps their registration order among themselves.
+        Assert.Same(scrubber, pipeline.ResponseFeatures[0]);
+        Assert.Same(normaliser, pipeline.ResponseFeatures[1]);
+        Assert.Same(hostFeature, pipeline.ResponseFeatures[2]);
     }
 }

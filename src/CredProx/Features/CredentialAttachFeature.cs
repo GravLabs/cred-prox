@@ -183,11 +183,12 @@ public sealed class CredentialAttachFeature : IRequestFeature
         }
         catch (Exception ex)
         {
-            // Provider messages name the credential and the failure kind, never values;
-            // the caller sees only the static problem response (§3.4).
+            // M45 security finding F-5: a provider here may be a third party, and its
+            // message is its own — the log names the exception type, not the text; the
+            // caller sees only the static problem response (§3.4).
             _logger.LogWarning(
-                "The credential '{Credential}' could not be obtained for this request: {Error}",
-                name, ex.Message);
+                "The credential '{Credential}' could not be obtained for this request ({ErrorType}).",
+                name, ex.GetType().Name);
 
             await state
                 .AbortAsync(StatusCodes.Status502BadGateway, "credprox.credential_unavailable",
@@ -226,9 +227,10 @@ public sealed class CredentialAttachFeature : IRequestFeature
         {
             // Placement failed (e.g. no URI could be built for a query credential); the
             // caller gets the static credential problem, not the catch-all 500 (§3.4).
+            // M45 security finding F-5: type, not text.
             _logger.LogWarning(
-                "The credential '{Credential}' could not be placed on the outbound request: {Error}",
-                name, ex.Message);
+                "The credential '{Credential}' could not be placed on the outbound request ({ErrorType}).",
+                name, ex.GetType().Name);
 
             await state
                 .AbortAsync(StatusCodes.Status502BadGateway, "credprox.credential_unavailable",

@@ -264,7 +264,32 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         try
         {
             var client = _httpClientFactory.CreateClient(CredProxHttpClientNames.ForConnection(options.Connection));
-            json = await client.GetStringAsync(jwksUri, cancellationToken).ConfigureAwait(false);
+            // Explicit request (not GetStringAsync) so a redirect is a refusal this provider
+            // sees and names (M45 security finding F-1) — the success shape and the failure
+            // wrapping stay byte-identical to the previous fetch.
+            using var request = new HttpRequestMessage(HttpMethod.Get, jwksUri);
+            var configured = request.RequestUri;
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if ((int)response.StatusCode is >= 300 and < 400
+                || CredProxRedirectGuard.WasRedirected(request, configured))
+            {
+                throw new InvalidOperationException(
+                    $"The token-exchange JWKS '{jwksUri}' answered with a redirect "
+                    + $"(HTTP {(int)response.StatusCode}); CredProx never follows redirects for credential acquisition.");
+            }
+
+            if (CredProxRedirectGuard.EndsElsewhere(response, configured))
+            {
+                // M45 security finding R-1: the response stamps an effective request
+                // URI at another address than the configured JWKS address — the status
+                // is named, never a body.
+                throw new InvalidOperationException(
+                    $"The token-exchange JWKS '{jwksUri}' did not end at its configured address "
+                    + $"(HTTP {(int)response.StatusCode}); CredProx never accepts a credential response from another address.");
+            }
+
+            response.EnsureSuccessStatusCode();
+            json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -360,7 +385,27 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         request.Content = new FormUrlEncodedContent(form);
 
         var client = _httpClientFactory.CreateClient(CredProxHttpClientNames.ForConnection(options.Connection));
+        var configured = request.RequestUri;
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if ((int)response.StatusCode is >= 300 and < 400 || CredProxRedirectGuard.WasRedirected(request, configured))
+        {
+            // M45 security finding F-1: a redirect off the configured exchange endpoint is
+            // a refusal — the status is named, never a target URL or the response body.
+            throw new InvalidOperationException(
+                $"The token-exchange endpoint for credential '{credentialName}' answered with a redirect "
+                + $"(HTTP {(int)response.StatusCode}); CredProx never follows redirects for credential acquisition.");
+        }
+
+        if (CredProxRedirectGuard.EndsElsewhere(response, configured))
+        {
+            // M45 security finding R-1: the response stamps an effective request URI
+            // at another address than the configured endpoint — the status is named,
+            // never a target URL or body.
+            throw new InvalidOperationException(
+                $"The token-exchange endpoint for credential '{credentialName}' did not end at its configured address "
+                + $"(HTTP {(int)response.StatusCode}); CredProx never accepts a credential response from another address.");
+        }
 
         if (!response.IsSuccessStatusCode)
         {

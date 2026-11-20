@@ -20,6 +20,14 @@ namespace CredProx;
 /// patterns start at the same position the longest wins (patterns are tried longest
 /// first); matches never overlap.
 /// </para>
+/// <para>
+/// In escaped-echo mode (opened for JSON response bodies) the matcher additionally
+/// reads through <c>\uXXXX</c> escapes — four hex digits, either case, surrogate pairs
+/// combined — and replaces the original escaped bytes the view span maps to, so a
+/// vendor's JSON encoder cannot echo a credential past the scrubber and the body stays
+/// exactly as parseable as it arrived. Malformed escapes are ordinary text. A body with
+/// no escape at all pays one scan for the backslash-u shape and matches as before.
+/// </para>
 /// </remarks>
 internal sealed class ScrubbingStream : Stream
 {
@@ -30,6 +38,7 @@ internal sealed class ScrubbingStream : Stream
     private readonly byte[][] _patterns; // UTF-8 bytes, non-empty, longest first
     private readonly byte[] _replacement;
     private readonly int _maxPatternLength;
+    private readonly bool _escapedEcho;
 
     // Pooled; ever-held RAW (unscrubbed) response bytes — must return clearArray: true.
     private byte[] _pending;
@@ -43,7 +52,14 @@ internal sealed class ScrubbingStream : Stream
     private int _outputLength;
     private bool _innerEof;
 
-    public ScrubbingStream(Stream inner, IReadOnlyList<string> secrets, ArrayPool<byte>? pool = null)
+    /// <param name="inner">The upstream response stream.</param>
+    /// <param name="secrets">The registered values, raw and URL-encoded forms.</param>
+    /// <param name="escapedEcho">
+    /// Whether to match through JSON <c>\uXXXX</c> escapes (set for JSON response
+    /// bodies, where a vendor encoder renders echoed bytes that way).
+    /// </param>
+    /// <param name="pool">The byte pool for the pending and batch buffers.</param>
+    public ScrubbingStream(Stream inner, IReadOnlyList<string> secrets, bool escapedEcho = false, ArrayPool<byte>? pool = null)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(secrets);
@@ -53,6 +69,7 @@ internal sealed class ScrubbingStream : Stream
         _patterns = SecretScrubber.CompilePatterns(secrets);
         _replacement = SecretScrubber.Replacement;
         _maxPatternLength = _patterns.Length == 0 ? 0 : _patterns[0].Length;
+        _escapedEcho = escapedEcho;
         _pending = _pool.Rent(2 * ChunkSize);
         _pendingCapacity = 2 * ChunkSize;
     }
@@ -234,8 +251,15 @@ internal sealed class ScrubbingStream : Stream
 
                 // Hold back the tail that could still complete a match started before
                 // the emit boundary; at EOF there is nothing more coming, so emit it
-                // all.
-                var holdback = _innerEof ? 0 : _maxPatternLength - 1;
+                // all. The floor is the raw longest-match bound; escaped mode adds the
+                // worst-case trailing PARTIAL escape (5 bytes: '\', 'u', three hexits)
+                // the no-full-escape fast path cannot see — ContainsJsonEscape only
+                // fires on a COMPLETE \uXXXX, so a short secret's raw floor alone would
+                // let a partial escape's source bytes stream before they re-decode.
+                // Undecided tails and boundary prefixes of real matches are capped per
+                // batch inside SecretScrubber.ScrubBatchEscaped via the BuildView map.
+                var floor = _maxPatternLength - 1;
+                var holdback = _innerEof ? 0 : _escapedEcho ? Math.Max(floor, 5) : floor;
                 var emitLength = _pendingLength - holdback;
                 if (emitLength <= 0)
                 {
@@ -321,8 +345,13 @@ internal sealed class ScrubbingStream : Stream
 
     private void BuildOutputBatch(int emitLength)
     {
+        // Escaped mode engages the view matcher only when the window actually holds a
+        // \uXXXX escape: plain JSON and every other body pay a single scan, not a copy.
+        var window = _pending.AsSpan(0, _pendingLength);
         var (batch, batchLength, consumedThrough) =
-            SecretScrubber.ScrubBatch(_pending.AsSpan(0, _pendingLength), emitLength, _patterns, _replacement, _pool);
+            _escapedEcho && SecretScrubber.ContainsJsonEscape(window)
+                ? SecretScrubber.ScrubBatchEscaped(window, emitLength, _patterns, _replacement, _pool)
+                : SecretScrubber.ScrubBatch(window, emitLength, _patterns, _replacement, _pool);
 
         _output = batch;
         _outputPosition = 0;

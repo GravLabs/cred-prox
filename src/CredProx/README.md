@@ -109,6 +109,15 @@ is the full guide:
 `0.x` — the public API is stable within a minor version (`0.x.*`); APIs marked
 `[Experimental]` may change before 1.0. Target framework: `net10.0`.
 
+## Install
+
+```bash
+dotnet add package CredProx
+```
+
+Add-on packages install under their own ids (`dotnet add package CredProx.OAuth`, and
+so on) and register with one call each; the Packages section above is the map.
+
 ## License
 
 MIT

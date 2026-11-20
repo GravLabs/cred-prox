@@ -32,7 +32,6 @@
   <PropertyGroup>
     <RepositoryUrl>https://github.com/GravLabs/cred-prox.git</RepositoryUrl>
     <PackageProjectUrl>https://github.com/GravLabs/cred-prox</PackageProjectUrl>
-    <PackageReleaseNotes>https://github.com/GravLabs/cred-prox/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <!-- The SDK's git detection fills $(ScmRepositoryUrl) and the SourceRoot items from
@@ -68,14 +67,21 @@
     <Copyright>Copyright (c) Hector Ramos</Copyright>
     <RepositoryType>git</RepositoryType>
     <PackageTags>yarp;reverse-proxy;oauth;credentials</PackageTags>
+    <!-- nuget.org renders releaseNotes as plain text on the package page, and the
+         documented field is a description of the changes in this release (nuspec
+         reference) — so it leads with the version and keeps the CHANGELOG link.
+         Declared AFTER the Version.props import above: MSBuild expands a property
+         at assignment, so in the group before the import $(Version) was still
+         empty and every nuspec shipped "Changes in :". -->
+    <PackageReleaseNotes>Changes in $(Version): see the changelog at https://github.com/GravLabs/cred-prox/blob/main/CHANGELOG.md</PackageReleaseNotes>
   </PropertyGroup>
 
   <!-- Package quality (plan §7): SourceLink for GitHub, package README, and API
-       compatibility validation. The PackageValidation baseline is the published 0.12.0
-       bytes (rotated at the 0.13.0 prep, 2026-11-19 - ADR-0001; the 0.11.0 generation is
+       compatibility validation. The PackageValidation baseline is the published 0.13.0
+       bytes (rotated at the 0.13.1 prep, 2026-11-19 - ADR-0001; the 0.12.0 generation is
        in git history, and the internal-URL nuspec residue the 0.7.0
        baselines carried has been out of every generation since). Every pack compares
-       the public surface against the published 0.12.0. The baseline
+       the public surface against the published 0.13.0. The baseline
        packages are the published bytes, committed under
        build/baselines (docs/adr/0001), so validation needs no network or LAN feed —
        this machine and a GitHub-hosted runner compare against identical bytes.
@@ -85,11 +91,12 @@
        from release/10.0 and from the 10.0.112 task assembly). ApiCompatExcludeAttributes-
        File is NOT the lever: it feeds attribute-data comparison only, and on newer SDKs
        listing ExperimentalAttribute there would disable the native skip. Removals through
-       0.12.0 are absorbed by the baseline. The suppressions files the 0.11.0 and 0.12.0
+       0.13.0 are absorbed by the baseline. The suppressions files the 0.11.0 and 0.12.0
        Breaking entries carried — src/CredProx/ 45 entries, src/CredProx.Abstractions/ 2,
        one per type or member removal of the caller-contract collapse and the package-split
-       moves — are inside the published 0.12.0 bytes, so both files are removed at this
-       rotation. A fresh-obj pack must show zero diagnostics and
+       moves — were deleted at the 0.13.0 baseline rotation; the removals they describe are
+       inside the published 0.13.0 bytes, so no suppressions exist at this baseline.
+       A fresh-obj pack must show zero diagnostics and
        zero unnecessary-suppression warnings; future intentional
        removals regenerate them
        (dotnet pack /p:ApiCompatGenerateSuppressionFile=true). Pre-1.0 the whole public surface is
@@ -105,7 +112,7 @@
     <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
     <EnableSourceLink>true</EnableSourceLink>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.12.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.13.0</PackageValidationBaselineVersion>
     <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
          entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
          $(MSBuildProjectName) equals $(PackageId) for all ten packable projects. -->

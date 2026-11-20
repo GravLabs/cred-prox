@@ -7,6 +7,86 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-19
+
+This is a security patch. Four fixes, no public API added, changed or removed:
+credential acquisition and caller-token validation now refuse HTTP redirects
+outright (affected: credential acquisition in every released version,
+0.3.0-preview.1 through 0.13.0; caller-token validation in 0.11.0 through
+0.13.0); the response scrubber also redacts JSON-escaped credential echoes
+(affected: every version with response scrubbing, 0.7.0 through 0.13.0); the
+scrubber's pass-through classes became operator-visible warnings; and
+operator-facing messages at the credential-provider boundaries report the
+exception type instead of relaying a provider's own message text. Upgrading
+from 0.13.0 is a version bump: same public surface, same configuration,
+behaviour unchanged except where a fetch used to follow a redirect or an
+escaped echo used to pass unscrubbed.
+
+**Documentation**: three operator guides ship with this release — a production
+checklist, a credential-rotation runbook, and an upgrade guide.
+
+### Security
+
+- Credential acquisition and caller-token validation never follow HTTP redirects.
+  A configured endpoint — a token endpoint, an OIDC discovery document, a JWKS
+  address, or a login-exchange endpoint — that answered with a redirect to another
+  address used to have the redirect target's response believed: outbound, a mint
+  was read from a host nobody configured; inbound, the redirect target's key set
+  decided which caller tokens authenticated. Every one of those fetches now
+  refuses a 3xx outright — the refusal names the credential and never a redirect
+  target or its body. Affected: credential acquisition in every released version
+  (0.3.0-preview.1 through 0.13.0); caller-token validation in 0.11.0 through
+  0.13.0. Upgrading fixes it. Three consequences to plan for. A host that supplied
+  its own redirecting handler to a credential client now gets a refusal instead
+  of the followed response. The rule each response is held to, exactly: a response
+  stamped with an effective request URI at another address than the configured one
+  (scheme, host, port or path — a differing query alone is ordinary) is refused; a
+  3xx is refused whether or not it carries a stamp; a response with no stamp at all
+  is accepted on that basis alone, because every transport CredProx ships stamps its
+  responses and a hand-built response carries none. So a host handler that serves the
+  configured endpoint keeps working whichever way it builds its response — stamped or
+  unstamped — and only a response claiming to have ended at a different address is
+  refused. And Azure hosts — whose token and secret fetches ride
+  the Azure SDK's own transport rather than CredProx's clients — should close the
+  same door where they build their credential or `SecretClient`: give the
+  transport a primary handler with `AllowAutoRedirect = false` (measured: both
+  legs follow a cross-host 302 by default). And an IdP that legitimately serves
+  its JWKS or discovery document through a redirect now fails the credential
+  `credential_unavailable` (HTTP 502) instead of being followed to the final
+  address: configure the final URL directly.
+
+- The response scrubber also removes echoed credentials that a vendor's JSON encoder
+  escaped on the way out. An echo arriving as `+` spelled \u002b or `<`
+  spelled \u003c — System.Text.Json emits those forms for `+`, `<`, `>`, `&`
+  by default, and base64-shaped credentials carry `+` and `/` — reached the caller
+  unscrubbed: the matcher only knew the raw and URL-encoded forms. It now reads
+  through the escapes and writes the redaction onto the original escaped bytes, so
+  the body stays exactly as parseable as it arrived, and a malformed escape is
+  ordinary text that never throws. Escaped echoes survived in every version with
+  response scrubbing (0.7.0 through 0.13.0); a JSON-escaped echo inside a
+  `text/event-stream` payload remains the event framing's documented residue.
+
+- The scrubber's pass-through classes are now operator-visible instead of silently
+  inert. A response whose media type is non-text (`application/octet-stream` and
+  friends) or missing entirely was forwarded byte-identical with no signal at all
+  that an echoed credential in it reached the caller; each such class now logs one
+  warning per route. Forwarding those bodies is unchanged behaviour — the warning
+  exists so an operator can see a vendor echoing through a body the scrubber cannot
+  open.
+
+- Operator-facing messages at the credential-provider boundaries report the exception's
+  **type**, never the provider's own message text. The catch-alls in credential attach,
+  HMAC signing, the credential-registry rebind and the token-health probe relayed the
+  provider's `Message` — safe while only built-in providers ran there, whose messages
+  name the credential and the failure kind, but a third-party credential type or secret
+  source is a message of its own, and that message can carry a secret value straight
+  into an operator log or the health report. Those messages now carry the type name —
+  `(InvalidOperationException)` — and nothing else; the rebind site no longer attaches
+  the exception object either, since every real log provider renders an attached
+  exception in full. Caller-facing responses are unchanged. This is defence in depth:
+  a contract message that carries a value was already off-contract
+  (docs/extending.md).
+
 ## [0.13.0] - 2026-11-19
 
 This release makes the health switch really turn health off, fixes caller-key
@@ -24,6 +104,13 @@ arms picked up in 0.12.0.
   off could not tell it apart from monitoring that had simply not run its first round.
   The health options, built-in probes and snapshot stay registered and resolvable
   (ADR-0006).
+
+- Response features that share a stage now run after the secret scrubber regardless of
+  registration order. A host that had registered its own response feature — or CredProx's
+  error normalisation feature — before `AddCredProx` used to get it running before the
+  scrubber inside `Stage.ShapeResponse`, where it could embed unscrubbed response bytes in
+  `vendor_detail`. The scrubber is now pinned to the front of its stage; other same-stage
+  features keep their relative order.
 
 ### Fixed
 

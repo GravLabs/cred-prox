@@ -96,7 +96,11 @@ Four interactions worth knowing before you flip a switch:
   request. Ship a `README.md` that names the call and the config keys.
 - **Secret values never leave the accessor.** Resolve through `ISecretAccessor` per use;
   never store a secret in a long-lived field, log one, or place one in an error message.
-  `CredProx.Testing`'s `CapturedLogSink.AssertNoSecretValues` proves it.
+  Messages thrown out of a contract name the credential and the failure kind, never a
+  value: CredProx's catch-alls report the exception's type (not its text) to the log and
+  the health report, so a message that does carry a value is still not echoed — but the
+  discipline is yours, and `CredProx.Testing`'s `CapturedLogSink.AssertNoSecretValues`
+  proves it.
 - **Prove behavior, not just compilation.** Derive your tests from the conformance
   suites (`CredentialProviderConformanceTests`, `SecretSourceConformanceTests`,
   `TokenCacheConformanceTests`): refresh-on-401, single-flight, cache scoping and secret

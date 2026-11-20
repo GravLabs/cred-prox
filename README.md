@@ -130,11 +130,13 @@ ships no vendor presets.
 | `CredProx.AzureKeyVault` | The `TokenCredential` credential type: trades an Azure token credential (managed identity, service principal) for Entra tokens | The vendor expects Entra tokens obtained through Azure identity |
 | `CredProx.Testing` | Fakes and the conformance suites the built-ins themselves are tested with | You test a credential type or authenticator you wrote |
 
-Published to the CredProx NuGet registry (the feed is machine-local; publishing
-machines declare it in their user-level NuGet config — see PUBLISHING.md). Target
-framework: `net10.0`. Each package's own README carries its one registration call and
-the config it reads; the core's README is also the package map that ships inside the
-nupkg. See [CHANGELOG.md](CHANGELOG.md).
+Install with `dotnet add package CredProx` plus the add-on packages you need; every
+package targets `net10.0`. Until the first public nuget.org release lands (M44
+readiness, PUBLISHING.md), the packages are served from the CredProx NuGet registry —
+the feed is machine-local; publishing machines declare it in their user-level NuGet
+config. Each package's own README carries its install line, its one registration call
+and the config it reads; the core's README is also the package map that ships inside
+the nupkg. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements and compatibility
 
@@ -163,6 +165,18 @@ points.
 - Audit records carry credential **names**, never values; redacted headers/JSON fields
   are masked before any sink sees them. Caller key values never appear in audit records
   or in CredProx log messages.
+- **Response scrubbing inspects text-like bodies.** A response whose media type is
+  `application/octet-stream` or another non-text type, that carries no media type, or
+  that arrives with an unknown or chained `Content-Encoding` is forwarded
+  byte-identical — an echoed credential inside such a body reaches the caller, and an
+  event-stream boundary can split an echo across events; each class logs one warning
+  per route.
+- **The caller's own `Authorization` and `Cookie` ride to the vendor** on routes whose
+  credential is not a caller header value (query placement and friends): header hygiene
+  removes the presented credential, the caller-auth key and the partition header, and
+  forwards the caller's remaining headers unchanged. Where a route must not see them,
+  strip them with YARP's `RequestHeaderRemove` transform (one entry per header) —
+  proven end-to-end in the test host.
 
 ## Contributing
 

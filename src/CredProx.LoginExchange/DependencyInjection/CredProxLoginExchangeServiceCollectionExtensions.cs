@@ -36,7 +36,16 @@ public static class CredProxLoginExchangeServiceCollectionExtensions
         // The provider creates the shared "credprox-token" clients through
         // IHttpClientFactory; the add-on registers it itself rather than borrowing the
         // core built-in batch's AddHttpClient side effect, which no longer exists.
-        services.AddHttpClient(CredProxHttpClientNames.TokenClient);
+        // Credential acquisition never follows redirects (M45 security finding F-1): the
+        // default transport refuses 3xx outright, and the guard refuses the response of a
+        // followed redirect even when a host supplies its own redirecting primary handler.
+        services.AddHttpClient(CredProxHttpClientNames.TokenClient)
+            .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            })
+            .AddHttpMessageHandler(static () => new CredProxRedirectGuard());
 
         services.AddCredProxCredentialType<LoginExchangeProvider, LoginExchangeOptions>("LoginExchange");
         services.TryAddSingleton<IValidateOptions<LoginExchangeOptions>, LoginExchangeOptionsValidator>();

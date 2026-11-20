@@ -5,10 +5,12 @@
        [0.12.0] - the M42 package splits that moved OAuth, LoginExchange, Hmac,
        Operations, caller keys and agent tokens out of the core into their own
        packages (ADR-0005); publishing itself is the separate maintainer ceremony
-       in PUBLISHING.md). This line carries `0.13.0`, the release number set by
-       the 0.13.0 release prep — a release-candidate number, deliberately not a
-       development line; it reopens as `<next>-dev` only in the post-publish
-       step below.
+       in PUBLISHING.md). 0.13.0 is RELEASED (its contents: CHANGELOG [0.13.0] -
+       the caller-key rotation fix, the health switch that is really off, and
+       ADR-0006's replace/turn-off contract). This line carries `0.13.1`, the
+       release number set by the 0.13.1 release prep — a release-candidate number,
+       deliberately not a development line; it reopens as `0.14.0-dev` (the M45
+       line) only in the post-publish step below.
        The -dev suffix is load-bearing: candidate packs carry a prerelease
        version, so they can never collide in the machine-wide NuGet cache with a
        published version (slice-4b hazard F3). A released number without -dev
@@ -23,6 +25,6 @@
        tools/m33-soak/SoakHost props — the soak host tracks this number without
        inheriting the library's build policy. -->
   <PropertyGroup>
-    <Version>0.13.0</Version>
+    <Version>0.13.1</Version>
   </PropertyGroup>
 </Project>

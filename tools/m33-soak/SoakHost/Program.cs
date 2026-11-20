@@ -59,7 +59,15 @@ if (!string.IsNullOrEmpty(kvStubBase))
 
 builder.Services.AddCredProxTokenCache();
 builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
+// The soak config admits callers by key (CredProx:Callers); without a caller authenticator
+// the startup guard (ADR-0005) refuses to boot, so the key traffic k6 sends must be
+// admitted by CredProx.CallerKeys exactly as an enforcing host registers it.
+builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
 builder.Services.AddCredProxBuiltInCredentials();
+// ADR-0005 moved the OAuth and LoginExchange credential types out of the core; the soak
+// config names both, so their packages register before the credential config binds.
+builder.Services.AddCredProxOAuth();
+builder.Services.AddCredProxLoginExchange();
 builder.Services.AddCredProxCredentials(builder.Configuration);
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()

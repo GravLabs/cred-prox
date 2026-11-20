@@ -14,8 +14,9 @@ namespace CredProx;
 /// succeeds recovers it.
 /// </summary>
 /// <remarks>
-/// Failure descriptions name the credential and the failure kind — provider messages
-/// never contain secret values.
+/// Failure descriptions name the credential and the exception type. A provider's own
+/// message is never relayed: a third-party provider's catch-all reports the type, not
+/// the text (M45 security finding F-5).
 /// </remarks>
 [Experimental("CREDPROX001")]
 internal sealed class TokenObtainableProbe(
@@ -53,10 +54,11 @@ internal sealed class TokenObtainableProbe(
                 }
                 catch (Exception ex)
                 {
-                    // Provider messages name the credential and the failure kind, never
-                    // values; the health report and warning inherit that discipline.
+                    // M45 security finding F-5: the provider here may be a third party,
+                    // and its message is its own — the health report names the exception
+                    // type, never the text.
                     var target = partition is null ? $"'{name}'" : $"'{name}' (partition '{partition}')";
-                    failures.Add($"credential {target} could not be obtained: {ex.Message}");
+                    failures.Add($"credential {target} could not be obtained ({ex.GetType().Name})");
                     failedNames.Add(name);
                 }
             }

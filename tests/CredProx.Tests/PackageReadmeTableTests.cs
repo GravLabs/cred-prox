@@ -65,6 +65,25 @@ public sealed class PackageReadmeTableTests
     }
 
     [Fact]
+    public void EveryPackageReadme_CarriesItsInstallLine()
+    {
+        // M44: a first-time nuget.org user finds the install line where they read
+        // about the package — the line is the convention, so it is pinned.
+        var root = RepoRoot();
+        foreach (var dir in Directory.EnumerateDirectories(Path.Combine(root, "src"))
+                     .Where(d => Directory.EnumerateFiles(d, "*.csproj").Any())
+                     .OrderBy(d => d, StringComparer.Ordinal))
+        {
+            var name = Path.GetFileName(dir);
+            var readme = File.ReadAllText(Path.Combine(dir, "README.md"));
+            Assert.Contains($"dotnet add package {name}", readme);
+        }
+
+        Assert.Contains("dotnet add package CredProx",
+            File.ReadAllText(Path.Combine(root, "README.md")));
+    }
+
+    [Fact]
     public async Task HeroConfigSnippets_StartUpValidationPasses()
     {
         // One JSON block per hero README, and that block must survive the real

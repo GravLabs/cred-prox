@@ -1,7 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
+using System.Net.Http;
 using CredProx;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -167,6 +169,15 @@ public static class CredProxCallerTokenServiceCollectionExtensions
         // the configured MaxTokenAge bound (M39).
         services.AddSingleton(callerTokenOptions);
 
+        // M45 security finding R-4: the validation backchannel is decided once, after
+        // every options callback — the host's handler runs, wrapped in the F-1 refusal;
+        // CredProx's closed default ships when the host supplied none. The registration
+        // MUST precede every AddJwtBearer call below: post-configures run in registration
+        // order, and JwtBearer's own builds options.Backchannel from the handler property
+        // at the moment it runs — a post-configure registered after it decides a property
+        // nobody reads again.
+        services.AddSingleton<IPostConfigureOptions<JwtBearerOptions>, CallerTokenBackchannelPostConfigure>();
+
         var callerTokenBuilder = services.AddAuthentication();
         if (registerScheme is null)
         {
@@ -196,6 +207,12 @@ public static class CredProxCallerTokenServiceCollectionExtensions
                     // With mapping off the handler's role claim type must name the raw
                     // claim, or ClaimsPrincipal.IsInRole stops seeing app roles.
                     options.TokenValidationParameters.RoleClaimType = "roles";
+                    // M45 security findings F-1 and R-4: this backchannel carries OIDC
+                    // discovery and the JWKS fetch. It is decided after every Configure
+                    // callback by CallerTokenBackchannelPostConfigure — a host handler is
+                    // kept and wrapped, never replaced; ours ships when none is supplied.
+                    // That post-configure is registered above, before this call, so its
+                    // decision lands before JwtBearer builds the Backchannel from it.
                 });
         }
         else

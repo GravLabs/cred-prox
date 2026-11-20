@@ -56,7 +56,7 @@ Unchanged-code reruns on the shared development machine, 2026-11:
 | Overhead suite, same-run ratio (SSE arms) | ×1.6 – ×1.8 |
 | Overhead suite, absolute mean | up to ±45% |
 | Overhead suite, allocations (echo arms) | ≤ 7 B (≤0.1%) |
-| Overhead suite, allocations (SSE arms, 3-event bounded stream) | Six pinned passes at unchanged workload (2026-11-14, after the M37 workload change): SseCredProx 12,116–15,989 B around the 14,469 B reference — max upward excursion +1,520 B (10.5%); SsePlain 7,292–8,551 B vs the 8,766 B reference, never above it. At the 12% allowance the largest SseCredProx regression the gate can still miss is +1,736 B (+1,737 B is the smallest it catches) (the old ~5 s abandoned stream measured +3.3% / +5.6% of much larger values). Interleaved A/B attribution (2026-11-15, six quiet-gated passes, the released 0.9.4 commit against the 0.10.0 candidate): the RELEASED code itself measured 14,434–16,578 B against the 13,117 B 0.9.4 reference while the candidate reached 25,567 B (1.95×) with none of the changed code in the arm's path — both trees exceeded the +12% line in 2 of 3 passes, so a fixed 12% FAIL cannot gate these arms |
+| Overhead suite, allocations (SSE arms, 3-event bounded stream) | Six pinned passes at unchanged workload (2026-11-14, after the M37 workload change): SseCredProx 12,116–15,989 B around the 14,469 B reference — max upward excursion +1,520 B (10.5%); SsePlain 7,292–8,551 B vs the 8,766 B reference, never above it. At the 12% allowance the largest SseCredProx regression the gate can still miss is +1,736 B (+1,737 B is the smallest it catches) (the old ~5 s abandoned stream measured +3.3% / +5.6% of much larger values). 2026-11-19: the confirmation pair run inside the M45 security window read 21,126 B on SseCredProx's BASE side — release-shape bytes — while that window's own base legs measured 14,967 and 16,528 B (recorded base-side scatter now spans 11,751–21,126 B); the conclusion is unchanged — the +12% line fires on this arm's scatter alone, and the >2.5× fail-above remains the only reliable stop. Interleaved A/B attribution (2026-11-15, six quiet-gated passes, the released 0.9.4 commit against the 0.10.0 candidate): the RELEASED code itself measured 14,434–16,578 B against the 13,117 B 0.9.4 reference while the candidate reached 25,567 B (1.95×) with none of the changed code in the arm's path — both trees exceeded the +12% line in 2 of 3 passes, so a fixed 12% FAIL cannot gate these arms |
 | Micro suites, same-run ratio | ≤ ×1.13 (worst: the sub-microsecond destination arms — nanosecond-scale measurements against nanosecond-scale denominators) |
 | Micro suites, absolute mean | ≤ +2.1% (except arms below ~100 ns, which track the ratio) |
 | Micro suites, allocations | ≤ 16 B — **except** `TokenCacheBenchmarks.SingleFlight`: band 23,444 – 23,520 B (≈76 B) at unchanged `src/` |
@@ -197,6 +197,27 @@ every attach arm routes through that state, so one check stands in for all three
 A per-request closure created and invoked inline elsewhere on the transform path stays
 green here; the out-of-process bench gate is its numeric net. Why `StaticKeyAttach`
 varied by up to 17 B between gate passes stayed unexplained.
+
+## Accepted release-delta allocations — 0.13.1
+
+The 0.13.1 security patch carries one measured allocation cost: the
+escaped-echo redaction (M45 finding F-2) adds a constant ~30 B/op to
+`OAuthCacheHitScrub`. The M45 differential window (2026-11-19,
+17:59:18Z–18:03:47Z, one window back-to-back, all legs marker-gated: tip ×2,
+fresh detached base ×2, plus an independent confirmation pair in the same
+window) measured base 9,728–9,734 B (the committed 0.13.0 baseline is
+9,731 B) against tip 9,761/9,763/9,761/9,763 B — a band of **+27…35 B/op**
+over the six base and four tip readings, deterministic, base-side jitter of
+6 B crossing the flat +32 B allowance in exactly one of the four pairings
+(best pairing +33 B). The lead accepted the band as the measured security
+cost of the scrub for this release (note 6593, 2026-11-19 18:04Z): no
+gate-policy change; the post-publish baseline refresh below absorbs it. The
+window's tip was test-only over the security merge, and the release src is
+byte-identical to that merge (`git diff 691a484 d82b1e4 -- src` is empty),
+so the band is the release's. No other overhead-suite arm moved: the echo
+and attach arms measured alloc-flat (±1 B) in every pairing, and the
+`SseCredProx` WARNs are the arm's own scatter, reproduced on base bytes in
+the same window (row above).
 
 ## Refreshing the baseline at each release
 

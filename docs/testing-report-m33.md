@@ -19,6 +19,16 @@ their target behaviour; B3 (dir `m33-soak-20261109-101912`, 10:19–10:49Z) clos
 with the opt-in features wired and the rotate lever deepened. Attempt #1 was invalidated
 mid-run by a harness fault (§5, entry 1).
 
+**Scope correction, 2026-11-19.** Every run reported here (2026-11-08/09) predates caller-key
+enforcement in the soak host: enforcement landed at `568a398` (2026-11-19 13:44Z), so at run time
+the host accepted scenario traffic without caller-key authentication. Each figure below remains
+true as the record of the run as executed — nothing is retracted — but smoke #9 (§2) and the §4
+rows that quote authenticated-path baselines (1a, 5, 6) are witnesses of the proxied path
+*without* an authenticated caller identity, and none of them serves as evidence for today's
+authenticated pipeline. The first soak witness of the full authenticated path is the re-run on
+the fixed harness, still pending as of this note
+(see [testing-report-m45.md](testing-report-m45.md) §4).
+
 ## 1. Environment
 
 | Item | Value |

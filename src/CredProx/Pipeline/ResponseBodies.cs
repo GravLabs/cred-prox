@@ -81,6 +81,31 @@ internal static class ResponseBodies
     }
 
     /// <summary>
+    /// Whether the media type is a JSON shape: <c>json</c> as the subtype or its
+    /// suffix (<c>+json</c>, ndjson and the vendor variants). Only these bodies open
+    /// the scrubber's escaped-echo matcher — the <c>\uXXXX</c> rendering is JSON's,
+    /// and every other text body keeps the plain byte path untouched.
+    /// </summary>
+    internal static bool IsJsonLike(MediaTypeHeaderValue? contentType)
+    {
+        if (contentType?.MediaType is not { Length: > 0 } mediaType)
+        {
+            return false;
+        }
+
+        var separator = mediaType.IndexOf('/');
+        if (separator < 0)
+        {
+            return false;
+        }
+
+        var subtype = mediaType[(separator + 1)..];
+        // A media type carries no parameters here (MediaTypeHeaderValue.MediaType is
+        // the bare type), so a plain suffix test is exact.
+        return subtype.EndsWith("json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Whether a declared charset is one a UTF-8 reader decodes without loss: absent
     /// (the media-type default), or <c>utf-8</c> / <c>utf8</c> / <c>us-ascii</c> /
     /// <c>ascii</c> by name. Any other declared charset (<c>iso-8859-*</c>,

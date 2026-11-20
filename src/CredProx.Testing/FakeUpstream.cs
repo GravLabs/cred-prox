@@ -85,6 +85,9 @@ public sealed class FakeUpstream : HttpMessageHandler
             answer = _script.Count > 0 ? _script.Dequeue() : Responder;
         }
 
-        return Task.FromResult(answer(request));
+        var response = answer(request);
+        // Stamped like a real transport, as in FakeTokenServer (M45 finding R-1).
+        response.RequestMessage ??= request;
+        return Task.FromResult(response);
     }
 }

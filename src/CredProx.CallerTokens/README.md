@@ -29,6 +29,14 @@ caller's client ids under `CredProx:Callers:<id>:TokenClientIds` (see the
 A host that never references this package ignores `TokenClientIds` entirely — the
 entries are inert and the key path is untouched.
 
+## Install
+
+```bash
+dotnet add package CredProx.CallerTokens
+```
+
+Installs beside `CredProx`; the core package README carries the package map.
+
 ## License
 
 MIT

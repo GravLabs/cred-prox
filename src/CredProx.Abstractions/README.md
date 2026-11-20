@@ -36,6 +36,15 @@ This package registers nothing — it is contracts only; the registration calls 
 is a complete custom credential type in ~50 lines, registered explicitly and tested with
 the `CredProx.Testing` conformance suites — the template for community plugins.
 
+## Install
+
+```bash
+dotnet add package CredProx.Abstractions
+```
+
+Reference it directly when you write your own plugin against the contract; an app
+host installs `CredProx` instead, which brings the contract with it.
+
 ## License
 
 MIT

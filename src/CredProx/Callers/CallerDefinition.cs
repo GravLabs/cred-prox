@@ -9,7 +9,14 @@ namespace CredProx;
 /// (ADR-0004). Patterns are matched against the decoded request path; <c>*</c> matches
 /// exactly one path segment, a trailing <c>**</c> matches the remaining segments (zero or
 /// more). Matching is ordinal and case-sensitive — the strictest reading, so case tricks
-/// and homoglyphs simply do not match.
+/// and homoglyphs simply do not match. Routing above this list is case-insensitive, so a
+/// case-flipped path still reaches its route — and matches no rule here, so it is refused
+/// (the asymmetry fails closed; spell patterns exactly as the route serves them). Matrix
+/// parameters (<c>;p=1</c>) ride their segment: the list matches the server's normalised,
+/// decoded path while the vendor receives the path as it arrived — a vendor that interprets
+/// or strips parameters sees a different resource than the one authorized; dot-segment
+/// escapes are normalised away before matching, so the difference is presentation, not
+/// bypass.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class CallerOperationRule

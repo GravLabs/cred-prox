@@ -53,9 +53,12 @@ public sealed class CredentialRegistryProvider
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                // M45 security finding F-5: a binding failure can surface a provider or
+                // secret-source message; the log carries the registry-failure kind only —
+                // no exception object (its text lands in the log entry), no message.
                 logger.LogError(
-                    ex,
-                    "CredProx credentials failed to rebind after a configuration change; keeping the previous registry.");
+                    "CredProx credentials failed to rebind after a configuration change ({ErrorType}); keeping the previous registry.",
+                    ex.GetType().Name);
             }
         });
     }

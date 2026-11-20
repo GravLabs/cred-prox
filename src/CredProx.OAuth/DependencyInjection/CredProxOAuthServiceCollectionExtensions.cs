@@ -37,7 +37,16 @@ public static class CredProxOAuthServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddHttpClient(OAuthClientCredentialsProvider.HttpClientName);
+        // Credential acquisition never follows redirects (M45 security finding F-1): the
+        // default transport refuses 3xx outright, and the guard refuses the response of a
+        // followed redirect even when a host supplies its own redirecting primary handler.
+        services.AddHttpClient(OAuthClientCredentialsProvider.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(static () => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            })
+            .AddHttpMessageHandler(static () => new CredProxRedirectGuard());
 
         services
             .AddCredProxCredentialType<OAuthClientCredentialsProvider, OAuthClientCredentialsOptions>("OAuthClientCredentials")

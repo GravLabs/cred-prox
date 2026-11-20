@@ -41,7 +41,11 @@ if (__ENV.SOAK_STRICT === '1') {
 }
 
 function hdr(keyId) {
-  return { headers: { 'x-api-key': keyId } };
+  // X-CredProx-Key is CallerKeyOptions' default HeaderName — what an enforcing host
+  // reads when nothing overrides CredProx:CallerAuth:HeaderName. The 2026-11-19
+  // 13:53Z run sent 'x-api-key' here instead: every one of its 993,604 requests was
+  // a 401 "No caller API key was presented" and nothing was ever proxied.
+  return { headers: { 'X-CredProx-Key': keyId } };
 }
 
 export function cc() {
@@ -60,7 +64,7 @@ export function gen1() {
 
 export function login() {
   const r = http.get(`${BASE}/login-api/echo?probe=login`,
-    { headers: { 'x-api-key': keys.c, 'X-API-Env': 'prod' } });
+    { headers: { 'X-CredProx-Key': keys.c, 'X-API-Env': 'prod' } });
   check(r, { 'login 200': (x) => x.status === 200 });
   noSentinelInBody(r);
 }
@@ -79,12 +83,26 @@ function noSentinelInBody(r) {
 }
 
 export function handleSummary(data) {
-  // Real metric names: trend = http_req_duration, counter = http_reqs, rate = http_req_failed.
+  // Real metric names: trend = http_req_duration, counter = http_reqs, gate = checks.
+  // The gate signal is `checks`: its passes/fails are literal per-check results (pinned
+  // empirically on the digest-pinned k6 v1.4.0 image: an always-TRUE check -> passes=1,
+  // always-FALSE -> fails=1). http_req_failed is TRANSPORT-ONLY: 2 successful GETs plus
+  // 1 connection-refused still reported {passes:3, fails:0, rate:1}. The all-401 run of
+  // 2026-11-19 proves http_req_failed is not a load gate; it only carries transport
+  // health (timeouts, refused connections) beside these columns.
   const m = data.metrics.http_req_duration || {};
+  const c = (data.metrics.checks || {}).values || {};
+  const checksPass = c.passes || 0;
+  const checksFail = c.fails || 0;
+  const total = checksPass + checksFail;
+  // failed_rate is the CHECK-failure share (the response-status gate); zero iterations
+  // or zero checks is a failure, never a green.
+  const failedRate = total === 0 ? 1 : checksFail / total;
   const line = [
     new Date().toISOString(), (m.values || {}).med, (m.values || {})['p(95)'], (m.values || {})['p(99)'],
-    (data.metrics.http_req_failed || { values: { rate: 'NaN' } }).values.rate,
+    failedRate,
     (data.metrics.scrub_miss || { values: { sum: 0 } }).values.sum,
+    checksPass, checksFail,
   ].join(',');
   return {
     '/soak/k6-summary.json': JSON.stringify(data),
@@ -95,7 +113,7 @@ export function handleSummary(data) {
 
 function textSummary(data) {
   return Object.keys(data.metrics)
-    .filter((k) => ['http_req_duration', 'http_reqs', 'http_req_failed', 'scrub_miss'].includes(k))
+    .filter((k) => ['http_req_duration', 'http_reqs', 'http_req_failed', 'checks', 'scrub_miss'].includes(k))
     .map((k) => `${k}: ${JSON.stringify(data.metrics[k].values)}`)
     .join('\n');
 }

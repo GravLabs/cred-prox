@@ -111,9 +111,11 @@ public sealed class ClientCertificateConnection
                 throw;
             }
 
+            // M45 security finding F-5: a secret source here may be a third party; the
+            // log names the exception type, never its text.
             _logger.LogError(
-                "The connection '{Connection}' could not re-read its client certificate secret; keeping the current certificate. {Error}",
-                Name, ex.Message);
+                "The connection '{Connection}' could not re-read its client certificate secret ({ErrorType}); keeping the current certificate.",
+                Name, ex.GetType().Name);
             return;
         }
 
@@ -137,9 +139,10 @@ public sealed class ClientCertificateConnection
                 throw;
             }
 
+            // M45 security finding F-5: the loader's text is not trusted; type, not text.
             _logger.LogError(
-                "The connection '{Connection}' could not reload its client certificate; keeping the current certificate. {Error}",
-                Name, ex.Message);
+                "The connection '{Connection}' could not reload its client certificate ({ErrorType}); keeping the current certificate.",
+                Name, ex.GetType().Name);
             return;
         }
 

@@ -6,7 +6,7 @@ Status: accepted (M25, GitHub public pivot)
 ## Context
 
 Every `dotnet pack` runs APICompat against the last published release
-(`<PackageValidationBaselineVersion>`, currently `0.12.0`) so a public-surface removal
+(`<PackageValidationBaselineVersion>`, currently `0.13.0`) so a public-surface removal
 fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
 Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
 declared the internal LAN NuGet registry (anonymous download), and the SDK's
@@ -22,16 +22,16 @@ Commit the **published baseline packages** under `build/baselines/` and point
 `<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
 
 ```
-build/baselines/CredProx.0.12.0.nupkg               cb274794c0091aa26a304ac67c1bbf6f89cb19089e7be0fc9e6b90014312b72a
-build/baselines/CredProx.Abstractions.0.12.0.nupkg  edc724067e25f639e2a632285ca85f5dbd52699aa0ef4ea8ced8fefc0d7928fe
-build/baselines/CredProx.AzureKeyVault.0.12.0.nupkg 482a8ccf16533757d05021236e211bb9957c916aded83f157b1b89fd5fb21e92
-build/baselines/CredProx.CallerKeys.0.12.0.nupkg    6cc70ea28f752818424347c2687df301244eab2a1335024434484ce8aa08b193
-build/baselines/CredProx.CallerTokens.0.12.0.nupkg  6055e4df26af6b8c71b6190ee47a2044abd33b77be981db83dcd272c9073df53
-build/baselines/CredProx.Hmac.0.12.0.nupkg          751803b79eeb2999477ff73a69e01ff0f008f7be0a9cbc4052fc612eec0d5754
-build/baselines/CredProx.LoginExchange.0.12.0.nupkg a9084150ca7ae1facdd1c8282249327514331516af27a337cf6cde7df399dd17
-build/baselines/CredProx.OAuth.0.12.0.nupkg         6f15280b82b38814741cbc706b5c5a480fc6567729988b83408e40ea1cb42994
-build/baselines/CredProx.Operations.0.12.0.nupkg    59db2380dfa8f6f9ac8553036f0ee55aa40cb67762792848e2c79031c5a96e35
-build/baselines/CredProx.Testing.0.12.0.nupkg       7b987ece983ba1245efb77a1436559eb9df705541298e10685eed404f35499d5
+build/baselines/CredProx.0.13.0.nupkg               2757236c83ccdae7806b17582c915ed796bc1001fa974af39cea3933df1ffaa7
+build/baselines/CredProx.Abstractions.0.13.0.nupkg  3886cd5af1354534fdb745c28e4ed8ade5e843fcc9645f7085c48ee9b98c285f
+build/baselines/CredProx.AzureKeyVault.0.13.0.nupkg b261e72341ca9f0909221131ee802d7cecee6e0b27e23ffdd3ada0d59efca6f8
+build/baselines/CredProx.CallerKeys.0.13.0.nupkg    3008e32c648f161b53c1274c344821c3885d10e7a169e744130ca24a932284de
+build/baselines/CredProx.CallerTokens.0.13.0.nupkg  c09d2d4b3e494b464670b88cdecbfb64b6641d409002d78ad11edb338144b5e4
+build/baselines/CredProx.Hmac.0.13.0.nupkg          de50dc14f99d617425c317791cdbfb877427591b210b00fb9c62fcf72478cccf
+build/baselines/CredProx.LoginExchange.0.13.0.nupkg 8c93886972074198934fc659f199685661a022114f3c15bc9b60f220bbe12081
+build/baselines/CredProx.OAuth.0.13.0.nupkg         8dcbc8ed487d1a693f03813e78898c4a2352e97aa251dc9613da29e4880f126b
+build/baselines/CredProx.Operations.0.13.0.nupkg    57242801a9eb10a39b6728fa42ab8c4e8f3efc078168b89d8815c7f3ee9be3ff
+build/baselines/CredProx.Testing.0.13.0.nupkg       95edf261c1fbf316c430d1cd93832a6b55f799d330ea722849e0ff61473b4b65
 ```
 
 The files are the bytes downloaded from the registry that published them (sha256 above;
@@ -92,7 +92,11 @@ history at that commit. `0.12.0` rotated at the `0.13.0` prep (2026-11-19, owner
 ten, sha256 verified 10/10 equal to the published artifacts recorded in PUBLISHING.md's
 release history — replace the `0.11.0` set, whose entries are in git history at that
 commit; the six feature packages join the folder, so every pack now validates all ten
-packages against published bytes. Pack the
+packages against published bytes. `0.13.0` rotated at the `0.13.1` prep (2026-11-19,
+owner word "A, registry now, nuget.org later"): those registry-served `0.13.0` bytes —
+all ten, sha256 verified 10/10 equal to the published artifacts recorded in
+PUBLISHING.md's release history — replace the `0.12.0` set, whose entries are in git
+history at that commit. Pack the
 **fresh**
 `obj/` after rotating (see
 Consequences): a repack on an untouched obj skips validation silently.

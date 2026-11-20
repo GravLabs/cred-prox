@@ -7,6 +7,11 @@ Azure add-on for [CredProx](https://github.com/GravLabs/cred-prox):
   stored secret** at all. This package registers that one type; the core keeps no Azure
   knowledge beyond the startup hint that names this package.
 
+**Redirects:** CredProx's redirect refusals do not cover Azure's own transports — neither
+`Azure.Identity`'s token fetch nor a Key Vault `SecretClient` passes through a CredProx
+guard (measured: both follow a cross-host 302 by default), so where that door must stay
+shut, give each transport a primary handler with `AllowAutoRedirect = false`.
+
 ## Setup
 
 ```csharp
@@ -54,6 +59,14 @@ Two measured caveats about rotation, from live runs (2026-11-06):
   sees them, not just CredProx. Hosts with strict fail-closed validation (rejecting
   unknown keys under a product prefix, for example) must tolerate foreign names, or
   keep non-product material out of the product namespace.
+
+## Install
+
+```bash
+dotnet add package CredProx.AzureKeyVault
+```
+
+Installs beside `CredProx`; the core package README carries the package map.
 
 ## License
 
