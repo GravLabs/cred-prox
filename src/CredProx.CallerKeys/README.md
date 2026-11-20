@@ -15,6 +15,11 @@ Caller-API-key add-on for [CredProx](https://github.com/GravLabs/cred-prox):
   logged.
 - **Key rotation and revocation without a restart** — the live registry rebinds
   on configuration changes; the store follows it.
+- **A replaceable store** — key lookup is the `ICallerStore` interface, a public
+  seam that ships in this package's `CredProx.CallerKeys` namespace: register your
+  own implementation (database, identity provider) before
+  `AddCredProxCallerAuthentication` to decide caller identity from somewhere other
+  than configuration.
 
 ## Setup
 

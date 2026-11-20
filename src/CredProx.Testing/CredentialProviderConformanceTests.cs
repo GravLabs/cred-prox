@@ -128,7 +128,7 @@ public abstract class CredentialProviderConformanceTests<TProvider, TOptions>
     }
 
     /// <summary>
-    /// Binds the credential through the real <see cref="CredentialBinder"/> over the
+    /// Binds the credential through the real <c>CredentialBinder</c> over the
     /// configured inputs, with token HTTP calls landing on a <see cref="FakeTokenServer"/>
     /// and every log line captured.
     /// </summary>

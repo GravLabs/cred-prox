@@ -122,7 +122,7 @@ public sealed class LoginExchangeProvider : ICredentialProvider<LoginExchangeOpt
         }
 
         var token = await ReadTokenAsync(credentialName, options, response, cancellationToken).ConfigureAwait(false);
-        return (token, _time.GetUtcNow() + options.Lifetime);
+        return (token, _time.GetUtcNow() + options.DefaultLifetime);
     }
 
     private static async ValueTask<string> ExpandAsync(

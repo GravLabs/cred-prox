@@ -14,7 +14,7 @@ namespace CredProx;
 /// (M45 security finding F-7).
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class CredProxPipeline
+internal sealed class CredProxPipeline
 {
     private readonly IRequestFeature[] _requestFeatures;
     private readonly IPipelineFeature[] _pipelineFeatures;

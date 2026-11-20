@@ -6,7 +6,7 @@ namespace CredProx.Tests;
 /// <summary>
 /// §3.6 startup validation for <see cref="TokenExchangeOptions"/>: the validation source
 /// (Authority XOR Issuer+JwksUri — each direction fails at startup, never at runtime),
-/// the mandatory inbound Audience, and the exchange essentials.
+/// the mandatory InboundAudience, and the exchange essentials.
 /// </summary>
 public sealed class TokenExchangeOptionsValidatorTests
 {
@@ -14,7 +14,7 @@ public sealed class TokenExchangeOptionsValidatorTests
     {
         Issuer = "https://idp.example",
         JwksUri = "https://idp.example/jwks",
-        Audience = "credprox-api",
+        InboundAudience = "credprox-api",
         TokenEndpoint = "https://idp.example/token",
         ClientId = "cid",
     };
@@ -166,12 +166,12 @@ public sealed class TokenExchangeOptionsValidatorTests
     }
 
     [Fact]
-    public void RejectsMissingAudience()
+    public void RejectsMissingInboundAudience()
     {
         var options = Valid();
-        options.Audience = null;
+        options.InboundAudience = null;
 
-        Assert.Contains("Audience is required", string.Join(" ",
+        Assert.Contains("InboundAudience is required", string.Join(" ",
             new TokenExchangeOptionsValidator().Validate("c", options).Failures!));
     }
 

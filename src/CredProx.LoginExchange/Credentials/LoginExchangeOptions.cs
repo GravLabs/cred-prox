@@ -49,7 +49,7 @@ public sealed class LoginExchangeOptions : IHasAttachment, IHasPartitionConfig, 
     /// Assumed token lifetime; the login response carries no expiry. Default one hour
     /// (the cayuse example configures <c>00:55:00</c>).
     /// </summary>
-    public TimeSpan Lifetime { get; set; } = TimeSpan.FromHours(1);
+    public TimeSpan DefaultLifetime { get; set; } = TimeSpan.FromHours(1);
 
     /// <summary>
     /// The partition block (<c>From</c> + <c>Allowed</c>) gating every use of the

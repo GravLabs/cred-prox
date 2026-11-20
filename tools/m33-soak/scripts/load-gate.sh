@@ -53,10 +53,12 @@ read -r CSVOK SCRUB <<<"$(awk -F, 'END{print ((NF>=8 && $6!="") ? "ok" : "bad"),
 [ "${CP:-0}" -eq "${IT:-0}" ] || RED="$RED checks_passes=$CP!=iterations=$IT"
 
 # --- term 2: host-side refusals must be zero (no pipefail; grep -c prints 0 on no-match).
-# The caller-auth info line also fires for the login-exchange POST, which is anonymous by
-# design (the exchange call presents no caller key); every such call logs exactly one line.
-# So the auth-line budget is one per journaled login call — any protected route that lost
-# its key would instead surface as a transform-set 401 and fail the refusals term above.
+# Two caller-auth info lines appear in the boot window of both 2026-11-19 runs (valid
+# run: host-log lines 18 and 20, first Proxying-to at line 22; void run: the same
+# constant 2 under 2 x 993,604). The request that emits them is not identified - the
+# host logs no request path - so the allowance is an empirical boot constant, not a
+# per-request-type rule. Positional rule (term 2d) governs everything after the first
+# proxied request.
 REFUSALS=$(grep -cE 'Not Proxying, a [45][0-9][0-9] response was set by the transforms' "$LOG")
 NOTAUTH=$(grep -c 'was not authenticated' "$LOG")
 [ "$REFUSALS" -eq 0 ] || RED="$RED host_transform_refusals=$REFUSALS"
@@ -97,7 +99,24 @@ print(' '.join(f'{p.split(chr(47))[1]}={want[p]}' for p in want))
 LOGIN_CALLS=$(echo "$JOUR" | tr ' ' '\n' | sed -n 's/^login=//p')
 LOGIN_CALLS="${LOGIN_CALLS:-0}"
 [ "$LOGIN_CALLS" -gt 0 ] || RED="$RED journal_login=$LOGIN_CALLS"
-[ "$NOTAUTH" -le "$LOGIN_CALLS" ] || RED="$RED host_caller_auth_failures=$NOTAUTH>login_calls=$LOGIN_CALLS"
+# --- term 2d: positional caller-auth rule (replaces the old NOTAUTH<=login_calls budget,
+# which compared a whole-run count to a last-window ring number this file itself bans for
+# whole-run claims above, and whose void-run RED fired only via login_calls=0). Rule: zero
+# auth lines after the first proxied request, plus a NAMED boot allowance for the boot
+# window. A protected route that lost its key logs auth lines once traffic has started —
+# caught directly here; with no proxy line at all (void shape) every auth line is "after".
+GATE_VERSION=load-gate.v2-auth-positional
+FIRST_PROXY_LINE=$(grep -m1 -n 'Proxying to' "$LOG" | cut -d: -f1)
+FIRST_PROXY_LINE="${FIRST_PROXY_LINE:-0}"
+if [ "$FIRST_PROXY_LINE" -gt 0 ]; then
+  NOTAUTH_AFTER=$(tail -n +"$((FIRST_PROXY_LINE + 1))" "$LOG" | grep -c 'was not authenticated')
+else
+  NOTAUTH_AFTER=$NOTAUTH
+fi
+NOTAUTH_BOOT=$((NOTAUTH - NOTAUTH_AFTER))
+[ "$NOTAUTH_AFTER" -eq 0 ] || RED="$RED caller_auth_after_first_proxy=$NOTAUTH_AFTER"
+BOOT_AUTH_ALLOWANCE=2
+[ "$NOTAUTH_BOOT" -le "$BOOT_AUTH_ALLOWANCE" ] || RED="$RED caller_auth_boot=$NOTAUTH_BOOT>allowance=$BOOT_AUTH_ALLOWANCE"
 for pair in $JOUR; do
   case "$pair" in login=*) continue ;; esac
   n="${pair#*=}"
@@ -105,10 +124,11 @@ for pair in $JOUR; do
 done
 
 if [ -n "$RED" ]; then
-  echo "LOAD-GATE-RED$RED journal[$JOUR] checks_pass=$CP checks_fail=$CF iterations=$IT scrub=$SCRUB"
+  echo "LOAD-GATE-RED$RED journal[$JOUR] checks_pass=$CP checks_fail=$CF iterations=$IT scrub=$SCRUB auth_after=$NOTAUTH_AFTER auth_boot=$NOTAUTH_BOOT/$BOOT_AUTH_ALLOWANCE gate=$GATE_VERSION"
   exit 1
 fi
 # Every number on the OK line is the MEASURED value — a marker must never print a
-# constant 0 for a term it computed (the 2026-11-19 boot-window NOTAUTH lines stayed
-# inside the login-call budget, and the printed line must show that openly: here 2).
-echo "LOAD-GATE-OK checks_pass=$CP/$IT host_refusals=$REFUSALS caller_auth_failures=$NOTAUTH host_proxy_total=$PROXY_TOTAL host_mints=$MINTS host_exchanges=$EXCHANGES journal[$JOUR] scrub=$SCRUB"
+# constant 0 for a term it computed (the 2026-11-19 run logged 2 boot-window auth
+# lines before the first proxy and 0 after; the line shows both openly). The gate=
+# field names the rule set so replay lines from different gate versions never read alike.
+echo "LOAD-GATE-OK checks_pass=$CP/$IT host_refusals=$REFUSALS caller_auth_failures=$NOTAUTH host_proxy_total=$PROXY_TOTAL host_mints=$MINTS host_exchanges=$EXCHANGES journal[$JOUR] scrub=$SCRUB auth_after=$NOTAUTH_AFTER auth_boot=$NOTAUTH_BOOT/$BOOT_AUTH_ALLOWANCE gate=$GATE_VERSION"

@@ -7,6 +7,141 @@ change between minor versions; `[Experimental]` APIs may change at any time.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-20
+
+### Changed behaviour
+
+- HMAC signing now refuses to sign a request whose signed components are ambiguous
+  under the configured separator: when a header, path or query value carries the
+  configured separator — or a multi-value header value carries the `,` that joins its
+  values — the canonical string could stand for two distinct requests, so CredProx
+  answers with a 422 `credprox.canonical_ambiguous` problem response instead of
+  forwarding a signature the vendor cannot pin to one request. Configurations that
+  chose a separator legal inside header values (`|`, `&`, `:`, `,`, space) and serve
+  traffic that carries it now get these refusals; the newline default is not
+  constructible through validated header values. Requests whose values carry no
+  separator sign exactly as before.
+- Header hygiene now removes the caller's own `Authorization` and `Cookie` headers
+  before forwarding, on every route (M45 security finding F-4): a caller's credential
+  no longer rides to a third-party vendor on routes whose own credential is placed
+  elsewhere. The credential CredProx attaches is placed after the strip — a
+  header-placed vendor credential is unaffected — and the caller's other headers flow
+  unchanged. To keep today's behaviour on a route, set route metadata
+  `CredProx.CallerHeaderStrip = "off"` (case-insensitive; any other value, including a
+  misspelling, strips like every other route).
+- A host-defined `CredProxAuth.CallerPolicy` is no longer replaced when it is registered
+  before `AddCredProxCallerAuthentication` or `AddCredProxCallerPolicy`: CredProx skips its
+  own policy registration once the name carries a policy, and a host definition added later
+  still takes effect, so the host definition wins in either registration order (ADR-0006
+  host-first).
+- **Refresh-on-401 replays larger request bodies.** The retried-body cap rose from 64 KiB to
+  1 MiB, so a request with a body between 64 KiB and 1 MiB that answers 401 is now replayed
+  with the refreshed credential (the other retry rules, buffering included, are unchanged).
+  To keep the old cap: `services.Configure<RefreshOn401Options>(o => o.MaxRetriedBodyBytes = 65536);`
+
+### Breaking (experimental API)
+
+The 0.14.0 surface freeze for 1.0 changes only `[Experimental]` APIs. Code and configuration
+written for 0.13.1 keep compiling and starting unless they name one of the things below; the
+behaviour changes are listed under Changed behaviour.
+
+- **`ICallerStore` and `CallerKeyMatch` changed namespace:** `CredProx.Abstractions.*` to
+  `CredProx.CallerKeys.*`, so the declaration namespace matches the `CredProx.CallerKeys`
+  package that ships them. Same types, same members, same registrations. Add
+  `using CredProx.CallerKeys;` (or spell the full name) wherever you implement or name the
+  caller store; code that only passes these types around — the `CallerKeyAuthenticationHandler`
+  constructor and `ConfigCallerStore.ResolveKeyAsync` take or return them — is covered by the
+  same one-line fix.
+
+- **`TokenExchangeOptions.Audience` is now `InboundAudience`.** Same meaning: the audience the
+  caller's inbound token must carry (the outbound audience you send when requesting a token has
+  always been `RequestedAudience` — the old name just did not say which side it read). Rename
+  the config key too: `CredProx:Credentials:<name>:Audience` becomes
+  `CredProx:Credentials:<name>:InboundAudience`. The old key is not read and now refuses
+  startup by name.
+
+- **`LoginExchangeOptions.Lifetime` is now `DefaultLifetime`.** Same meaning: the token lifetime
+  assumed when the login response carries no expiry (default one hour). Rename
+  `CredProx:Credentials:<name>:Lifetime` to `...:DefaultLifetime`; the old key refuses startup
+  by name.
+
+- **Seven public types no longer have public constructors:** `CallerRegistryProvider`,
+  `ConnectionRegistryProvider`, `CredentialRegistryProvider`, `DestinationResolutionFeature`,
+  `CredProxStartupValidator`, `CredProxConfigValidator` and `CredProxTransformProvider`
+  (`CallerRegistryProvider` has both of its constructors changed). The types stay public and
+  the registrations are unchanged — if you constructed one of these directly, resolve the
+  registered instance from your service provider instead.
+
+- **Thirteen types are now internal:** `CallerBinder`, `ConnectionBinder`, `DestinationBinder`,
+  `CredentialBinder`, `CredentialTypeRegistration`, `DestinationRegistryProvider`,
+  `DestinationRegistry`, `DestinationEntry`, `TokenRefreshHandler`, `TokenRefreshTargets`,
+  `ConfigurationSecretSource`, `SecretReferenceValidator` and `CredProxPipeline`. Working
+  configs need no change: the registries are still bound from `CredProx:*` configuration,
+  credential types still register through `AddCredProxCredentialType`, the configuration
+  secret source still arrives with `AddCredProxConfigurationSecrets`, and startup still
+  validates every section. Code that named one of these types — resolving a registry directly,
+  for instance — no longer compiles; open an issue describing what you needed it for.
+
+- **`CredProxRequestState.Destination` is now internal**, together with the `DestinationEntry`
+  type it returned: code in a feature that read the resolved destination of a request no
+  longer compiles. There is no public replacement yet — open an issue describing what you
+  needed it for.
+
+### Security
+
+- New opt-in `CredProx:Scrubbing:FailClosed` (default `false`): when on, an upstream
+  response the scrubber cannot inspect — non-text or missing media type, unknown or
+  chained `Content-Encoding`, or a body in a charset the byte matcher cannot read
+  (the `utf-16`/`utf-32` family, a stateful name like `iso-2022-jp`, or an unknown
+  declared name — the readable ASCII-compatible charsets `utf-8`/`utf8`, `us-ascii`/`ascii`,
+  `iso-8859-1` through `iso-8859-11` and `iso-8859-13` through `iso-8859-16` (there is no
+  iso-8859-12), and `windows-1250` through `windows-1258`, matched by exact published name,
+  are inspected normally and never refused) — is refused with
+  a `credprox.response_uninspectable` problem response instead of forwarded
+  byte-identical, error responses included. A host that does not turn it on keeps
+  today's behaviour exactly: those bodies are forwarded as they are today (including
+  ASCII-compatible declared charsets like `iso-8859-1`, which stay scrubbable on
+  purpose) and each class logs its one warning per route. Alias spellings such as latin1,
+  l1, iso8859-1 and cp1252 are not on the readable list. With the fail-closed option they
+  are refused; in the default mode their bytes are searched as-is, which finds a plain
+  ASCII echo but is not guaranteed. Declare the canonical name. The gate reads the DECLARED
+  charset, never the bytes: a response that misreports its charset is not detected.
+  A refusal answers `502`
+  where the vendor reported success or a redirect — CredProx never reports success for
+  bytes it withheld — and keeps the vendor's status on 4xx/5xx; a refusal logs one
+  warning that says the body was refused, naming the class and the route, in place of
+  the pass-through warning (which stays exactly on the paths that really forward). A
+  response with no body (an empty body, a `HEAD` response, a bodiless redirect) is
+  never refused — a declared non-zero `Content-Length` counts as a body except on a `HEAD`, where the method alone decides — so
+  redirects keep working with the option on. Inspectable bodies — every readable
+  charset above included — are still scrubbed, never refused; a secret that contains
+  non-ASCII characters is matched only in its UTF-8 bytes. `FailClosed` requires `CredProx:Scrubbing:Enabled=true`; the
+  combination with scrubbing switched off can refuse nothing and is now rejected at
+  startup naming both keys.
+- The consent-required `401` (`credprox.consent_required`) no longer relays a
+  provider authorize URL that carries a secret. The guard scans the WHOLE URL —
+  path, query and fragment — raw and percent-decoded (`+` read as a space), for
+  two value sources: secrets this pipeline already injected for the request, and
+  the credential's own configured secret VALUES — matched BY member name
+  (`ClientSecret`, `SigningKey`, `Secret`, `Password`, one nesting level). The consent
+  path exists only for custom credential providers (raising `ConsentRequiredException`
+  is the plugin contract; no built-in provider does it), so a plugin whose option type
+  names its member otherwise is not covered by this arm — the parameter-NAME rule below
+  is the general guard, and a plugin must never put its secret into an authorize URL
+  (a first-attempt consent has injected nothing yet, so the configured values are what
+  the check can know).
+  Independently, a top-level query or fragment parameter whose NAME contains
+  `secret`, `assertion` or `password`, or is exactly `access_token` or
+  `refresh_token`, drops the URL whatever its value (`;` separates parameters as
+  well as `&`). Either way the consent problem itself still lands; the
+  server-side log names the offending parameters — percent-escaped, never their
+  values — or says the value sat outside any parameter value, in the path, the
+  fragment, or a parameter name. Ordinary
+  entry-point queries — `client_id`, `redirect_uri`, `state`, `id_token_hint` —
+  still relay byte-for-byte, so consent flows are unaffected (M45 security
+  finding F-9, widened in M47: the earlier build checked only exact four-name
+  query matches against injected values).
+
 ## [0.13.1] - 2026-11-19
 
 This is a security patch. Four fixes, no public API added, changed or removed:

@@ -15,7 +15,7 @@ namespace CredProx;
 /// startup and on rebind, where a failed rebind keeps the previous registry.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class DestinationBinder
+internal sealed class DestinationBinder
 {
     private const string PartitionPlaceholder = "{partition}";
 

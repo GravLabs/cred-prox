@@ -18,13 +18,14 @@ exists the absence is named, not papered over. The config-key shapes are in
 ## 1. Vendor secrets (client secrets, API keys)
 
 - Every vendor secret reaches the library as a `secret:<name>` reference resolved
-  from `CredProx:Secrets` (`ConfigurationSecretSource`), and values are expanded
+  from `CredProx:Secrets` (the configuration secret source), and values are expanded
   **at use time** — per token fetch (`OAuthClientCredentialsProvider`), per signed
   request (`HmacProvider`), per assertion (`JwtAssertionProvider`), per lookup
   (`StaticKeyProvider`). A replaced value therefore applies to the next fetch with
   no restart, as long as the configuration source actually re-delivered it
-  (`tests/CredProx.Tests/ConfigurationSecretSourceTests.cs` pins that a reload
-  updates resolved values and that the change token fires).
+  (the configuration secret source tests pin that a reload
+  updates resolved values and that the change token fires —
+  `tests/CredProx.Tests/ConfigurationSecretSourceTests.cs`).
 - The source decides how the new value reaches the process:
   - **Key Vault** — `AddAzureKeyVault` with an explicit `ReloadInterval`
     (30 s in `samples/AzureContainerApps` and `samples/MicrosoftGraph`). That
@@ -49,9 +50,10 @@ exists the absence is named, not papered over. The config-key shapes are in
   whose trigger is narrow: a 401 invalidates the cached token and replays the
   request only where CredProx is willing to retry it — idempotent methods, or
   `RefreshOn401Options.RetryNonIdempotent` (default off) — and only with a
-  known-length body at or below `MaxRetriedBodyBytes` (default 64 KiB). A
+  known-length body at or below `MaxRetriedBodyBytes` (default 1 MiB). A
   streamed or over-cap body gets the upstream 401 untouched, and the cached
-  token is not invalidated at all (`src/CredProx/Pipeline/TokenRefreshHandler.cs`).
+  token is not invalidated at all (the refresh-on-401 handler,
+  `src/CredProx/Pipeline/TokenRefreshHandler.cs`).
   So "cut access immediately" holds for small-body idempotent traffic; against
   POST-heavy or streaming callers the cut lands no sooner than each cached
   token's own refresh point.
@@ -91,12 +93,13 @@ exists the absence is named, not papered over. The config-key shapes are in
   if the PFX has one). The connection compares the secret value on each refresh,
   reloads the certificate only when it changed, and bumps a monotonic `Version`
   so the forwarder rebuilds its client for the new material
-  (`ClientCertificateConnection`; `tests/CredProx.Tests/ConnectionBinderTests.cs`
-  pins reload + version bump, `CredProxForwarderHttpClientFactoryTests` pins the
-  reuse stamp across rotation).
+  (`ClientCertificateConnection`; the connection binder tests,
+  `tests/CredProx.Tests/ConnectionBinderTests.cs`, pin reload + version bump;
+  `CredProxForwarderHttpClientFactoryTests` pins the reuse stamp across rotation).
 - A bad replacement fails safe: a rebind whose certificate will not load keeps
   the previous certificate serving and logs only the exception type
-  (`ConnectionBinderTests` pins the keep-serving path).
+  (the connection binder tests pin the keep-serving path —
+  `tests/CredProx.Tests/ConnectionBinderTests.cs`).
 - End-to-end witness: `tests/CredProx.E2ETests/NginxMTlsTests.cs` rotates a real
   client certificate over real sockets and nginx sees the new one on the next
   connection. Watch expiry before it bites: `CertificateExpiryProbe` reports

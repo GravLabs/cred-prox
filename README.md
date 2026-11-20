@@ -166,17 +166,39 @@ points.
   are masked before any sink sees them. Caller key values never appear in audit records
   or in CredProx log messages.
 - **Response scrubbing inspects text-like bodies.** A response whose media type is
-  `application/octet-stream` or another non-text type, that carries no media type, or
-  that arrives with an unknown or chained `Content-Encoding` is forwarded
-  byte-identical — an echoed credential inside such a body reaches the caller, and an
-  event-stream boundary can split an echo across events; each class logs one warning
-  per route.
-- **The caller's own `Authorization` and `Cookie` ride to the vendor** on routes whose
-  credential is not a caller header value (query placement and friends): header hygiene
-  removes the presented credential, the caller-auth key and the partition header, and
-  forwards the caller's remaining headers unchanged. Where a route must not see them,
-  strip them with YARP's `RequestHeaderRemove` transform (one entry per header) —
-  proven end-to-end in the test host.
+  `application/octet-stream` or another non-text type, that carries no media type,
+  that arrives with an unknown or chained `Content-Encoding`, or whose declared
+  charset the matcher cannot read (the `utf-16`/`utf-32` family, a stateful name like
+  `iso-2022-jp`, or an unknown name — the readable ASCII-compatible charsets `utf-8`/`utf8`,
+  `us-ascii`/`ascii`, `iso-8859-1` through `iso-8859-11` and `iso-8859-13` through
+  `iso-8859-16` (there is no iso-8859-12), and `windows-1250` through `windows-1258`,
+  matched by exact published name, are inspected like any other body) is
+  forwarded byte-identical — an echoed credential inside such a body reaches the
+  caller, and an event-stream boundary can split an echo across events; each class
+  logs one warning per route. The matcher reads UTF-8/ASCII bytes: a secret that
+  contains non-ASCII characters is matched only in its UTF-8 bytes. Alias spellings such as
+  latin1, l1, iso8859-1 and cp1252 are not on the readable list. With the fail-closed option
+  they are refused; in the default mode their bytes are searched as-is, which finds a plain
+  ASCII echo but is not guaranteed. Declare the canonical name. The gate reads the DECLARED
+  charset, never the bytes: a response that misreports its charset is not detected.
+  `CredProx:Scrubbing:FailClosed=true`
+  (default `false`) refuses those responses instead of forwarding them: a
+  `credprox.response_uninspectable` problem response replaces the body, a refused
+  success or redirect is answered `502`, and a vendor 4xx/5xx keeps its status; a
+  refusal logs one warning that says the body was refused, naming the class and the
+  route. A response with no body — an empty body, a `HEAD` response, a bodiless
+  redirect — is never refused (a declared non-zero `Content-Length` counts as a
+  body except on a `HEAD`, where the method alone decides), so redirects keep working with the option on. `FailClosed` requires
+  `CredProx:Scrubbing:Enabled=true`; the combination with scrubbing off is rejected
+  at startup.
+- **The caller's own `Authorization` and `Cookie` do not ride to the vendor.** Header
+  hygiene removes them — alongside the presented credential, the caller-auth key and
+  the partition header — on every route; the credential CredProx itself attaches fills
+  the vendor's `Authorization` slot after the strip, and the caller's other headers
+  flow unchanged. A route that genuinely needs the caller's own `Authorization` or
+  `Cookie` opts out with route metadata `CredProx.CallerHeaderStrip = "off"`; YARP's
+  `RequestHeaderRemove` transform (one entry per header) remains the opposite door —
+  both proven end-to-end in the test host.
 
 ## Contributing
 

@@ -11,7 +11,12 @@ the behavior is covered, the change is done.
   (`net10.0`); there is no multi-targeting.
 - Docker — needed for the E2E tests (Keycloak, nginx mTLS) and most samples.
 
+On a fresh clone, pack the libraries into the local feed first: the samples in the
+solution consume CredProx as packages from `artifacts/packages`, so the solution build
+cannot restore them until that feed exists.
+
 ```bash
+for p in src/*/; do dotnet pack "$p" -c Release -o artifacts/packages; done
 dotnet build CredProx.slnx -c Release   # must stay 0 warnings / 0 errors
 ```
 

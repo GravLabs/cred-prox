@@ -10,7 +10,7 @@ namespace CredProx;
 /// the message, so a shared cluster client can serve routes with different credentials.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class TokenRefreshTargets
+internal sealed class TokenRefreshTargets
 {
     /// <summary>Creates the triple.</summary>
     /// <param name="acquire">Obtains the current credential value (typically through the token cache).</param>

@@ -16,6 +16,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fuzz target homes agree
+        run: bash tests/CredProx.Fuzz/check-targets-agree.sh
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:

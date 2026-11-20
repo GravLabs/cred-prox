@@ -14,7 +14,7 @@ namespace CredProx;
 /// values; <see cref="GetChangeToken"/> fires on each reload.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class ConfigurationSecretSource : ISecretSource, IConfigurationBackedSecretSource
+internal sealed class ConfigurationSecretSource : ISecretSource, IConfigurationBackedSecretSource
 {
     /// <summary>The configuration section that holds secret values, keyed by reference name.</summary>
     public const string SecretsSection = "CredProx:Secrets";

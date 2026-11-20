@@ -3,6 +3,7 @@ using System.Text.Json;
 using CredProx;
 using CredProx.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace CredProx.Tests;
@@ -34,6 +35,10 @@ public sealed class CredentialAttachFeatureTests
     public sealed class RecordingOptions : IHasAttachment, IHasPartitionConfig, IHasConnection
     {
         public string Value { get; set; } = "recorded-token";
+
+        // A secret-bearing member, so consent-path pins can configure a credential's own
+        // secret the same way the built-in providers' options hold theirs (by name).
+        public string? Secret { get; set; }
 
         public PartitionConfigOptions? Partition { get; set; }
 
@@ -70,6 +75,80 @@ public sealed class CredentialAttachFeatureTests
         }
     }
 
+    /// <summary>
+    /// Drives the consent guard over the REAL <see cref="LoginExchangeOptions"/> shape:
+    /// that options type nests its credentials one level (Basic/Form), which is exactly
+    /// what the by-name walk's inner level exists for. Test-local because the real
+    /// provider would attempt a login rather than raise consent.
+    /// </summary>
+    public sealed class LoginConsentProvider : ICredentialProvider<LoginExchangeOptions>
+    {
+        public string Type => "LoginConsent";
+
+        public Exception? FailWith { get; set; }
+
+        public ValueTask<string> GetCredentialAsync(
+            LoginExchangeOptions options,
+            ISecretAccessor secrets,
+            CredentialRequestContext context,
+            CancellationToken cancellationToken)
+        {
+            if (FailWith is not null)
+            {
+                throw FailWith;
+            }
+
+            return new ValueTask<string>("unused");
+        }
+    }
+
+    /// <summary>
+    /// The plugin contract's shape (samples/CustomPlugin): a custom provider's option
+    /// type with ARBITRARY member names. The by-name configured-secret arm catches the
+    /// listed name and NOT the unlisted one — the documented honest limit.
+    /// </summary>
+    public sealed class PluginConsentOptions : IHasAttachment, IHasPartitionConfig, IHasConnection
+    {
+        public string Value { get; set; } = "plugin-token";
+
+        /// <summary>A listed member name: the by-name arm sees it.</summary>
+        public string? ClientSecret { get; set; }
+
+        /// <summary>An unlisted member name: documented not covered by the name list.</summary>
+        public string? ApiKey { get; set; }
+
+        public PartitionConfigOptions? Partition { get; set; }
+
+        public string? Connection { get; set; }
+
+        CredentialLocation IHasAttachment.Location => CredentialLocation.Header;
+
+        string IHasAttachment.Name => "X-Plugin";
+
+        string? IHasAttachment.Prefix => null;
+    }
+
+    public sealed class PluginConsentProvider : ICredentialProvider<PluginConsentOptions>
+    {
+        public string Type => "PluginConsent";
+
+        public Exception? FailWith { get; set; }
+
+        public ValueTask<string> GetCredentialAsync(
+            PluginConsentOptions options,
+            ISecretAccessor secrets,
+            CredentialRequestContext context,
+            CancellationToken cancellationToken)
+        {
+            if (FailWith is not null)
+            {
+                throw FailWith;
+            }
+
+            return new ValueTask<string>(options.Value);
+        }
+    }
+
     private readonly RecordingCache _cache = new();
 
     private (ServiceProvider Services, CredentialAttachFeature Feature, RecordingProvider Provider) Build(
@@ -92,6 +171,50 @@ public sealed class CredentialAttachFeatureTests
             _cache,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CredentialAttachFeature>.Instance);
         return (provider, feature, provider.GetRequiredService<RecordingProvider>());
+    }
+
+    private (ServiceProvider Services, CredentialAttachFeature Feature, LoginConsentProvider Provider) BuildLoginConsent(
+        params (string Key, string? Value)[] credProxEntries)
+    {
+        var configuration = TestConfig.Root(
+            credProxEntries.Select(e => ("CredProx:" + e.Key, e.Value)).ToArray());
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentialType<LoginConsentProvider, LoginExchangeOptions>("LoginConsent");
+        services.AddCredProxCredentials(configuration);
+        services.AddSingleton<ITokenCache>(_cache);
+        var provider = services.BuildServiceProvider();
+
+        var feature = new CredentialAttachFeature(
+            provider.GetRequiredService<CredentialRegistryProvider>(),
+            _cache,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CredentialAttachFeature>.Instance);
+        return (provider, feature, provider.GetRequiredService<LoginConsentProvider>());
+    }
+
+    private (ServiceProvider Services, CredentialAttachFeature Feature, PluginConsentProvider Provider) BuildPlugin(
+        params (string Key, string? Value)[] credProxEntries)
+    {
+        var configuration = TestConfig.Root(
+            credProxEntries.Select(e => ("CredProx:" + e.Key, e.Value)).ToArray());
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentialType<PluginConsentProvider, PluginConsentOptions>("PluginConsent");
+        services.AddCredProxCredentials(configuration);
+        services.AddSingleton<ITokenCache>(_cache);
+        var provider = services.BuildServiceProvider();
+
+        var feature = new CredentialAttachFeature(
+            provider.GetRequiredService<CredentialRegistryProvider>(),
+            _cache,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CredentialAttachFeature>.Instance);
+        return (provider, feature, provider.GetRequiredService<PluginConsentProvider>());
     }
 
     private static readonly Dictionary<string, string> AttachRoute =
@@ -593,6 +716,519 @@ public sealed class CredentialAttachFeatureTests
         Assert.DoesNotContain("user:pass", M4Contexts.ResponseBody(context), StringComparison.Ordinal);
     }
 
+    // ---- M47 finding F-9: the query rides, a query that carries a secret does not ----
+
+    [Theory]
+    [InlineData("https://id.example/authorize?client_id=demo&client_secret=TOPSECRET&state=xyz", "client_secret", "TOPSECRET")]
+    [InlineData("https://id.example/authorize?client_assertion=JWTVALUE", "client_assertion", "JWTVALUE")]
+    [InlineData("https://id.example/authorize?assertion=SAMLVALUE", "assertion", "SAMLVALUE")]
+    [InlineData("https://id.example/authorize?password=login-pw", "password", "login-pw")]
+    [InlineData("https://id.example/authorize?Client_Secret=TOPSECRET", "Client_Secret", "TOPSECRET")] // name match is case-insensitive
+    public async Task ConsentProblem_OmitsAuthorizeUrl_WhenQueryCarriesKnownSecretParameter(
+        string url, string parameterName, string secretValue)
+    {
+        // F-9: a provider-supplied authorize URL whose query carries one of the wire
+        // secret names the credential providers send is not relayed, whatever its
+        // value — the name itself marks a leak.
+        Assert.Contains(parameterName, url, StringComparison.Ordinal);
+        var (_, feature, recording) = Build(("Credentials:contoso:Type", "Recording"));
+        recording.FailWith = new ConsentRequiredException(url, "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.Equal(401, context.Response.StatusCode);
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        var extensions = problem.RootElement.GetProperty("extensions");
+        Assert.Equal("credprox.consent_required", extensions.GetProperty("code").GetString());
+        Assert.False(extensions.TryGetProperty("authorize_url", out _));
+        Assert.DoesNotContain(secretValue, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_OmitsAuthorizeUrl_WhenQueryValueMatchesAnInjectedSecret()
+    {
+        // F-9: reuse the scrubber's registered values — a query parameter carrying a
+        // secret this pipeline injected (whatever the parameter is called) is a leak.
+        const string Injected = "injected-wire-secret-1";
+        var (_, feature, recording) = Build(("Credentials:contoso:Type", "Recording"));
+        recording.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&token=" + Injected, "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        CredProxInjectedSecrets.GetOrCreate(context).Register(Injected);
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.False(
+            problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+        Assert.DoesNotContain(Injected, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_OmitsAuthorizeUrl_WhenPercentEncodedQueryValueCarriesAnInjectedSecret()
+    {
+        // Matching reads the percent-decoded form too (the scrubber registers both
+        // forms): containment, not just exact equality.
+        const string Injected = "injected-wire-secret-2";
+        var (_, feature, recording) = Build(("Credentials:contoso:Type", "Recording"));
+        recording.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?state=ctx%20" + Uri.EscapeDataString(Injected), "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        CredProxInjectedSecrets.GetOrCreate(context).Register(Injected);
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.False(
+            problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+    }
+
+    [Fact]
+    public async Task ConsentProblem_RidesThePlausibleAuthorizationCodeQuery_Intact()
+    {
+        // F-9 must not break the consent flow: client_id, redirect_uri and state are
+        // exactly what the entry point needs, and a registered secret that appears
+        // nowhere in the values changes nothing.
+        const string Plausible = "https://id.example/authorize?client_id=demo&redirect_uri=https%3A%2F%2Fapp.example%2Fcb&state=xyz";
+        var (_, feature, recording) = Build(("Credentials:contoso:Type", "Recording"));
+        recording.FailWith = new ConsentRequiredException(Plausible, "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        CredProxInjectedSecrets.GetOrCreate(context).Register("some-registered-secret");
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.Equal(Plausible,
+            problem.RootElement.GetProperty("extensions").GetProperty("authorize_url").GetString());
+    }
+
+    [Fact]
+    public async Task ConsentProblem_LogsDroppedAuthorizeUrl_ByParameterNamesOnly()
+    {
+        // F-9: the operator hears which parameters carried a secret — names only,
+        // never values.
+        var logs = new Capturing();
+        var configuration = TestConfig.Root(("CredProx:Credentials:contoso:Type", "Recording"));
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentialType<RecordingProvider, RecordingOptions>("Recording");
+        services.AddCredProxCredentials(configuration);
+        services.AddSingleton<ITokenCache>(_cache);
+        var provider = services.BuildServiceProvider();
+        var feature = new CredentialAttachFeature(
+            provider.GetRequiredService<CredentialRegistryProvider>(),
+            _cache,
+            logs);
+        var recording = provider.GetRequiredService<RecordingProvider>();
+        recording.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&client_secret=TOPSECRET&state=xyz", "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        await feature.ApplyAsync(context, default);
+
+        var warning = Assert.Single(logs.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("client_secret", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("TOPSECRET", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("authorize_url", warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_LogsTheParameterName_WhenOnlyTheDecodedValueCarriesTheSecret()
+    {
+        // F-4: the per-parameter decode exists so the log can NAME the parameter. A
+        // space-encoded secret under an ordinary 'state' name is invisible to the raw
+        // arm; the decoded arm still drops the URL (the whole-URL fallback would drop
+        // it anyway) but attributes it to 'state', not 'path-or-fragment'. The secret
+        // must be the CONFIGURED one: the injected registry also stores each value's
+        // escaped form (CredProxInjectedSecrets.Register), so an injected secret is
+        // raw-visible and cannot witness the decode arm.
+        var logs = new Capturing();
+        var configuration = TestConfig.Root(
+            ("CredProx:Credentials:contoso:Type", "Recording"),
+            ("CredProx:Credentials:contoso:Secret", "cfg wire s3cret"));
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentialType<RecordingProvider, RecordingOptions>("Recording");
+        services.AddCredProxCredentials(configuration);
+        services.AddSingleton<ITokenCache>(_cache);
+        var provider = services.BuildServiceProvider();
+        var feature = new CredentialAttachFeature(
+            provider.GetRequiredService<CredentialRegistryProvider>(),
+            _cache,
+            logs);
+        var recording = provider.GetRequiredService<RecordingProvider>();
+        recording.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&state=cfg%20wire%20s3cret", "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using (var problem = JsonDocument.Parse(body))
+        {
+            Assert.False(
+                problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+        }
+
+        var warning = Assert.Single(logs.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("state", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("path-or-fragment", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("cfg wire s3cret", warning.Message, StringComparison.Ordinal);
+    }
+
+    // ---- M47 F-9 widened: the guard scans the whole URL, knows the credential's own
+    // configured secrets, and over-refuses nothing the flow needs ----
+
+    [Theory]
+    // H2: a top-level query or fragment parameter NAME that contains secret, assertion
+    // or password (case-insensitive containment), or is exactly access_token or
+    // refresh_token, marks a leak whatever its value. ';' separates parameters too.
+    [InlineData("https://id.example/authorize?client_id=demo&client-secret=TOPSECRET")]
+    [InlineData("https://id.example/authorize?client_id=demo&clientSecret=TOPSECRET")]
+    [InlineData("https://id.example/authorize?client_id=demo&secret=TOPSECRET")]
+    [InlineData("https://id.example/authorize?client_id=demo&client_secret_value=TOPSECRET")]
+    [InlineData("https://id.example/authorize?id=1;client_secret=TOPSECRET")]
+    [InlineData("https://id.example/authorize?client_id=demo#access_token=TOPSECRET")]
+    [InlineData("https://id.example/authorize#refresh_token=TOPSECRET")]
+    [InlineData("https://id.example/authorize?client_id=demo#state=x&assertion=SAMLVALUE")]
+    public async Task ConsentProblem_OmitsAuthorizeUrl_WhenParameterNameMarksASecret(string url)
+    {
+        var (_, feature, recording) = Build(("Credentials:contoso:Type", "Recording"));
+        recording.FailWith = new ConsentRequiredException(url, "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.Equal("credprox.consent_required",
+            problem.RootElement.GetProperty("extensions").GetProperty("code").GetString());
+        Assert.False(
+            problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+        Assert.DoesNotContain("TOPSECRET", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_OmitsAuthorizeUrl_WhenPathSegmentCarriesAConfiguredSecret()
+    {
+        // Low-2: the guard read the query only; a secret in the PATH or FRAGMENT relays.
+        // The value scan covers the whole URL, and on a first consent it must know the
+        // credential's OWN configured secret — the injected registry is still empty.
+        const string Configured = "cfg-wire-secret-99";
+        var (_, feature, recording) = Build(
+            ("Credentials:contoso:Type", "Recording"),
+            ("Credentials:contoso:Secret", Configured));
+        recording.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize/" + Configured + "?client_id=demo", "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.False(
+            problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+        Assert.DoesNotContain(Configured, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_OmitsAuthorizeUrl_WhenFirstAttemptEchoesConfiguredSecret()
+    {
+        // Low-1: first attempt, no credential ever obtained, so CredProxInjectedSecrets
+        // is empty — an arbitrary-name echo of the credential's configured secret under
+        // 'state' must still refuse, from the configured value alone.
+        const string Configured = "cfg-wire-secret-77";
+        var (_, feature, recording) = Build(
+            ("Credentials:contoso:Type", "Recording"),
+            ("Credentials:contoso:Secret", Configured));
+        recording.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&state=" + Uri.EscapeDataString(Configured),
+            "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        // The guard must leave the request's secret registry EMPTY — registering the
+        // configured secret early would make never-credential'd requests scrubbable
+        // and refusable (the scrubber's HasAny gate and FailClosed both key on it).
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(CredProxInjectedSecrets.GetOrCreate(context).HasAny);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.False(
+            problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+        Assert.DoesNotContain(Configured, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_OmitsAuthorizeUrl_WhenFirstAttemptEchoesNestedLoginPassword()
+    {
+        // Round-2 F-3: the by-name walk reaches ONE nesting level, and the login options
+        // are exactly that shape — LoginExchangeOptions nests its password under Basic —
+        // so a login credential's own nested password is visible to the guard on a first
+        // attempt with an empty injected registry. Made inert, the inner level has no
+        // other witness anywhere in the suite.
+        const string Nested = "pw-nested-login-42";
+        var (_, feature, login) = BuildLoginConsent(
+            ("Credentials:contoso:Type", "LoginConsent"),
+            ("Credentials:contoso:Basic:User", "svc@example.com"),
+            ("Credentials:contoso:Basic:Password", Nested));
+        login.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&state=" + Uri.EscapeDataString(Nested),
+            "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        await feature.ApplyAsync(context, default);
+
+        Assert.False(CredProxInjectedSecrets.GetOrCreate(context).HasAny);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.False(
+            problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+        Assert.DoesNotContain(Nested, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_OmitsAuthorizeUrl_WhenPluginShapedOptionsUseAListedMemberName()
+    {
+        // F-2 pin (caught): a plugin-contract provider whose options follow the naming
+        // convention — the guard sees the configured value by name on a first attempt.
+        const string Listed = "plg-listed-77";
+        var (_, feature, plugin) = BuildPlugin(
+            ("Credentials:contoso:Type", "PluginConsent"),
+            ("Credentials:contoso:ClientSecret", Listed));
+        plugin.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&state=" + Listed, "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.False(
+            problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+        Assert.DoesNotContain(Listed, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_Relays_WhenPluginShapedOptionsUseAnUnlistedMemberName()
+    {
+        // F-2 pin (documented limit): a plugin that names its member ApiKey instead of a
+        // listed name is NOT caught by the configured-value arm — plugin option shapes
+        // are arbitrary and the by-name match is best-effort. The general guard is the
+        // parameter-NAME rule (name this parameter client_secret/assertion/password and
+        // it drops regardless), and the plugin must never put its secret into an
+        // authorize URL. This pin fixes the limit so a later change that widens or
+        // narrows the name list is a conscious edit here, not a silent drift.
+        const string Unlisted = "plg-unlisted-13";
+        var (_, feature, plugin) = BuildPlugin(
+            ("Credentials:contoso:Type", "PluginConsent"),
+            ("Credentials:contoso:ApiKey", Unlisted));
+        var url = "https://id.example/authorize?client_id=demo&state=" + Unlisted;
+        plugin.FailWith = new ConsentRequiredException(url, "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.Equal(
+            url, problem.RootElement.GetProperty("extensions").GetProperty("authorize_url").GetString());
+    }
+
+    [Theory]
+    // H2 over-refusal guard: these are what a working consent flow needs. The NAME rule
+    // reads top-level parameter names only, never paths or values — 'token' alone is not
+    // a secret word, and 'password' inside a PATH or inside another parameter's VALUE
+    // changes nothing.
+    [InlineData("https://id.example/authorize?client_id=demo&redirect_uri=https%3A%2F%2Fapp.example%2Fcb&state=xyz&scope=openid%20profile&nonce=n1&response_type=code&prompt=consent&code_challenge=E9Me&code_challenge_method=S256&id_token_hint=hint&login_hint=user%40example.com&token=opaque-op")]
+    [InlineData("https://id.example/authorize_passwordless?client_id=demo")]
+    [InlineData("https://id.example/authorize?client_id=demo&redirect_uri=https%3A%2F%2Fapp.example%2Fcb%3Fpassword_hint%3Dabc%26login_hint%3Dme")]
+    public async Task ConsentProblem_RidesTheParametersAConsentFlowNeeds(string url)
+    {
+        var (_, feature, recording) = Build(("Credentials:contoso:Type", "Recording"));
+        recording.FailWith = new ConsentRequiredException(url, "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+
+        await feature.ApplyAsync(context, default);
+
+        var body = M4Contexts.ResponseBody(context);
+        using var problem = JsonDocument.Parse(body);
+        Assert.Equal(url,
+            problem.RootElement.GetProperty("extensions").GetProperty("authorize_url").GetString());
+    }
+
+    [Fact]
+    public async Task ConsentProblem_RelaysUnsetOptionalSecret_SelectivelyRefusesConfiguredValue()
+    {
+        // An unset optional secret is no value to match, and a configured secret
+        // refuses ONLY when its own value appears — client_id=demo still relays.
+        const string Configured = "cfg-wire-secret-55";
+        var (_, feature, recording) = Build(
+            ("Credentials:contoso:Type", "Recording"),
+            ("Credentials:contoso:Secret", Configured));
+        recording.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&state=xyz", "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        await feature.ApplyAsync(context, default);
+
+        using (var problem = JsonDocument.Parse(M4Contexts.ResponseBody(context)))
+        {
+            Assert.Equal("https://id.example/authorize?client_id=demo&state=xyz",
+                problem.RootElement.GetProperty("extensions").GetProperty("authorize_url").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task ConsentProblem_Relays_WhenConfiguredSecretIsWhitespaceOnly()
+    {
+        // A whitespace-only configured secret is an unconfigured optional secret. It is
+        // SKIPPED, not matched — an entry that any URL contains would refuse every
+        // consent flow. (Availability, deliberately ahead of the scrubber's behaviour.)
+        var logs = new Capturing();
+        var configuration = TestConfig.Root(
+            ("CredProx:Credentials:contoso:Type", "Recording"),
+            ("CredProx:Credentials:contoso:Secret", "   "));
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentialType<RecordingProvider, RecordingOptions>("Recording");
+        services.AddCredProxCredentials(configuration);
+        services.AddSingleton<ITokenCache>(_cache);
+        var provider = services.BuildServiceProvider();
+        var feature = new CredentialAttachFeature(
+            provider.GetRequiredService<CredentialRegistryProvider>(),
+            _cache,
+            logs);
+        provider.GetRequiredService<RecordingProvider>().FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&state=xyz", "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        await feature.ApplyAsync(context, default);
+
+        using var problem = JsonDocument.Parse(M4Contexts.ResponseBody(context));
+        Assert.Equal("https://id.example/authorize?client_id=demo&state=xyz",
+            problem.RootElement.GetProperty("extensions").GetProperty("authorize_url").GetString());
+    }
+
+    [Fact]
+    public async Task ConsentProblem_Relays_WhenConfiguredSecretIsEmpty()
+    {
+        // An empty configured secret is an unconfigured one. Matched, an empty string
+        // is contained in every URL — it would refuse every consent flow. It is
+        // skipped, and the consent URL rides.
+        var (_, feature, recording) = Build(
+            ("Credentials:contoso:Type", "Recording"),
+            ("Credentials:contoso:Secret", string.Empty));
+        recording.FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&state=xyz", "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        await feature.ApplyAsync(context, default);
+
+        using var problem = JsonDocument.Parse(M4Contexts.ResponseBody(context));
+        Assert.Equal("https://id.example/authorize?client_id=demo&state=xyz",
+            problem.RootElement.GetProperty("extensions").GetProperty("authorize_url").GetString());
+    }
+
+    [Fact]
+    public async Task ConsentProblem_RefusesShortConfiguredSecret_AsIntended_AndNamesTheCredential()
+    {
+        // Parity with the scrubber, which registers short values as eagerly as long
+        // ones: a deliberately short configured secret contains-match's ordinary
+        // consent URLs and refuses them. That fail-closed cost is INTENDED — the
+        // operator sees which credential caused it, so the refusal's warning names it.
+        var logs = new Capturing();
+        var configuration = TestConfig.Root(
+            ("CredProx:Credentials:contoso:Type", "Recording"),
+            ("CredProx:Credentials:contoso:Secret", "ab"));
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentialType<RecordingProvider, RecordingOptions>("Recording");
+        services.AddCredProxCredentials(configuration);
+        services.AddSingleton<ITokenCache>(_cache);
+        var provider = services.BuildServiceProvider();
+        var feature = new CredentialAttachFeature(
+            provider.GetRequiredService<CredentialRegistryProvider>(),
+            _cache,
+            logs);
+        provider.GetRequiredService<RecordingProvider>().FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?client_id=demo&state=abc123", "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        await feature.ApplyAsync(context, default);
+
+        using var problem = JsonDocument.Parse(M4Contexts.ResponseBody(context));
+        Assert.False(
+            problem.RootElement.GetProperty("extensions").TryGetProperty("authorize_url", out _));
+        var warning = Assert.Single(logs.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("contoso", warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsentProblem_LogsDroppedSecretBearingNames_Escaped()
+    {
+        // Info-2: provider-chosen parameter names are attacker text. The warning may
+        // carry them only escaped — never a raw newline the provider picked, never a
+        // value.
+        const string Injected = "injected-wire-secret-3";
+        var logs = new Capturing();
+        var configuration = TestConfig.Root(("CredProx:Credentials:contoso:Type", "Recording"));
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentialType<RecordingProvider, RecordingOptions>("Recording");
+        services.AddCredProxCredentials(configuration);
+        services.AddSingleton<ITokenCache>(_cache);
+        var provider = services.BuildServiceProvider();
+        var feature = new CredentialAttachFeature(
+            provider.GetRequiredService<CredentialRegistryProvider>(),
+            _cache,
+            logs);
+        provider.GetRequiredService<RecordingProvider>().FailWith = new ConsentRequiredException(
+            "https://id.example/authorize?x=1&"
+            + Uri.EscapeDataString("ok\n[FORGED] credprox=never_happened") + "=" + Injected,
+            "consent");
+
+        var context = M4Contexts.Create(out _, AttachRoute);
+        CredProxInjectedSecrets.GetOrCreate(context).Register(Injected);
+        await feature.ApplyAsync(context, default);
+
+        var warning = Assert.Single(logs.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("contoso", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Injected, warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("[FORGED]", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("credprox=never_happened", warning.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ConsentException_OnDelegatedCredential_MapsToConsentNotInboundToken()
     {
@@ -691,5 +1327,25 @@ public sealed class CredentialAttachFeatureTests
         Assert.Equal(
             "https://vendor.example/v1/data",
             proxyRequest.RequestUri!.GetLeftPart(UriPartial.Path));
+    }
+
+    /// <summary>Minimal <see cref="ILogger{TCategoryName}"/> capture for the
+    /// feature constructor argument.</summary>
+    private sealed class Capturing : ILogger<CredentialAttachFeature>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

@@ -20,7 +20,7 @@ namespace CredProx;
 /// reports a name that does not resolve when it is requested.
 /// </remarks>
 [Experimental("CREDPROX001")]
-public sealed class SecretReferenceValidator
+internal sealed class SecretReferenceValidator
 {
     private readonly ISecretSource _source;
 

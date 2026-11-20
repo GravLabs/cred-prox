@@ -36,7 +36,7 @@ public sealed class ConnectionRegistryProvider
     /// <exception cref="Microsoft.Extensions.Options.OptionsValidationException">
     /// The initial bind fails — startup fails.
     /// </exception>
-    public ConnectionRegistryProvider(
+    internal ConnectionRegistryProvider(
         ConnectionBinder binder,
         ISecretSource secretSource,
         ILogger<ConnectionRegistryProvider> logger)

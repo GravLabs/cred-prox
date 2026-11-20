@@ -84,6 +84,22 @@ docker run --rm \
   -v "$FINDINGS:/work/findings" \
   -e FUZZ_SECONDS="$BUDGET" \
   "$IMAGE" bash /work/spike.sh "$TARGET" > "$FINDINGS/pass.log" 2>&1
+RUN_RC=$?
+
+# The container's exit code is the first fact about the run. Dropping it (measured
+# 2026-11-20, qitem-20261120031636-7499bc7183b0f7e9) made an in-container SPIKE-FAIL -
+# e.g. the instrument step refusing an assembly - surface only as done=0 with three
+# causes that were not the real one, because a container that dies before afl starts
+# looks identical to a run afl had to kill.
+if [ "$RUN_RC" != "0" ]; then
+  echo "NIGHTLY-FUZZ-FAIL $TARGET fuzz container exited rc=$RUN_RC (pass.log above)"
+  SPIKE_FAIL_LINE=$(grep -m1 'SPIKE-FAIL' "$FINDINGS/pass.log" 2>/dev/null || true)
+  if [ -n "$SPIKE_FAIL_LINE" ]; then
+    echo "NIGHTLY-FUZZ-FAIL $TARGET container reported: $SPIKE_FAIL_LINE"
+  else
+    echo "NIGHTLY-FUZZ-FAIL $TARGET no SPIKE-FAIL marker in pass.log: the container died outside the spike script (rc=$RUN_RC names it)"
+  fi
+fi
 
 # The container writes findings as root; upload-artifact runs as the runner user,
 # so make the tree (crash inputs included) readable before this step exits.
@@ -110,8 +126,16 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
 fi
 
 fail=0
+if [ "$RUN_RC" != "0" ]; then
+  echo "NIGHTLY-FUZZ-FAIL $TARGET run failed at the container, not at afl - see the rc line above"
+  fail=1
+fi
 if [ "${done_marker:-0}" != "1" ]; then
-  echo "NIGHTLY-FUZZ-FAIL $TARGET afl never reached its time-box (killed, OOM, or exec overrun)"
+  if [ "$RUN_RC" = "0" ]; then
+    echo "NIGHTLY-FUZZ-FAIL $TARGET afl never reached its time-box (killed, OOM, or exec overrun)"
+  else
+    echo "NIGHTLY-FUZZ-FAIL $TARGET no time-box marker: the container exited rc=$RUN_RC before afl reported DONE"
+  fi
   fail=1
 fi
 if [ "${execs:-0}" -eq 0 ]; then

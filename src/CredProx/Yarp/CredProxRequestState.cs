@@ -167,7 +167,7 @@ public sealed class CredProxRequestState
     public string? Partition { get; internal set; }
 
     /// <summary>The admitted destination entry, when a destination feature resolved one.</summary>
-    public DestinationEntry? Destination { get; internal set; }
+    internal DestinationEntry? Destination { get; set; }
 
     /// <summary>
     /// Set once a feature short-circuited the request; the pipeline stops and the forward

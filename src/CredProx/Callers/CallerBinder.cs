@@ -20,7 +20,7 @@ namespace CredProx;
 /// <c>CredProx.CallerTokens</c>. A 0.11.0 configuration binds unchanged.
 /// </remarks>
 [Experimental("CREDPROX001")]
-public sealed class CallerBinder
+internal sealed class CallerBinder
 {
     private readonly IConfiguration _configuration;
     private readonly IReadOnlyList<ICallerRegistryValidator> _validators;

@@ -29,7 +29,7 @@ namespace CredProx;
 /// </para>
 /// </remarks>
 [Experimental("CREDPROX001")]
-public sealed class TokenRefreshHandler : DelegatingHandler
+internal sealed class TokenRefreshHandler : DelegatingHandler
 {
     private readonly Func<HttpRequestMessage, TokenRefreshTargets?> _resolveTargets;
     private readonly bool _acquireOnSend;

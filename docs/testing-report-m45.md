@@ -27,8 +27,9 @@ Run: `tools/m33-soak` FULL mode (`scripts/run-soak.sh`), 2026-11-19
   credentials or scrubbing. The key VALUES were correct (each run key hashes
   to its configured `KeyHash`); the header NAME was the defect.
 - Evidence: `logs/soakhost.log` contains exactly 993,604 lines
-  "Not Proxying, a 401 response was set by the transforms." with the matching
-  "CredProxCallerKey was not authenticated" failure — one per iteration
+  "Not Proxying, a 401 response was set by the transforms." and 1,987,210
+  "CredProxCallerKey was not authenticated" lines — TWO per refused iteration
+  plus the 2 boot-window lines (2 x 993,604 + 2), not one per iteration
   (`iterations.count = http_reqs.count = 993,604`). Mean response 313 B — a
   401 body, not an echoed vendor payload.
 - `journal/wiremock.json`: 1,444 requests, 1,443 of them the Key Vault stub

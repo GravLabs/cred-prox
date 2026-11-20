@@ -379,6 +379,52 @@ public sealed class ConfigKeyValidationTests
     }
 
     [Fact]
+    public void FailClosedWithoutScrubbingEnabled_FailsStartup_NamingBothKeysAndTheFix()
+    {
+        // M47 F-3: FailClosed=true with Scrubbing Enabled=false is a contradiction —
+        // with scrubbing off nothing is ever inspected, so the knob cannot fail
+        // anything. It used to bind silently and log nothing (P2: the echo forwarded
+        // byte-identical with the option ON). Rejected at startup now, naming both
+        // keys and the fix.
+        var services = new ServiceCollection();
+        var config = Root(new Dictionary<string, string?>
+        {
+            ["CredProx:Scrubbing:Enabled"] = "false",
+            ["CredProx:Scrubbing:FailClosed"] = "true",
+        });
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => services.AddReverseProxy().AddCredProx(config));
+
+        Assert.Contains("CredProx:Scrubbing:FailClosed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("CredProx:Scrubbing:Enabled", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Enabled=true", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null, null)]     // defaults
+    [InlineData("false", null)]  // scrubbing off alone stays legal (opt-out, M20)
+    [InlineData(null, "true")]   // fail-closed alone stays legal
+    [InlineData("true", "true")] // the intended combination
+    public void ScrubbingOptionCombinations_ExceptTheContradiction_StartupIsAccepted(
+        string? enabled, string? failClosed)
+    {
+        var services = new ServiceCollection();
+        var entries = new Dictionary<string, string?>();
+        if (enabled is not null)
+        {
+            entries["CredProx:Scrubbing:Enabled"] = enabled;
+        }
+
+        if (failClosed is not null)
+        {
+            entries["CredProx:Scrubbing:FailClosed"] = failClosed;
+        }
+
+        services.AddReverseProxy().AddCredProx(Root(entries)); // must not throw
+    }
+
+    [Fact]
     public void EveryKnownSection_RootAcceptsTheWholeTopology()
     {
         var services = new ServiceCollection();

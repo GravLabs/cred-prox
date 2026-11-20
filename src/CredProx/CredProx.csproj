@@ -20,6 +20,9 @@
     <InternalsVisibleTo Include="CredProx.Benchmarks" />
     <!-- M31 (plan 5.4): coverage-guided fuzz harnesses target internal gates directly. -->
     <InternalsVisibleTo Include="CredProx.Fuzz" />
+    <!-- The conformance project dogfoods the shipped suites against the built-ins,
+         which are internal since the 1.0 surface freeze. -->
+    <InternalsVisibleTo Include="CredProx.ConformanceTests" />
   </ItemGroup>
 
   <PropertyGroup>

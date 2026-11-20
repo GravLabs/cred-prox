@@ -137,7 +137,7 @@ public sealed class CredentialRegistryProviderTests
         var entries = Entries();
         entries["CredProx:Credentials:obo:Type"] = "TokenExchange";
         entries["CredProx:Credentials:obo:Authority"] = "https://issuer.example/";
-        entries["CredProx:Credentials:obo:Audience"] = "api://credprox";
+        entries["CredProx:Credentials:obo:InboundAudience"] = "api://credprox";
         entries["CredProx:Credentials:obo:ClientId"] = "client";
         entries["CredProx:Credentials:obo:Mode"] = "EntraObo";
 
@@ -155,7 +155,7 @@ public sealed class CredentialRegistryProviderTests
         var entries = Entries();
         entries["CredProx:Credentials:obo:Type"] = "TokenExchange";
         entries["CredProx:Credentials:obo:Authority"] = "https://issuer.example/";
-        entries["CredProx:Credentials:obo:Audience"] = "api://credprox";
+        entries["CredProx:Credentials:obo:InboundAudience"] = "api://credprox";
         entries["CredProx:Credentials:obo:ClientId"] = "client";
         entries["CredProx:Credentials:obo:Mode"] = "1";
 

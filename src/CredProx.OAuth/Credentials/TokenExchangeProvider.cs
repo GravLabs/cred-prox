@@ -155,7 +155,7 @@ public sealed class TokenExchangeProvider : ICredentialProvider<TokenExchangeOpt
         string inbound,
         CancellationToken cancellationToken)
     {
-        var audience = await ExpandRequired(options.Audience!, context.Partition, secrets, cancellationToken)
+        var audience = await ExpandRequired(options.InboundAudience!, context.Partition, secrets, cancellationToken)
             .ConfigureAwait(false);
 
         IEnumerable<SecurityKey>? signingKeys;

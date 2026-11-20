@@ -50,8 +50,10 @@ public sealed class CredentialRequestContext
     /// <summary>
     /// The effective token-cache partition the provider used for this request, recorded by
     /// providers whose cache key goes beyond <c>(credential, partition)</c> — for example
-    /// <c>TokenExchange</c>, which keys per user subject. The core's refresh-on-401
-    /// invalidation drops <c>CachePartition ?? Partition</c>, so a downstream 401 evicts the
+    /// <c>TokenExchange</c>, which keys per user subject. A provider sets this during its
+    /// credential call; the core reads it once when that call returns, so a later write has
+    /// no effect on the request already under way. The core's refresh-on-401 invalidation
+    /// drops <c>CachePartition ?? Partition</c>, so a downstream 401 evicts the
     /// right per-user entry. <see langword="null"/> (the default) keeps the plain
     /// <c>(credential, partition)</c> invalidation every other provider uses.
     /// </summary>

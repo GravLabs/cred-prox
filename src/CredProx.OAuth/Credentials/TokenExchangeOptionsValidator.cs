@@ -4,7 +4,7 @@ namespace CredProx;
 
 /// <summary>
 /// Startup validation for <see cref="TokenExchangeOptions"/>: a validation source
-/// (Authority or Issuer+JwksUri), the mandatory inbound Audience, a reachable token endpoint
+/// (Authority or Issuer+JwksUri), the mandatory InboundAudience, a reachable token endpoint
 /// (explicit or discovered), and a client id for the exchange call.
 /// </summary>
 internal sealed class TokenExchangeOptionsValidator : IValidateOptions<TokenExchangeOptions>
@@ -73,11 +73,11 @@ internal sealed class TokenExchangeOptionsValidator : IValidateOptions<TokenExch
             failures.Add("Issuer is required with JwksUri (with Authority the issuer is discovered).");
         }
 
-        if (string.IsNullOrEmpty(options.Audience))
+        if (string.IsNullOrEmpty(options.InboundAudience))
         {
             // Without a mandatory audience any token the issuer minted for another client
             // becomes exchangeable (token confusion) - never a silent default (§3.6).
-            failures.Add("Audience is required: the inbound token must be minted for this proxy's API.");
+            failures.Add("InboundAudience is required: the inbound token must be minted for this proxy's API.");
         }
 
         if (!hasAuthority && string.IsNullOrEmpty(options.TokenEndpoint))

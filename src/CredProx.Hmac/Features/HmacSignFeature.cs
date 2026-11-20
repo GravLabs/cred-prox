@@ -151,8 +151,26 @@ public sealed class HmacSignFeature : IRequestFeature
         }
 
         var now = _time.GetUtcNow();
-        var canonical = HmacSigner.BuildCanonicalString(
-            components, state.ProxyRequest, body, options, now, state.OutboundPath, state.OutboundQuery);
+        string canonical;
+        try
+        {
+            canonical = HmacSigner.BuildCanonicalString(
+                components, state.ProxyRequest, body, options, now, state.OutboundPath, state.OutboundQuery);
+        }
+        catch (HmacCanonicalAmbiguousException ex)
+        {
+            // Fail closed (qitem-20261120025812-1841885579827f16): an ambiguous canonical
+            // string would sign two distinct requests the same, so nothing goes upstream.
+            // The log line is the exception's message, which names the component and never
+            // the value that carried the separator.
+            _logger.LogWarning("{Message}", ex.Message);
+            await state.AbortAsync(
+                StatusCodes.Status422UnprocessableEntity,
+                "credprox.canonical_ambiguous",
+                "A signed request component carries the configured HMAC separator; the signature would be ambiguous.").ConfigureAwait(false);
+            return;
+        }
+
         var signature = HmacSigner.Sign(canonical, key, options);
 
         // Replace, never merge: a caller-supplied signature header is not carried through

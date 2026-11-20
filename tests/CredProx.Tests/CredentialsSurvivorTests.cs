@@ -160,7 +160,7 @@ public sealed class CredentialsSurvivorTests
             {
                 Authority = "http://idp.example/",
                 RequireHttpsMetadata = false,
-                Audience = Audience,
+                InboundAudience = Audience,
                 ClientId = "cid",
                 ClientSecret = "csec",
             },
@@ -189,7 +189,7 @@ public sealed class CredentialsSurvivorTests
                 new TokenExchangeOptions
                 {
                     Authority = "http://idp.example/",
-                    Audience = Audience,
+                    InboundAudience = Audience,
                     ClientId = "cid",
                     ClientSecret = "csec",
                 },
@@ -215,7 +215,7 @@ public sealed class CredentialsSurvivorTests
                     Issuer = "http://idp.example",
                     JwksUri = "http://idp.example/jwks",
                     TokenEndpoint = "https://idp.example/token",
-                    Audience = Audience,
+                    InboundAudience = Audience,
                     ClientId = "cid",
                     ClientSecret = "csec",
                 },
@@ -242,7 +242,7 @@ public sealed class CredentialsSurvivorTests
                 JwksUri = "http://idp.example/jwks",
                 TokenEndpoint = "https://idp.example/token",
                 RequireHttpsMetadata = false,
-                Audience = Audience,
+                InboundAudience = Audience,
                 ClientId = "cid",
                 ClientSecret = "csec",
             },
@@ -272,7 +272,7 @@ public sealed class CredentialsSurvivorTests
             Issuer = "http://idp.example",
             JwksUri = "http://idp.example/jwks",
             TokenEndpoint = "https://idp.example/token",
-            Audience = Audience,
+            InboundAudience = Audience,
             ClientId = "cid",
             ClientSecret = "csec",
         };
@@ -282,7 +282,7 @@ public sealed class CredentialsSurvivorTests
             JwksUri = "http://idp.example/jwks",
             TokenEndpoint = "https://idp.example/token",
             RequireHttpsMetadata = false,
-            Audience = Audience,
+            InboundAudience = Audience,
             ClientId = "cid",
             ClientSecret = "csec",
         };
@@ -317,7 +317,7 @@ public sealed class CredentialsSurvivorTests
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             provider.GetCredentialAsync(
-                new TokenExchangeOptions { Authority = "https://idp.example/", Audience = Audience, ClientId = "cid", ClientSecret = "csec" },
+                new TokenExchangeOptions { Authority = "https://idp.example/", InboundAudience = Audience, ClientId = "cid", ClientSecret = "csec" },
                 TestSecrets.AccessorFor([]),
                 Ctx(IssueHttpToken()),
                 default).AsTask());

@@ -521,7 +521,7 @@ public sealed class ResponseScrubFeatureTests
             new CredProxScrubbingOptions { Enabled = true },
             new Logger<ResponseScrubFeature>(logs)).ApplyAsync(context, CancellationToken.None);
 
-        Assert.Contains(logs.Entries, e => e.Level == LogLevel.Debug && e.Message.Contains("scrubbed"));
+        Assert.Contains(logs.Entries, e => e.Level == LogLevel.Debug && e.Message.Contains("passed the credential scrubber"));
     }
 
     // ---- M31 batch-4b survivors: the framing gate and the empty-value guard ----

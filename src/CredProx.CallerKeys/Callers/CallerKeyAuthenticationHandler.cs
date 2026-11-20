@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using CredProx.Abstractions;
+using CredProx.CallerKeys;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;

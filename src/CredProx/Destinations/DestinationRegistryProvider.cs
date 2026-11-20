@@ -20,7 +20,7 @@ namespace CredProx;
 /// reload signal the credential and connection registries follow.
 /// </remarks>
 [Experimental("CREDPROX001")]
-public sealed class DestinationRegistryProvider
+internal sealed class DestinationRegistryProvider
 {
     private readonly DestinationBinder _binder;
     private readonly ILogger<DestinationRegistryProvider> _logger;

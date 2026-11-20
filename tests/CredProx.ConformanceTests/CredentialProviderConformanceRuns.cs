@@ -176,7 +176,7 @@ public sealed class TokenExchangeConformance
             ["Type"] = "TokenExchange",
             ["Issuer"] = IssuerValue,
             ["JwksUri"] = JwksUrl,
-            ["Audience"] = AudienceValue,
+            ["InboundAudience"] = AudienceValue,
             ["TokenEndpoint"] = "https://conformance-idp.example/token",
             ["ClientId"] = "secret:cid",
             ["ClientSecret"] = "secret:csec",

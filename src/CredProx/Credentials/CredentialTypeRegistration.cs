@@ -8,7 +8,7 @@ namespace CredProx;
 /// options and provider types.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class CredentialTypeRegistration
+internal sealed class CredentialTypeRegistration
 {
     /// <summary>Creates the registration.</summary>
     /// <param name="typeName">The configuration <c>Type</c> name, for example <c>OAuthClientCredentials</c>.</param>

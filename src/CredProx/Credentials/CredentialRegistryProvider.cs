@@ -31,7 +31,7 @@ public sealed class CredentialRegistryProvider
     /// <exception cref="Microsoft.Extensions.Options.OptionsValidationException">
     /// The initial bind fails — startup fails.
     /// </exception>
-    public CredentialRegistryProvider(
+    internal CredentialRegistryProvider(
         CredentialBinder binder,
         ISecretSource secretSource,
         ILogger<CredentialRegistryProvider> logger)

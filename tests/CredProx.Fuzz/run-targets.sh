@@ -1,7 +1,9 @@
 #!/bin/bash
-# M31 Phase B batch driver (plan 5.4): six fuzz targets in parallel, one pinned core
+# M31 Phase B batch driver (plan 5.4): seven fuzz targets in parallel, one pinned core
 # each, FUZZ_SECONDS budget per target (default 7200). Core plan on a 20-core host:
-# fuzz takes 2-7, 0-1 stay free for the system, 8-19 stay free for builds and mutation.
+# fuzz takes 2-8, 0-1 stay free for the system, 9-19 stay free for builds and mutation.
+# TARGETS and CORES must stay equal-length: a missing pin gives taskset an empty core
+# and that container dies while the batch summary still prints (done=0, unnoticed).
 # NO pipefail. Logs land in /tmp/m31-fuzz-<target>.log. Findings (crashes +
 # fuzzer_stats) are mounted from a host directory — afl writes them continuously —
 # so a killed or docker-hung batch cannot eat findings a second time (the first
@@ -10,12 +12,16 @@
 # non-empty -o directory.
 set -e
 REPO="${REPO:-$PWD}"
-TARGETS=(pathpatterns headerattach scrub sse configkeys parsers)
-CORES=(2 3 4 5 6 7)
+TARGETS=(pathpatterns headerattach scrub sse configkeys parsers media)
+CORES=(2 3 4 5 6 7 8)
+[ "${#TARGETS[@]}" -eq "${#CORES[@]}" ] || { echo "RUNTARGETS-FAIL TARGETS/CORES length mismatch"; exit 1; }
 BUDGET="${FUZZ_SECONDS:-7200}"
 FINDINGS="${FINDINGS_DIR:-/tmp/m31-fuzz-findings}"
 
 cd "$REPO"
+# One source of truth across the three target homes (Program.cs labels, this list, the
+# nightly matrix) - a drift here silently drops or misblames a target (qitem-20261120031636-7499bc7183b0f7e9).
+bash tests/CredProx.Fuzz/check-targets-agree.sh || { echo "RUNTARGETS-FAIL target homes disagree (see above)"; exit 1; }
 dotnet publish tests/CredProx.Fuzz/CredProx.Fuzz.csproj -c Release -o /tmp/fuzzpub
 
 rm -rf "$FINDINGS"

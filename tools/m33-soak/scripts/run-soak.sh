@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# M33 steady-soak runner (plan §5.5). Budget guards: hourly uptime check, back off (kill k6,
-# tear down) if the 5-min load average passes 40. Teardown runs on EVERY exit path.
+# M33 steady-soak runner (plan §5.5). Budget guards: load sampled every <=60 s (the
+# watchdog's bounded step), back off (stop this run's label-tagged k6 one-off, tear down,
+# fail the load gate by name) if the 5-min load average passes SOAK_LOAD_LIMIT.
+# Teardown runs on EVERY exit path.
 # Usage: run-soak.sh [--smoke] [--minutes N] [--vus N]
+# Env: SOAK_LOAD_LIMIT overrides the backoff threshold (default 40; lets the backoff
+# branch be witnessed on a short run without waiting for a real load spike).
 set -u
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 MINUTES=240; VUS=20
@@ -23,7 +27,10 @@ chmod 777 "$RUN"; chmod 666 "$RUN/k6-line.csv" "$RUN/stats.csv"
 export SOAK_RUN_DIR="$RUN" SOAK_VUS="$VUS" SOAK_MINUTES="$MINUTES"
 cd "$HERE/compose" || exit 2
 
+WATCH=""
 cleanup() {
+  # stop the watchdog FIRST: the loop alone was harmless, its sleep held stdout
+  [ -n "$WATCH" ] && kill "$WATCH" 2>/dev/null
   docker compose logs --no-color soakhost > "$RUN/logs/soakhost.log" 2>/dev/null
   curl -fsS http://127.0.0.1:18081/__admin/requests > "$RUN/journal/wiremock.json" 2>/dev/null
   bash "$HERE/scripts/teardown.sh"
@@ -37,24 +44,54 @@ for _ in $(seq 1 60); do
 done
 curl -fsS http://127.0.0.1:18080/healthz >/dev/null || { echo "HEALTH-FAIL (see: docker compose logs soakhost)"; exit 1; }
 
+# the step is bounded by the remaining budget (fine enough to still sample load) and the
+# loop's TERM trap reaps the sleep IT started: killing only the loop orphaned the sleep,
+# which held the caller's stdout pipe for up to an hour after TEARDOWN-DONE (qitem-20261120004151)
+LOAD_LIMIT="${SOAK_LOAD_LIMIT:-40}"
 (
   end=$(( $(date +%s) + (MINUTES + 10) * 60 ))
-  while [ "$(date +%s)" -lt "$end" ]; do
-    sleep 3600
+  s=""
+  trap '[ -n "$s" ] && kill "$s" 2>/dev/null; exit 0' TERM INT HUP
+  while :; do
+    now=$(date +%s)
+    rem=$(( end - now ))
+    [ "$rem" -le 0 ] && break
+    step=$(( rem < 60 ? rem : 60 ))
+    sleep "$step" &
+    s=$!
+    wait "$s"
+    s=""
     load5="$(awk '{print int($1)}' /proc/loadavg)"
     echo "watchdog: 5-min load $load5"
-    if [ "$load5" -gt 40 ]; then
-      echo "BACKOFF: load $load5 > 40 - stopping load generator"
-      docker compose stop k6 >/dev/null 2>&1
-      pkill -f 'k6 run /k6/soak.js' 2>/dev/null
+    if [ "$load5" -gt "$LOAD_LIMIT" ]; then
+      echo "BACKOFF: load $load5 > $LOAD_LIMIT - stopping load generator"
+      # `compose stop k6` never touches the `compose run --rm` one-off (it is not a
+      # project service) and host pkill cannot see inside its namespace — the run kept
+      # load high after BACKOFF (qitem-20261120021049). The one-off carries this run's
+      # label, so stop exactly the containers this run started. Marker FIRST and stop
+      # tolerant (F-4): a failed stop — empty id list (no-arg docker stop, rc=1) or an
+      # already-gone container — must never preempt the marker, whatever shell options
+      # this subshell runs under; a backoff without its marker grades as a normal soak.
+      mkdir -p "$RUN" && touch "$RUN/backoff.fired"
+      ids="$(docker ps -q --filter "label=m33-soak-run=$RUN" 2>/dev/null || true)"
+      if [ -n "$ids" ]; then docker stop $ids 2>/dev/null || true; fi
       exit 0
     fi
   done
 ) &
 WATCH=$!
 
-docker compose --profile load run --rm k6 || { echo "K6-FAIL"; kill "$WATCH" 2>/dev/null; exit 1; }
+# The one-off container carries this run's label so the watchdog can stop exactly it
+# (see the BACKOFF branch); a backoff that fired makes the whole run a NAMED failed gate,
+# checked before K6-FAIL so the real cause is the line that prints.
+K6_RC=0
+docker compose --profile load run --rm --label "m33-soak-run=$RUN" k6 || K6_RC=$?
 kill "$WATCH" 2>/dev/null
+if [ -f "$RUN/backoff.fired" ]; then
+  echo "BACKOFF-GATE-FAIL: load watchdog stopped this run's k6 container (5-min load above $LOAD_LIMIT) - the load gate failed"
+  exit 1
+fi
+[ "$K6_RC" -eq 0 ] || { echo "K6-FAIL"; exit 1; }
 
 # Evidence BEFORE the scan (the scan reads these): the trap recollects on failure paths.
 mkdir -p "$RUN/logs"

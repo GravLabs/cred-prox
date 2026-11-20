@@ -56,7 +56,7 @@ public sealed class CredProxStartupValidator : IHostedService
     /// <param name="secretValidator">The literal-reference resolver.</param>
     /// <param name="presetSources">The preset sources, so preset-introduced secret references are scanned too.</param>
     /// <param name="logger">Logs fully-dynamic declaration warnings.</param>
-    public CredProxStartupValidator(
+    internal CredProxStartupValidator(
         IServiceProvider services,
         IEnumerable<IProxyConfigProvider> proxyConfigProviders,
         IConfiguration configuration,

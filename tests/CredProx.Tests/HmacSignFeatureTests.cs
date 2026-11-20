@@ -479,6 +479,121 @@ public sealed class HmacSignFeatureTests
     }
 
     [Fact]
+    public async Task SeparatorBearingSignedValue_FailsClosedNamingComponentNotValue()
+    {
+        var (services, _) = Build(HmacConfig(("Credentials:signer:Components:0", "header:X-Forwarded-Note")));
+        var registry = HandRolledHmacRegistry(new HmacOptions
+        {
+            Secret = "secret:hmac-key",
+            SignatureHeader = "X-Signature",
+            Components = ["header:X-Forwarded-Note"],
+        });
+        SwapInRegistry(services, registry);
+        var logger = new CapturingLogger();
+        var feature = BuildFeature(services, logger);
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Note", "line-one\nforged-line");
+
+        await feature.ApplyAsync(context, default);
+
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.True(state.IsAborted);
+        var (status, code, _) = ProblemEnvelope(context);
+        Assert.Equal(422, status);
+        Assert.Equal("credprox.canonical_ambiguous", code);
+        Assert.False(proxyRequest.Headers.Contains("X-Signature")); // nothing forwarded on an ambiguous form
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("X-Forwarded-Note", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("forged-line", entry.Message, StringComparison.Ordinal); // component name, never value
+    }
+
+    [Fact]
+    public async Task ContentHeaderMultiValueWithComma_FailsClosedTheContentBranchIsLive()
+    {
+        // The comma guard's content-collection branch had no pin: deleting it left the
+        // suite green while a content-side multi-value header still resolves through the
+        // ',' that joins its values. This request carries X-Tag ONLY on the content
+        // collection, so only that branch can refuse it.
+        var (services, _) = Build(HmacConfig(("Credentials:signer:Components:0", "header:X-Tag")));
+        var registry = HandRolledHmacRegistry(new HmacOptions
+        {
+            Secret = "secret:hmac-key",
+            SignatureHeader = "X-Signature",
+            Components = ["header:X-Tag"],
+        });
+        SwapInRegistry(services, registry);
+        var logger = new CapturingLogger();
+        var feature = BuildFeature(services, logger);
+
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        proxyRequest.Content = new StringContent("payload");
+        proxyRequest.Content.Headers.TryAddWithoutValidation("X-Tag", "alpha");
+        proxyRequest.Content.Headers.TryAddWithoutValidation("X-Tag", "beta,gamma");
+
+        await feature.ApplyAsync(context, default);
+
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.True(state.IsAborted);
+        var (status, code, _) = ProblemEnvelope(context);
+        Assert.Equal(422, status);
+        Assert.Equal("credprox.canonical_ambiguous", code);
+        Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("X-Tag", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("beta,gamma", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HeaderNameOnBothCollections_FailsClosedNamingTheHeaderNotValues()
+    {
+        // The boundary rule covers the two header collections too: ResolveHeader reads
+        // the request collection first and falls back to the content collection, so a
+        // name present on BOTH would sign one collection's value while the vendor may
+        // merge or pick the other. One guessed merge is the same ambiguity class as a
+        // separator inside a value: refuse, name the header, never the values.
+        var (services, _) = Build(HmacConfig(("Credentials:signer:Components:0", "header:X-Tag")));
+        var registry = HandRolledHmacRegistry(new HmacOptions
+        {
+            Secret = "secret:hmac-key",
+            SignatureHeader = "X-Signature",
+            Components = ["header:X-Tag"],
+        });
+        SwapInRegistry(services, registry);
+        var logger = new CapturingLogger();
+        var feature = BuildFeature(services, logger);
+        var context = M4Contexts.Create(out var proxyRequest, SignRoute);
+        proxyRequest.Method = HttpMethod.Post;
+        proxyRequest.RequestUri = new Uri("https://vendor.example/api/widgets");
+        proxyRequest.Content = new StringContent("payload");
+        proxyRequest.Headers.TryAddWithoutValidation("X-Tag", "alpha");
+        proxyRequest.Content.Headers.TryAddWithoutValidation("X-Tag", "beta");
+
+        await feature.ApplyAsync(context, default);
+
+        var state = context.Features.Get<CredProxRequestState>()!;
+        Assert.True(state.IsAborted);
+        var (status, code, _) = ProblemEnvelope(context);
+        Assert.Equal(422, status);
+        Assert.Equal("credprox.canonical_ambiguous", code);
+        Assert.False(proxyRequest.Headers.Contains("X-Signature"));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("X-Tag", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha", entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("beta", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BodyHashWithoutBufferBody_FailsClosedBeforeHashing()
     {
         var (services, _) = Build(HmacConfig(("Credentials:signer:Components:0", "method")));

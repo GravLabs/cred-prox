@@ -241,7 +241,7 @@ public sealed class PresetTests
             ("Presets:acme-login:Method", "POST"),
             ("Presets:acme-login:Response", "JsonPath"),
             ("Presets:acme-login:ResponseField", "sessionId"),
-            ("Presets:acme-login:Lifetime", "01:00:00"),
+            ("Presets:acme-login:DefaultLifetime", "01:00:00"),
             ("Presets:acme-login:Form:User", "{partition}-svc"),
             ("Presets:acme-login:Form:Password", "secret:acme-password"),
             ("Credentials:c:Preset", "acme-login"),
@@ -255,7 +255,7 @@ public sealed class PresetTests
         Assert.Equal("POST", options.Method);
         Assert.Equal(LoginExchangeResponse.JsonPath, options.Response);
         Assert.Equal("sessionId", options.ResponseField);
-        Assert.Equal(TimeSpan.FromHours(1), options.Lifetime);
+        Assert.Equal(TimeSpan.FromHours(1), options.DefaultLifetime);
         Assert.NotNull(options.Form);
         Assert.Equal("{partition}-svc", options.Form!.User);
         Assert.Equal("secret:acme-password", options.Form.Password);

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using CredProx;
 using CredProx.Abstractions;
+using CredProx.CallerKeys;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;

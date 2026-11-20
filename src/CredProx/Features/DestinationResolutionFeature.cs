@@ -25,7 +25,7 @@ public sealed class DestinationResolutionFeature : IRequestFeature
 
     /// <summary>Creates the feature over the live destination registry.</summary>
     /// <param name="registryProvider">The reload-aware destination registry.</param>
-    public DestinationResolutionFeature(DestinationRegistryProvider registryProvider) =>
+    internal DestinationResolutionFeature(DestinationRegistryProvider registryProvider) =>
         _registryProvider = registryProvider ?? throw new ArgumentNullException(nameof(registryProvider));
 
     /// <inheritdoc />

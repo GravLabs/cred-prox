@@ -16,14 +16,15 @@ using Yarp.ReverseProxy.Forwarder;
 namespace CredProx.Tests;
 
 /// <summary>
-/// M45 security finding F-4, the documented consequence: header hygiene removes the
-/// presented credential, the caller-auth key and the partition header — on routes whose
-/// credential is not a caller header value (query placement and friends) the caller's
-/// own <c>Authorization</c> and <c>Cookie</c> ride to the vendor unchanged. The control
-/// leg measures that status quo; the mitigation leg proves the operator's documented
-/// door really closes: YARP's <c>RequestHeaderRemove</c> transform on the route strips
-/// both without disturbing credential placement (one entry per header — the plural
-/// name circulating in the public discussion does not exist in YARP 2.3.0).
+/// M45 security finding F-4, the default change: header hygiene now removes the caller's
+/// own <c>Authorization</c> and <c>Cookie</c> on every route, so a credential of the
+/// caller's cannot ride to a third party. A route opts out with metadata
+/// <c>CredProx.CallerHeaderStrip = "off"</c> (ADR-0006: a switch that says off is off;
+/// any other value strips like every other route). CredProx's own attachments survive:
+/// a header-placed vendor credential replaces the stripped slot (attachment runs after
+/// hygiene), and query placement is untouched by it. YARP's <c>RequestHeaderRemove</c>
+/// transform still works alongside the default (one entry per header — the plural name
+/// circulating in the public discussion does not exist in YARP 2.3.0).
 /// </summary>
 public sealed class CallerHeaderRideTests : IAsyncLifetime
 {
@@ -58,6 +59,12 @@ public sealed class CallerHeaderRideTests : IAsyncLifetime
             ["CredProx:Credentials:qkey:Name"] = "api_key",
             ["CredProx:Credentials:qkey:Location"] = "Query",
             ["CredProx:Secrets:q-key"] = "query-cred-value",
+            // Header placement (the default): the attached credential owns the vendor's
+            // Authorization slot and must survive the caller-header strip.
+            ["CredProx:Credentials:hkey:Type"] = "StaticKey",
+            ["CredProx:Credentials:hkey:Secret"] = "secret:h-key",
+            ["CredProx:Credentials:hkey:Name"] = "Authorization",
+            ["CredProx:Secrets:h-key"] = "vendor-h-key-value",
         };
 
         _proxy = new HostBuilder()
@@ -70,7 +77,7 @@ public sealed class CallerHeaderRideTests : IAsyncLifetime
                 services.AddCredProxCredentials(context.Configuration);
                 services.AddRouting();
                 services.AddReverseProxy()
-                    .LoadFromMemory([PlainRoute, StrippedRoute], [Cluster])
+                    .LoadFromMemory([PlainRoute, StrippedRoute, RidingRoute, MisspeltRoute, HeaderPlacedRoute], [Cluster])
                     .AddCredProx(context.Configuration);
                 services.AddSingleton<IForwarderHttpClientFactory>(
                     sp => new StubTransportFactory(sp, transport));
@@ -105,14 +112,27 @@ public sealed class CallerHeaderRideTests : IAsyncLifetime
 
     // No prefix removal: the upstream keys its capture off the first path segment, and
     // the raw outbound path is also part of the claim.
-    private static RouteConfig Route(string id, params Dictionary<string, string>[] transforms) => new()
+    private static RouteConfig Route(string id, string credential = "qkey", params Dictionary<string, string>[] transforms) => new()
     {
         RouteId = id,
         ClusterId = "v",
         Match = new RouteMatch { Path = $"/{id}/{{**catch-all}}" },
         Transforms = [.. transforms],
-        Metadata = new Dictionary<string, string> { [CredProxMetadata.Credential] = "qkey" },
+        Metadata = new Dictionary<string, string> { [CredProxMetadata.Credential] = credential },
     };
+
+    private static RouteConfig WithMetadata(RouteConfig route, string key, string value)
+    {
+        var metadata = new Dictionary<string, string>(route.Metadata!) { [key] = value };
+        return new RouteConfig
+        {
+            RouteId = route.RouteId,
+            ClusterId = route.ClusterId,
+            Match = route.Match,
+            Transforms = route.Transforms,
+            Metadata = metadata,
+        };
+    }
 
     private static readonly RouteConfig PlainRoute = Route("plain");
 
@@ -121,8 +141,19 @@ public sealed class CallerHeaderRideTests : IAsyncLifetime
     // version (the Unknown-transform config failure was this pin's first witness).
     private static readonly RouteConfig StrippedRoute = Route(
         "stripped",
-        new Dictionary<string, string> { ["RequestHeaderRemove"] = "Authorization" },
-        new Dictionary<string, string> { ["RequestHeaderRemove"] = "Cookie" });
+        transforms: [
+            new Dictionary<string, string> { ["RequestHeaderRemove"] = "Authorization" },
+            new Dictionary<string, string> { ["RequestHeaderRemove"] = "Cookie" },
+        ]);
+
+    // The M47 F-4 door: this route alone keeps the old ride.
+    private static readonly RouteConfig RidingRoute =
+        WithMetadata(Route("riding"), CredProxMetadata.CallerHeaderStrip, "off");
+
+    private static readonly RouteConfig MisspeltRoute =
+        WithMetadata(Route("ridingmisspelt"), CredProxMetadata.CallerHeaderStrip, "nope");
+
+    private static readonly RouteConfig HeaderPlacedRoute = Route("hdr", credential: "hkey");
 
     private static readonly ClusterConfig Cluster = new()
     {
@@ -152,21 +183,24 @@ public sealed class CallerHeaderRideTests : IAsyncLifetime
         return request;
     }
 
-    // ---- the documented status quo: the caller's own secrets ride on ----
+    // ---- the new default: the caller's own secrets do not ride ----
 
     [Fact]
-    public async Task QueryPlacedRoute_Control_CallerAuthorizationAndCookieReachVendor()
+    public async Task QueryPlacedRoute_Default_CallerAuthorizationAndCookieAreStripped()
     {
         using var client = new HttpClient();
         var response = await client.SendAsync(
             CallerRequest($"http://127.0.0.1:{_port}/plain/data?x=1"), HttpCompletionOption.ResponseContentRead);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // The route's own credential placement is untouched by the strip:
         Assert.Equal("/plain/data?x=1&api_key=query-cred-value", await response.Content.ReadAsStringAsync());
-        Assert.Equal(("Bearer CALLER-OWN-TOKEN", "sess=caller-session-cookie"), _vendorView["plain"]);
+        var (auth, cookie) = _vendorView["plain"];
+        Assert.Equal(string.Empty, auth);
+        Assert.Equal(string.Empty, cookie);
     }
 
-    // ---- the documented mitigation, proven to work ----
+    // ---- the documented door still works alongside the default ----
 
     [Fact]
     public async Task QueryPlacedRoute_RequestHeaderRemove_VendorSeesNeitherCallerHeader()
@@ -180,6 +214,51 @@ public sealed class CallerHeaderRideTests : IAsyncLifetime
         Assert.Equal("/stripped/data?x=1&api_key=query-cred-value", await response.Content.ReadAsStringAsync());
         var (auth, cookie) = _vendorView["stripped"];
         Assert.Equal(string.Empty, auth);
+        Assert.Equal(string.Empty, cookie);
+    }
+
+    // ---- the per-route switch (ADR-0006: off means off; anything else is the default) ----
+
+    [Fact]
+    public async Task CallerHeaderStripOff_CallerAuthorizationAndCookieStillRide()
+    {
+        using var client = new HttpClient();
+        var response = await client.SendAsync(
+            CallerRequest($"http://127.0.0.1:{_port}/riding/data?x=1"), HttpCompletionOption.ResponseContentRead);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("/riding/data?x=1&api_key=query-cred-value", await response.Content.ReadAsStringAsync());
+        Assert.Equal(("Bearer CALLER-OWN-TOKEN", "sess=caller-session-cookie"), _vendorView["riding"]);
+    }
+
+    [Fact]
+    public async Task CallerHeaderStripMisspelt_StripsLikeEveryRoute()
+    {
+        using var client = new HttpClient();
+        var response = await client.SendAsync(
+            CallerRequest($"http://127.0.0.1:{_port}/ridingmisspelt/data?x=1"), HttpCompletionOption.ResponseContentRead);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var (auth, cookie) = _vendorView["ridingmisspelt"];
+        Assert.Equal(string.Empty, auth);
+        Assert.Equal(string.Empty, cookie);
+    }
+
+    // ---- the survival case: the credential CredProx attaches IS the header ----
+
+    [Fact]
+    public async Task HeaderPlacedCredential_SurvivesTheDefaultStrip()
+    {
+        using var client = new HttpClient();
+        var response = await client.SendAsync(
+            CallerRequest($"http://127.0.0.1:{_port}/hdr/data?x=1"), HttpCompletionOption.ResponseContentRead);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("/hdr/data?x=1", await response.Content.ReadAsStringAsync());
+        var (auth, cookie) = _vendorView["hdr"];
+        // Only the vendor's own credential arrives: the caller's token is gone, the
+        // attached one replaced the stripped slot (attachment runs after hygiene).
+        Assert.Equal("vendor-h-key-value", auth);
         Assert.Equal(string.Empty, cookie);
     }
 }

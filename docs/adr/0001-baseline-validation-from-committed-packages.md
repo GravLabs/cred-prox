@@ -6,7 +6,7 @@ Status: accepted (M25, GitHub public pivot)
 ## Context
 
 Every `dotnet pack` runs APICompat against the last published release
-(`<PackageValidationBaselineVersion>`, currently `0.13.0`) so a public-surface removal
+(`<PackageValidationBaselineVersion>`, currently `0.13.1`) so a public-surface removal
 fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
 Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
 declared the internal LAN NuGet registry (anonymous download), and the SDK's
@@ -22,16 +22,16 @@ Commit the **published baseline packages** under `build/baselines/` and point
 `<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
 
 ```
-build/baselines/CredProx.0.13.0.nupkg               2757236c83ccdae7806b17582c915ed796bc1001fa974af39cea3933df1ffaa7
-build/baselines/CredProx.Abstractions.0.13.0.nupkg  3886cd5af1354534fdb745c28e4ed8ade5e843fcc9645f7085c48ee9b98c285f
-build/baselines/CredProx.AzureKeyVault.0.13.0.nupkg b261e72341ca9f0909221131ee802d7cecee6e0b27e23ffdd3ada0d59efca6f8
-build/baselines/CredProx.CallerKeys.0.13.0.nupkg    3008e32c648f161b53c1274c344821c3885d10e7a169e744130ca24a932284de
-build/baselines/CredProx.CallerTokens.0.13.0.nupkg  c09d2d4b3e494b464670b88cdecbfb64b6641d409002d78ad11edb338144b5e4
-build/baselines/CredProx.Hmac.0.13.0.nupkg          de50dc14f99d617425c317791cdbfb877427591b210b00fb9c62fcf72478cccf
-build/baselines/CredProx.LoginExchange.0.13.0.nupkg 8c93886972074198934fc659f199685661a022114f3c15bc9b60f220bbe12081
-build/baselines/CredProx.OAuth.0.13.0.nupkg         8dcbc8ed487d1a693f03813e78898c4a2352e97aa251dc9613da29e4880f126b
-build/baselines/CredProx.Operations.0.13.0.nupkg    57242801a9eb10a39b6728fa42ab8c4e8f3efc078168b89d8815c7f3ee9be3ff
-build/baselines/CredProx.Testing.0.13.0.nupkg       95edf261c1fbf316c430d1cd93832a6b55f799d330ea722849e0ff61473b4b65
+build/baselines/CredProx.0.13.1.nupkg               740dc87f35af29cc59c3349deb2f350df76bd218c4ad5a723f661650223e30c6
+build/baselines/CredProx.Abstractions.0.13.1.nupkg  569d42bd100946993272b34e17ed04f248af1788a1acba720577ffa7c9c2caa3
+build/baselines/CredProx.AzureKeyVault.0.13.1.nupkg b45fe46c942db33e6ef9e98572f28866fae7451dd30a68100d659ecfb267a9e8
+build/baselines/CredProx.CallerKeys.0.13.1.nupkg    ed85f747f9550cfcda2c8e6d9d079b60eeee2842556681815d06d2c9ae8cb001
+build/baselines/CredProx.CallerTokens.0.13.1.nupkg  5ec9a232d6273aa456e9d03e0c42594a9d741d6d4fcfe84e825babe226ea1551
+build/baselines/CredProx.Hmac.0.13.1.nupkg          5ea460ef2cb1efeffeca58ece6c7707f1ccaabadfe7a079f4bc5b683b8856d2d
+build/baselines/CredProx.LoginExchange.0.13.1.nupkg 17143d012c4e62ab5c1db42d56aa213c69ca3221bcc5793028ce76c5f83acc8f
+build/baselines/CredProx.OAuth.0.13.1.nupkg         9235ca2197b5e174ec6e40b821de0d3d60145b7e86d90246abf07a5072cbefd1
+build/baselines/CredProx.Operations.0.13.1.nupkg    95fdbdef11a5b679705a5c624e8e8a9522ceae08db8b891241f394886dfefa9e
+build/baselines/CredProx.Testing.0.13.1.nupkg       fe1f33a6221cb0f269be6ca92c2c9cac0a3ba72f8197f6315c30c3bc2bf1eb9e
 ```
 
 The files are the bytes downloaded from the registry that published them (sha256 above;
@@ -96,7 +96,11 @@ packages against published bytes. `0.13.0` rotated at the `0.13.1` prep (2026-11
 owner word "A, registry now, nuget.org later"): those registry-served `0.13.0` bytes —
 all ten, sha256 verified 10/10 equal to the published artifacts recorded in
 PUBLISHING.md's release history — replace the `0.12.0` set, whose entries are in git
-history at that commit. Pack the
+history at that commit. `0.13.1` rotated at the `0.14.0` prep (2026-11-20, owner word
+"start 0.14.0 after the gpu-rig is done testing the engine"): those registry-served `0.13.1`
+bytes — all ten, sha256 verified 10/10 equal to the published artifacts recorded in
+PUBLISHING.md's release history — replace the `0.13.0` set, whose entries are in git history
+at that commit. Pack the
 **fresh**
 `obj/` after rotating (see
 Consequences): a repack on an untouched obj skips validation silently.

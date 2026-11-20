@@ -55,7 +55,7 @@ public sealed class CallerRegistryProvider
     /// <exception cref="Microsoft.Extensions.Options.OptionsValidationException">
     /// The initial bind fails — startup fails.
     /// </exception>
-    public CallerRegistryProvider(CallerBinder binder, ISecretSource secretSource, ILogger<CallerRegistryProvider> logger)
+    internal CallerRegistryProvider(CallerBinder binder, ISecretSource secretSource, ILogger<CallerRegistryProvider> logger)
         : this(binder, [], null, secretSource, logger)
     {
     }
@@ -77,7 +77,7 @@ public sealed class CallerRegistryProvider
     /// <exception cref="Microsoft.Extensions.Options.OptionsValidationException">
     /// The initial bind fails — startup fails.
     /// </exception>
-    public CallerRegistryProvider(
+    internal CallerRegistryProvider(
         CallerBinder binder,
         IEnumerable<ICallerRegistryContributor> contributors,
         IConfiguration? configuration,

@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.IO.Compression;
+using System.Net;
 using System.Net.Http.Headers;
 using CredProx.Abstractions;
 using Microsoft.AspNetCore.Http;
@@ -20,11 +22,22 @@ namespace CredProx;
 /// <para>
 /// Headers: response headers and content headers are scrubbed for secret occurrences
 /// (an echoed <c>Authorization</c>, a <c>Set-Cookie</c> carry). Body: text-like content
-/// types stream through <see cref="ScrubbingStream"/>; gzip/deflate/br/zstd bodies of
+/// types stream through <see cref="ScrubbingStream"/>; gzip (and its <c>x-gzip</c> alias), deflate and br bodies of
 /// eligible types are transparently decoded, scrubbed and forwarded decompressed
 /// (<c>Content-Encoding</c> dropped) — a secret must not hide behind the encoding
-/// header. An encoding this build cannot decode is logged once and forwarded untouched:
+/// header. An encoding this build cannot decode — <c>zstd</c> among them, .NET ships
+/// no streaming decompressor for it — is logged once and forwarded untouched:
 /// refusing exotic responses would break working traffic for a documented residue.
+/// <c>CredProx:Scrubbing:FailClosed=true</c> inverts that stance for every class the
+/// scrubber cannot inspect (non-text or missing media type, unknown or chained
+/// encoding, a declared charset the byte matcher cannot read, error responses included): the
+/// response is refused with a <c>credprox.response_uninspectable</c> problem
+/// response — a refused 2xx/3xx answers <c>502</c>, a vendor 4xx/5xx keeps its
+/// status, and a response with no body (empty, <c>HEAD</c>, a bodiless redirect) is
+/// never refused. A refusal logs one warning that says the body was refused, naming
+/// the class and the route; the once-per-route pass-through warnings stay exactly on
+/// the paths that forward. The option requires <c>Enabled</c>; the combination with
+/// scrubbing switched off is rejected at startup.
 /// For JSON bodies the matcher also reads through <c>\uXXXX</c> escapes (four hex
 /// digits, either case), replacing the original escaped bytes, so a vendor's JSON
 /// encoder cannot echo a credential past the scrubber; a JSON-escaped echo inside a
@@ -32,9 +45,12 @@ namespace CredProx;
 /// </para>
 /// <para>
 /// Scrubbing can change the body length, so a scrubbed response's <c>Content-Length</c>
-/// is dropped (the caller sees chunked framing). The matcher works on UTF-8 bytes — a
-/// body in a non-UTF-8 character set is a documented residue that carries the value
-/// through. <c>text/event-stream</c> bodies scrub per event: events flow as they
+/// is dropped (the caller sees chunked framing). The matcher works on raw bytes — in a
+/// readable ASCII-compatible charset a plain ASCII echo is caught, but non-ASCII
+/// characters re-encoded in that charset, or any echo in a charset the matcher cannot
+/// read, are a documented residue that carries the value through; with
+/// <c>FailClosed</c> on, a response that <i>declares</i> a charset the matcher cannot
+/// read is refused rather than forwarded. <c>text/event-stream</c> bodies scrub per event: events flow as they
 /// complete, keeping streaming latency, and a secret split across an event boundary is
 /// the framing's own documented residue. Values are never logged — the logs say that
 /// scrubbing happened, never what it removed.
@@ -93,12 +109,13 @@ public sealed class ResponseScrubFeature : IResponseFeature
 
         if (response.Content is { } content)
         {
-            await ScrubBodyAsync(state, response, content, secrets.Values, cancellationToken)
+            await ScrubBodyAsync(context, state, response, content, secrets.Values, cancellationToken)
                 .ConfigureAwait(false);
         }
     }
 
     private async Task ScrubBodyAsync(
+        HttpContext context,
         CredProxRequestState state,
         HttpResponseMessage response,
         HttpContent content,
@@ -109,7 +126,20 @@ public sealed class ResponseScrubFeature : IResponseFeature
         {
             // M45 security finding F-3: byte-identical pass-through is still the
             // answer, but the operator hears about the class of response that can
-            // carry an echo unopened.
+            // carry an echo unopened. M47 F-3 (Low-3): with fail-closed on the
+            // decision comes FIRST — a withheld body logs as refused, never as
+            // forwarded; the pass-through warning stays exactly where the body
+            // really is forwarded (off mode, or a response with no body).
+            if (_options.FailClosed && !await IsBodylessAsync(context, response, cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                LogRefused(state, content.Headers.ContentType is null ? "no media type" : "non-text media type");
+                RefuseUninspected(context, response, content.Headers.ContentType is null
+                    ? "no-media-type"
+                    : "non-text-media-type");
+                return;
+            }
+
             if (content.Headers.ContentType is null)
             {
                 WarnUninspected(state, "no media type",
@@ -131,15 +161,88 @@ public sealed class ResponseScrubFeature : IResponseFeature
             return; // an empty body holds nothing to scrub
         }
 
+        // The scrubber asks its own charset question, deliberately different from M24's
+        // ResponseBodies.IsCharsetUtf8OrAscii: that predicate gates ERROR NORMALISATION,
+        // where only utf-8/ascii round-trip as text, while this one asks whether the
+        // raw-byte matcher can see an ASCII echo — every single-byte ASCII-compatible
+        // charset answers yes. Two features now disagree on the same header by design;
+        // do not merge the predicates.
+        if (!IsCharsetReadable(content.Headers.ContentType))
+        {
+            // M47 F-3 (Low-4): a body in a charset the byte matcher genuinely cannot read
+            // (utf-16/32 family, stateful names, unknown names) keeps an echoed credential
+            // intact, so with the option on it is refused. Readable ASCII-compatible
+            // charsets — the exact published names on IsCharsetReadable — are
+            // scrubbed and never refused. The class is operator-visible in both modes:
+            // forward with the pass-through warning when the option is off, refusal line
+            // when it is on. A bodyless response is never refused whatever its charset,
+            // and its warning must not claim a search of a body that is not there
+            // (log accuracy, same class as the searched-as-is wording). The bodiless
+            // message carries its OWN dedupe shape so it cannot swallow the has-body
+            // warning on the same route, and the branch then returns: response headers
+            // were already scrubbed at the top of ApplyAsync, there is no body to carry
+            // to the matcher, and skipping the matcher also skips its framing rewrite
+            // (declared Content-Length survives). HEAD is bodiless by this predicate's
+            // own rule — free, no probe — so the off mode states the absence too without
+            // starting to read bytes (M47 round 3, lead 07:25Z instruction).
+            // The HEAD arm rests on the rule that a HEAD response carries no body: the
+            // HTTP stack hands back zero bytes for it, so the matcher has nothing to
+            // read and is skipped here by design, not by omission.
+            var bodiless = HttpMethods.IsHead(context.Request.Method)
+                || (_options.FailClosed
+                    && await IsBodylessAsync(context, response, cancellationToken).ConfigureAwait(false));
+            if (_options.FailClosed && !bodiless)
+            {
+                LogRefused(state, "non-UTF-8 charset");
+                RefuseUninspected(context, response, "non-utf8-charset");
+                return;
+            }
+
+            if (bodiless)
+            {
+                WarnUninspected(state, "non-UTF-8 charset, no body",
+                    $"An upstream response declared charset '{content.Headers.ContentType?.CharSet}', which the "
+                    + "scrubber cannot read; no response body was present to search for echoed credentials, so "
+                    + "the response was forwarded untouched.");
+                return;
+            }
+
+            // The has-body branch falls through and still searches the raw bytes, so its
+            // message must not claim the outcome of a pass-through: media-type and
+            // encoding warnings above really return before the scrub and keep their
+            // wording.
+            WarnUninspected(state, "non-UTF-8 charset",
+                $"An upstream response declared charset '{content.Headers.ContentType?.CharSet}', which the "
+                + "scrubber cannot read; its body was searched as-is for echoed credentials, so an echo "
+                + "encoded in that charset would not be found.");
+        }
+
         switch (ResponseBodies.ResolveDecoding(content, out var decoder, out var encoding))
         {
             case ResponseBodies.Decoding.Unsupported:
+                if (_options.FailClosed && !await IsBodylessAsync(context, response, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    // M47 F-3 (Low-3): decide before logging — see the media-type branch.
+                    LogRefused(state, "unknown content encoding");
+                    RefuseUninspected(context, response, "unknown-content-encoding");
+                    return;
+                }
+
                 _logger.LogWarning(
                     "The upstream response used content encoding '{Encoding}', which cannot be "
                     + "scrubbed; the body was forwarded untouched.",
                     encoding);
                 return;
             case ResponseBodies.Decoding.Chained:
+                if (_options.FailClosed && !await IsBodylessAsync(context, response, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    LogRefused(state, "chained content encodings");
+                    RefuseUninspected(context, response, "chained-content-encoding");
+                    return;
+                }
+
                 _logger.LogWarning(
                     "The upstream response chained content encodings ({Encodings}), which cannot be "
                     + "scrubbed; the body was forwarded untouched.",
@@ -169,7 +272,159 @@ public sealed class ResponseScrubFeature : IResponseFeature
         replacement.Headers.ContentLength = null;
 
         response.Content = replacement;
-        _logger.LogDebug("The proxied response body was scrubbed for injected credentials.");
+        _logger.LogDebug("The proxied response body passed the credential scrubber.");
+    }
+
+    /// <summary>
+    /// M47 finding F-3: fail-closed mode (<c>CredProx:Scrubbing:FailClosed</c>). Replaces
+    /// the uninspectable body with the refusal document. Honest status: a refused 2xx/3xx
+    /// is answered 502 — CredProx never reports success for bytes it withheld — and a
+    /// vendor 4xx/5xx keeps its status, the vendor's own error class staying visible.
+    /// The document names the response class, never a value.
+    /// </summary>
+    private static void RefuseUninspected(HttpContext context, HttpResponseMessage response, string responseClass)
+    {
+        context.Features.Set(ScrubRefusalMarker.Shared);
+        var vendorStatus = (int)response.StatusCode;
+        var refusalStatus = vendorStatus < 400 ? HttpStatusCode.BadGateway : (HttpStatusCode)vendorStatus;
+        response.StatusCode = refusalStatus;
+        var document = CredProxProblemResponses.CreateProblemBytes(
+            CredProxProblemResponses.ProxyErrorType,
+            (int)refusalStatus,
+            "The upstream response was withheld",
+            new Dictionary<string, object?>
+            {
+                ["code"] = "credprox.response_uninspectable",
+                ["response_class"] = responseClass,
+            });
+        var replacement = new ByteArrayContent(document);
+        replacement.Headers.ContentType = new MediaTypeHeaderValue("application/problem+json") { CharSet = "utf-8" };
+        response.Content = replacement;
+    }
+
+    /// <summary>
+    /// M47 F-3 (Low-3): the refusal's only log line. The pass-through warning it
+    /// replaces claimed the body "was forwarded untouched" — the opposite of what
+    /// happened to a refused response. One warning per refusal (the once-per-route
+    /// shape census is about forwards; a refusal is an event), naming the response
+    /// class and the route, never a value.
+    /// </summary>
+    private void LogRefused(CredProxRequestState state, string shape)
+    {
+        var route = state.Destination?.Name ?? "(unbound)";
+        _logger.LogWarning(
+            "An upstream response was refused without inspection (class '{Shape}', route '{Route}'); "
+            + "the caller received a credprox.response_uninspectable problem response instead of the body.",
+            shape,
+            route);
+    }
+
+    /// <summary>
+    /// M47 F-3: a response with no body is never refused — there is nothing to inspect.
+    /// An empty <c>Content-Length</c> and a <c>HEAD</c> response are bodyless by
+    /// definition; a bodiless redirect (and every other empty response) rides the same
+    /// rule, which is what keeps redirects working with the option on. A chunked or
+    /// unknown-length body is decided by whether any body byte arrives: one byte is read
+    /// as the witness — zero bytes means bodyless, any byte means a body that could
+    /// carry an echo. The probe byte is dropped, not replayed: it is read only on paths
+    /// the refusal replaces outright or the forward leaves empty.
+    /// </summary>
+    private static async ValueTask<bool> IsBodylessAsync(
+        HttpContext context,
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        if (HttpMethods.IsHead(context.Request.Method))
+        {
+            return true; // a HEAD response carries no body whatever its headers claim
+        }
+
+        var content = response.Content;
+        if (content is null)
+        {
+            return true;
+        }
+
+        var length = content.Headers.ContentLength;
+        if (length == 0)
+        {
+            return true;
+        }
+
+        if (length is not null)
+        {
+            return false; // the vendor claims bytes: there is something to inspect
+        }
+
+        try
+        {
+            var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            return await stream.ReadAsync(new byte[1], 0, 1, cancellationToken).ConfigureAwait(false) == 0;
+        }
+        catch (IOException)
+        {
+            return false; // a stream that cannot answer the probe is not "no body"
+        }
+    }
+
+    /// <summary>
+    /// The readable charsets: the EXACT published single-byte, ASCII-compatible
+    /// names whose bodies the byte matcher can read.
+    /// </summary>
+    private static readonly string[] ReadableCharsets =
+    [
+        "utf-8", "utf8", "us-ascii", "ascii",
+        "iso-8859-1", "iso-8859-2", "iso-8859-3", "iso-8859-4", "iso-8859-5",
+        "iso-8859-6", "iso-8859-7", "iso-8859-8", "iso-8859-9", "iso-8859-10",
+        "iso-8859-11", "iso-8859-13", "iso-8859-14", "iso-8859-15", "iso-8859-16",
+        "windows-1250", "windows-1251", "windows-1252", "windows-1253",
+        "windows-1254", "windows-1255", "windows-1256", "windows-1257",
+        "windows-1258",
+    ];
+
+    /// <summary>
+    /// Whether the scrubber's byte matcher can find an ASCII credential echo in a body
+    /// declaring this charset: only the exact names in <see cref="ReadableCharsets"/>
+    /// — <c>utf-8</c>/<c>utf8</c>, <c>us-ascii</c>/<c>ascii</c>, <c>iso-8859-1</c>
+    /// through <c>iso-8859-11</c> and <c>iso-8859-13</c> through <c>iso-8859-16</c>
+    /// (there is no iso-8859-12: reserved and withdrawn, so its refusal is the
+    /// permanent record), and <c>windows-1250</c> through <c>windows-1258</c>, the
+    /// complete published set. Nothing else is readable: not prefix extensions of a
+    /// family (<c>iso-8859-99</c>) and not alias spellings (<c>latin1</c>, <c>l1</c>,
+    /// <c>iso8859-1</c>, <c>cp1252</c>) — declare the canonical name. Deliberately not
+    /// the error-normalisation predicate in ResponseBodies — that admits only utf-8 and
+    /// ascii because it embeds the payload as text; this one asks a byte-matching
+    /// question and stays wider while still refusing the utf-16/32 family, stateful
+    /// names (iso-2022-*) and unknown names. Matching is by name: trimmed, with ONE
+    /// pair of surrounding double quotes stripped (the RFC 9110 quoted form keeps its
+    /// quotes through MediaTypeHeaderValue), case-insensitive. The gate reads the
+    /// DECLARED charset, never the bytes: a response that misreports its charset is
+    /// not detected. No name ever resolves a .NET Encoding, so a bogus name answers
+    /// unreadable instead of throwing.
+    /// </summary>
+    private static bool IsCharsetReadable(MediaTypeHeaderValue? contentType)
+    {
+        var charset = contentType?.CharSet;
+        if (string.IsNullOrWhiteSpace(charset))
+        {
+            return true; // no declared charset: the media-type default is readable text
+        }
+
+        var name = charset.Trim();
+        if (name.Length >= 2 && name[0] == '"' && name[^1] == '"')
+        {
+            name = name[1..^1].Trim();
+        }
+
+        foreach (var readable in ReadableCharsets)
+        {
+            if (name.Equals(readable, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false; // unknown, stateful, alias, or prefixed-extension names are unreadable
     }
 
     private void WarnUninspected(CredProxRequestState state, string shape, string message)

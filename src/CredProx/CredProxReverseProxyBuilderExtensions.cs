@@ -105,6 +105,18 @@ public static class CredProxReverseProxyBuilderExtensions
             configuration, "CredProx:Scrubbing", typeof(CredProxScrubbingOptions));
         var scrubbingOptions = new CredProxScrubbingOptions();
         configuration.GetSection("CredProx:Scrubbing").Bind(scrubbingOptions);
+        // M47 F-3 (Low-5): FailClosed without Enabled is a contradiction — with
+        // scrubbing off nothing is ever inspected, so the fail-closed knob can refuse
+        // nothing. It used to bind silently and forward every echo; refused at startup
+        // like the Errors cap below (FailClosed is new in 0.14, no existing host hits
+        // this).
+        if (scrubbingOptions.FailClosed && !scrubbingOptions.Enabled)
+        {
+            throw new Microsoft.Extensions.Options.OptionsValidationException(
+                "CredProx", typeof(object),
+                ["CredProx:Scrubbing:FailClosed=true requires CredProx:Scrubbing:Enabled=true — with scrubbing disabled nothing is inspected, so fail-closed can refuse nothing. Set CredProx:Scrubbing:Enabled=true, or remove the FailClosed setting."]);
+        }
+
         services.TryAddSingleton(scrubbingOptions);
 
         // M24 (§8.5): vendor error normalisation — on by default, the caller's error
@@ -174,7 +186,8 @@ public static class CredProxReverseProxyBuilderExtensions
 
         // Built-in request features; the pipeline orders them by declared stage.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, KillSwitchFeature>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, DestinationResolutionFeature>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, DestinationResolutionFeature>(
+            sp => new DestinationResolutionFeature(sp.GetRequiredService<DestinationRegistryProvider>())));
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, HeaderHygieneFeature>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, CredentialAttachFeature>());
 
@@ -188,8 +201,11 @@ public static class CredProxReverseProxyBuilderExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IResponseFeature, ErrorNormalisationFeature>());
 
         // The single transform adapter that runs the pipeline per request.
-        services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<Yarp.ReverseProxy.Transforms.Builder.ITransformProvider, CredProxTransformProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<Yarp.ReverseProxy.Transforms.Builder.ITransformProvider, CredProxTransformProvider>(
+            sp => new CredProxTransformProvider(
+                sp.GetRequiredService<CredProxPipeline>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CredProxTransformProvider>>(),
+                sp.GetRequiredService<CredProxAuditRecorder>())));
 
         // The CredProx forwarder client factory replaces YARP's default (registered by
         // AddReverseProxy before this call, hence Replace).
@@ -210,12 +226,24 @@ public static class CredProxReverseProxyBuilderExtensions
         // every load and refuses a load that fails, keeping the previous configuration
         // serving. The startup gate below still aggregates everything into one startup
         // failure.
-        services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IConfigValidator, CredProxConfigValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigValidator, CredProxConfigValidator>(
+            sp => new CredProxConfigValidator(
+                sp.GetRequiredService<CredentialRegistryProvider>(),
+                sp.GetRequiredService<DestinationRegistryProvider>(),
+                sp.GetRequiredService<ConnectionRegistryProvider>(),
+                sp.GetRequiredService<IConfiguration>())));
 
         // The startup gate: eager binds, secret-reference validation and metadata
         // cross-checks before the first request is served.
-        services.AddHostedService<CredProxStartupValidator>();
+        services.TryAddSingleton(sp => new CredProxStartupValidator(
+            sp,
+            sp.GetServices<IProxyConfigProvider>(),
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<SecretReferenceValidator>(),
+            sp.GetServices<IPresetSource>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CredProxStartupValidator>>()));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, CredProxStartupValidator>(
+            sp => sp.GetRequiredService<CredProxStartupValidator>()));
 
         // ADR-0005 fail-closed pair to the binder's check: callers declared under
         // CredProx:Callers with no caller authenticator registered refuse startup —

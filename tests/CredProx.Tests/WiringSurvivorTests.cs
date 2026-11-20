@@ -129,7 +129,16 @@ public sealed class WiringSurvivorTests
     [Fact]
     public void AddCredProx_RegistersTheBuiltInExtensions()
     {
-        Wire(out var builder);
+        // Same wiring as Wire(), plus the IConfiguration a real host always carries: the
+        // behavioral check below resolves every hosted service, and the caller guard
+        // takes the configuration root as a constructor argument.
+        var services = new ServiceCollection();
+        var config = Config();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddCredProxConfigurationSecrets(config);
+        var builder = services.AddReverseProxy();
+        builder.AddCredProx(config);
+        using var provider = services.BuildServiceProvider();
 
         bool Registered<T>(System.Type implementation) => ((IServiceCollection)builder.Services)
             .Any(d => d.ServiceType == typeof(T) && d.ImplementationType == implementation);
@@ -139,7 +148,11 @@ public sealed class WiringSurvivorTests
         // AddCredProx alone must not bring it — only AddCredProxHmac registers it.
         Assert.False(Registered<IRequestFeature>(typeof(HmacSignFeature)));
         Assert.True(Registered<IHttpMessageHandlerBuilderFilter>(typeof(CredProxTokenClientFilter)));
-        Assert.True(Registered<IHostedService>(typeof(CredProxStartupValidator)));
+        // The startup validator is registered through a factory (its constructor is
+        // internal since the 1.0 surface freeze), so the descriptor carries no
+        // implementation type to introspect — assert the effect instead: resolving the
+        // hosted services yields exactly one validator, the singleton the gate uses.
+        Assert.Single(provider.GetServices<IHostedService>().OfType<CredProxStartupValidator>());
     }
 
     [Fact]

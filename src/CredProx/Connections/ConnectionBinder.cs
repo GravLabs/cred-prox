@@ -15,7 +15,7 @@ namespace CredProx;
 /// at startup and on rebind.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class ConnectionBinder
+internal sealed class ConnectionBinder
 {
     private readonly IConfiguration _configuration;
     private readonly SecretAccessorFactory _accessorFactory;

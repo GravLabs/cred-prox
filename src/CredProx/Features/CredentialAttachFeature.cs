@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http;
+using System.Reflection;
 using CredProx.Abstractions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -141,12 +142,23 @@ public sealed class CredentialAttachFeature : IRequestFeature
             // consent entry point, not the generic 502 (§8.3). The URL reaches the body
             // only when it is safe to hand to a browser; the problem lands either way,
             // and the exception message never does (§3.4).
-            var authorizeUrl = SanitizeAuthorizeUrl(ex.AuthorizeUrl);
+            var authorizeUrl = SanitizeAuthorizeUrl(context, binding.Options, ex.AuthorizeUrl, out var secretParams);
             if (authorizeUrl is null)
             {
-                _logger.LogWarning(
-                    "The credential '{Credential}' requires user consent, but the provider's authorize URL is not an absolute http(s) URL without credentials; the response omits it.",
-                    name);
+                if (secretParams is { Length: > 0 })
+                {
+                    // M47 F-9: the operator hears what carried a secret — escaped
+                    // parameter names (or the path/fragment marker), never values.
+                    _logger.LogWarning(
+                        "The credential '{Credential}' requires user consent, but the provider's authorize URL carries secret-bearing content ('{SecretBearing}'); the response omits the URL.",
+                        name, secretParams);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "The credential '{Credential}' requires user consent, but the provider's authorize URL is not an absolute http(s) URL without credentials; the response omits it.",
+                        name);
+                }
 
                 await state
                     .AbortAsync(StatusCodes.Status401Unauthorized, "credprox.consent_required",
@@ -268,13 +280,211 @@ public sealed class CredentialAttachFeature : IRequestFeature
     /// or other non-browser schemes, userinfo such as <c>https://user:***@idp/</c>) is
     /// dropped so a provider cannot smuggle credentials or script URLs into a response
     /// body; the consent problem itself is returned either way.
+    /// M45 finding F-9 (widened in M47): the whole URL — path, query and fragment — is
+    /// scanned, raw and percent-decoded (with '+' read as a space, both directions), for
+    /// two value sources: secrets this pipeline already injected for the request, and
+    /// the credential's OWN configured secret members (on a first-attempt consent the
+    /// injected registry is still empty, so the configured values are what the check can
+    /// know — see <see cref="CollectConfiguredSecrets"/>; that member match is BY NAME
+    /// over arbitrary plugin option shapes and its honest limit — only custom providers
+    /// reach the consent path — is stated there). Independently, a top-level
+    /// query or fragment parameter NAME containing <c>secret</c>, <c>assertion</c> or
+    /// <c>password</c> (case-insensitive), or named exactly <c>access_token</c> or
+    /// <c>refresh_token</c>, marks a leak whatever its value — while a URL that merely
+    /// contains those words in a path or inside another parameter's value relays,
+    /// because over-refusal breaks sign-in. ';' separates parameters as well as '&amp;'.
+    /// <paramref name="secretBearingParameters"/> comes back with the offending markers
+    /// on a secret drop — percent-escaped names, or <c>path-or-fragment</c> when the
+    /// value sat outside any parameter value, in the path, the fragment, or a parameter
+    /// name — never values. A secret sitting inside a parameter NAME of an otherwise
+    /// parseable query also lands under this marker: the per-pair arms read values,
+    /// so the whole-URL containment is what catches it.
     /// </summary>
-    private static string? SanitizeAuthorizeUrl(string authorizeUrl) =>
-        Uri.TryCreate(authorizeUrl, UriKind.Absolute, out var uri)
-        && uri.Scheme is "https" or "http"
-        && string.IsNullOrEmpty(uri.UserInfo)
-            ? authorizeUrl
-            : null;
+    private static string? SanitizeAuthorizeUrl(
+        HttpContext context,
+        object options,
+        string authorizeUrl,
+        out string? secretBearingParameters)
+    {
+        secretBearingParameters = null;
+        if (!Uri.TryCreate(authorizeUrl, UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("https" or "http")
+            || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            return null; // the browser-safety drop, unchanged
+        }
+
+        var injected = CredProxInjectedSecrets.GetOrCreate(context);
+        var values = new List<string>(injected.Values);
+        values.AddRange(CollectConfiguredSecrets(options));
+
+        List<string>? flagged = null;
+
+        void ScanParameters(string parameterString)
+        {
+            foreach (var pair in parameterString.Split(['&', ';'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                var equals = pair.IndexOf('=');
+                var rawName = equals < 0 ? pair : pair[..equals];
+                var rawValue = equals < 0 ? string.Empty : pair[(equals + 1)..];
+                var name = Uri.UnescapeDataString(rawName.Replace('+', ' '));
+                // The per-parameter percent-decode is the ATTRIBUTION arm: a value that
+                // carries the secret only once decoded is named in the log by its own
+                // parameter. The whole-URL fallback after the scan is the leak guard —
+                // the same URL is dropped even if this arm never fires — so removing the
+                // decode here would degrade the operator's log to 'path-or-fragment',
+                // not widen a leak. Deliberate; pinned by
+                // ConsentProblem_LogsTheParameterName_WhenOnlyTheDecodedValueCarriesTheSecret.
+                var value = Uri.UnescapeDataString(rawValue.Replace('+', ' '));
+
+                var carriesSecret = NameMarksSecret(name);
+                if (!carriesSecret && values.Count > 0)
+                {
+                    carriesSecret = values.Any(known =>
+                        rawValue.Contains(known, StringComparison.Ordinal)
+                        || value.Contains(known, StringComparison.Ordinal));
+                }
+
+                if (carriesSecret)
+                {
+                    // The name is provider-chosen text: it may only reach the log escaped.
+                    (flagged ??= []).Add(Uri.EscapeDataString(name));
+                }
+            }
+        }
+
+        if (uri.Query.Length > 1)
+        {
+            ScanParameters(uri.Query[1..]);
+        }
+
+        if (uri.Fragment.Length > 1)
+        {
+            ScanParameters(uri.Fragment[1..]);
+        }
+
+        if (flagged is null && values.Count > 0)
+        {
+            // A secret in the path — or anywhere the parameter scan cannot reach — is
+            // the same leak; the whole string is the value's scope.
+            var decodedUrl = Uri.UnescapeDataString(authorizeUrl.Replace('+', ' '));
+            if (values.Any(known =>
+                    authorizeUrl.Contains(known, StringComparison.Ordinal)
+                    || decodedUrl.Contains(known, StringComparison.Ordinal)))
+            {
+                flagged = ["path-or-fragment"];
+            }
+        }
+
+        if (flagged is not null)
+        {
+            secretBearingParameters = string.Join(", ", flagged);
+            return null;
+        }
+
+        return authorizeUrl;
+    }
+
+    /// <summary>
+    /// A parameter name is a leak marker by containment of the secret words the
+    /// credential providers send on the wire (<c>secret</c>, <c>assertion</c>,
+    /// <c>password</c>) or by exact name for the token names that live in URLs
+    /// (<c>access_token</c>, <c>refresh_token</c>). A bare <c>token</c> is NOT a marker:
+    /// OIDC legitimately carries <c>id_token_hint</c> and opaque token values through
+    /// authorize URLs.
+    /// </summary>
+    private static bool NameMarksSecret(string decodedName) =>
+        decodedName.Contains("secret", StringComparison.OrdinalIgnoreCase)
+        || decodedName.Contains("assertion", StringComparison.OrdinalIgnoreCase)
+        || decodedName.Contains("password", StringComparison.OrdinalIgnoreCase)
+        || decodedName.Equals("access_token", StringComparison.OrdinalIgnoreCase)
+        || decodedName.Equals("refresh_token", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The option member names that hold a credential's own secret, across the built-in
+    /// credential types: <c>ClientSecret</c> (OAuth client credentials, token exchange),
+    /// <c>SigningKey</c> (JWT assertion, signing material held as a string),
+    /// <c>Password</c> (login exchange, nested one level in its user/password members),
+    /// <c>Secret</c> (static key, HMAC). Membership is BY NAME: <c>client_id</c> is
+    /// public and never a member, and the raw configuration subtree is never walked —
+    /// only readable string members of the bound options carry a value here. A member
+    /// held as a <c>secret:</c> reference or template is matched in that configured form
+    /// only; the guard never resolves references (the provider's own accessor is the
+    /// resolver, and reaching it here would mean registering the value — see
+    /// <see cref="SanitizeAuthorizeUrl"/>). The consent path is reached only by a
+    /// custom credential provider raising <see cref="ConsentRequiredException"/> — the
+    /// plugin contract; no built-in provider throws it — so this name list is
+    /// best-effort over plugin option shapes: a plugin that names its member otherwise
+    /// (<c>ApiKey</c>, <c>Token</c>, <c>ClientAssertion</c>) is NOT matched here. The
+    /// parameter-NAME rule in <see cref="NameMarksSecret"/> is the general guard, and a
+    /// plugin must never put its secret into an authorize URL.
+    /// Empty and whitespace-only members are SKIPPED: a whitespace member is no real
+    /// configured secret, and containment on it fires only where the URL carries the
+    /// SAME run of whitespace (measured — a registered "   " relays a value holding one
+    /// space and refuses a padded run). The skip remains a deliberate divergence from
+    /// the scrubber, which would register a whitespace-only value and scrub it. Value LENGTH is at parity instead: the scrubber has no
+    /// minimum length, so this list has none either — a configured two-character secret
+    /// can contain-match and refuse an ordinary consent URL, which is intended
+    /// fail-closed behaviour and operator-visible because the refusal warning names the
+    /// credential. The two rules are deliberately asymmetric; do not normalise them.
+    /// </summary>
+    private static List<string> CollectConfiguredSecrets(object options)
+    {
+        var secrets = new List<string>();
+        foreach (var member in ReadSecretMembers(options))
+        {
+            secrets.Add(member);
+        }
+
+        return secrets;
+    }
+
+    private static IEnumerable<string> ReadSecretMembers(object options)
+    {
+        foreach (var property in options.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            object? value;
+            try
+            {
+                value = property.GetValue(options);
+            }
+            catch (TargetInvocationException)
+            {
+                continue; // an options getter that throws is not a secret source
+            }
+
+            if (IsSecretNamedMember(property.Name, value))
+            {
+                yield return (string)value!;
+            }
+            else if (value is not null and not string)
+            {
+                // One level deep, by name: the login options nest their password.
+                foreach (var inner in value.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    object? innerValue;
+                    try
+                    {
+                        innerValue = inner.GetValue(value);
+                    }
+                    catch (TargetInvocationException)
+                    {
+                        continue;
+                    }
+
+                    if (IsSecretNamedMember(inner.Name, innerValue))
+                    {
+                        yield return (string)innerValue!;
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool IsSecretNamedMember(string memberName, object? value) =>
+        value is string secret
+        && !string.IsNullOrWhiteSpace(secret)
+        && memberName is "ClientSecret" or "SigningKey" or "Secret" or "Password";
 
     /// <summary>
     /// Reads the inbound bearer token (scheme stripped). A present-but-non-Bearer

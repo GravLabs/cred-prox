@@ -18,7 +18,7 @@ namespace CredProx;
 /// <see cref="OptionsValidationException"/> naming the credentials — never values.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class CredentialBinder
+internal sealed class CredentialBinder
 {
     private readonly IConfiguration _configuration;
     private readonly SecretAccessorFactory _accessorFactory;
@@ -117,7 +117,7 @@ public sealed class CredentialBinder
             var options = Activator.CreateInstance(registration.OptionsType)!;
             section.Bind(options);
 
-            var validationErrors = ValidateOptions(registration.OptionsType, options);
+            var validationErrors = ValidateOptions(name, registration.OptionsType, options);
             if (validationErrors.Count > 0)
             {
                 errors.AddRange(validationErrors.Select(e => $"The credential '{name}': {e}"));
@@ -175,7 +175,10 @@ public sealed class CredentialBinder
         return new CredentialRegistry(bindings);
     }
 
-    private List<string> ValidateOptions(Type optionsType, object options)
+    // The credential's configured name is handed to validators as the options name:
+    // a validator that advises (rather than rejects) must be able to say WHICH
+    // credential it advises about, and the binder is the only place that knows it.
+    private List<string> ValidateOptions(string? credentialName, Type optionsType, object options)
     {
         var errors = new List<string>();
         var validatorType = typeof(IValidateOptions<>).MakeGenericType(optionsType);
@@ -183,7 +186,7 @@ public sealed class CredentialBinder
 
         foreach (var validator in _services.GetServices(validatorType))
         {
-            if (validate.Invoke(validator, [null, options]) is ValidateOptionsResult { Failed: true } result)
+            if (validate.Invoke(validator, [credentialName, options]) is ValidateOptionsResult { Failed: true } result)
             {
                 errors.AddRange(result.Failures!);
             }

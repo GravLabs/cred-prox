@@ -76,7 +76,7 @@ content-type: application/problem+json
       "Method": "POST",
       "Form": { "User": "{partition}-svc", "Password": "secret:acme-password" },
       "Response": "JsonPath", "ResponseField": "sessionId",
-      "Lifetime": "01:00:00",
+      "DefaultLifetime": "01:00:00",
       "Partition": { "From": "header:X-API-Env", "Allowed": ["uat", "staging"] }
     }
   },
@@ -114,7 +114,7 @@ Tracing `curl -H 'X-API-Env: uat' http://localhost:5101/acme/api/v1/timeoff`:
 3. No cached session exists for partition `uat`, so CredProx runs the login exchange:
    `POST /acme/uat/login` with form fields `user=uat-svc` (template-expanded) and the
    resolved password, then reads `sessionId` from the JSON response and caches it for
-   `Lifetime`.
+   `DefaultLifetime`.
 4. The forwarded request carries `Authorization: sess-…` (raw, per the empty
    `AttachPrefix`).
 5. A second request for `uat` within the lifetime skips step 3 entirely — and a request

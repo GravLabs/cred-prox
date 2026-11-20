@@ -32,6 +32,15 @@ public static class CredProxMetadata
     public const string Caller = "CredProx.Caller";
 
     /// <summary>
+    /// Route metadata opting the route out of the caller-header strip: with the value
+    /// <c>"off"</c> (case-insensitive) the caller's own <c>Authorization</c> and
+    /// <c>Cookie</c> headers ride to the vendor as they did before 0.14. Any other
+    /// value — including a misspelling — strips them like every other route; check the
+    /// spelling against <see cref="HeaderHygieneFeature.OptOutValue"/>.
+    /// </summary>
+    public const string CallerHeaderStrip = "CredProx.CallerHeaderStrip";
+
+    /// <summary>
     /// Route metadata opting the route out of vendor error normalisation:
     /// with the value <c>"off"</c> (case-insensitive) the route's vendor error bodies
     /// flow to the caller byte-identical, exactly as the vendor writes them. Any other

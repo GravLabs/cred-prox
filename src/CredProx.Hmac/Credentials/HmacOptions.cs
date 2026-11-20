@@ -26,11 +26,29 @@ public sealed class HmacOptions : IHasPartitionConfig
     /// <summary>
     /// The ordered canonical-string components. Each entry is one of <c>method</c>,
     /// <c>path</c>, <c>query</c>, <c>timestamp</c>, <c>bodyHash</c>, or
-    /// <c>header:&lt;Name&gt;</c>. Required, non-empty.
+    /// <c>header:&lt;Name&gt;</c>. Required, non-empty. A <c>header:&lt;Name&gt;</c>
+    /// component on a request where the header is absent contributes an empty string —
+    /// and so does one present with an empty value: the two canonicalize identically,
+    /// so a signature cannot tell them apart.
     /// </summary>
     public List<string> Components { get; set; } = [];
 
-    /// <summary>The string joined between components. Default <c>"\n"</c>.</summary>
+    /// <summary>
+    /// The string joined between components. Default <c>"\n"</c>.
+    /// A header, path or query value that carries the separator (or, for a multi-value
+    /// header, carries the <c>,</c> that joins its values) makes the canonical string
+    /// ambiguous — two distinct requests would sign identically — so such requests are
+    /// refused with a <c>credprox.canonical_ambiguous</c> problem response instead of
+    /// being signed. A separator that is legal inside header values (<c>|</c>,
+    /// <c>&amp;</c>, <c>:</c>, <c>,</c>, space) therefore risks refusals on real
+    /// traffic; the newline default cannot occur in a validated header value.
+    /// An empty <c>Separator</c> concatenates the components outright, for vendor
+    /// schemes that sign a bare concatenation. The separator check cannot apply then
+    /// (every value contains the empty string), so such requests keep being signed and
+    /// each credential configured this way gets one startup warning naming it; the
+    /// other ambiguity refusals still apply — a multi-value header whose values carry
+    /// a comma, and a signed name present on both header collections.
+    /// </summary>
     public string Separator { get; set; } = "\n";
 
     /// <summary>How the <c>timestamp</c> component and timestamp header are formatted.

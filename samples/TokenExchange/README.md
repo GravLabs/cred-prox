@@ -107,7 +107,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ALICE" http:
       "Issuer": "http://keycloak:8080/realms/credprox",
       "JwksUri": "http://keycloak:8080/realms/credprox/protocol/openid-connect/certs",
       "RequireHttpsMetadata": false,         // demo-only opt-out: this Keycloak serves keys over http on the docker network; production default is true (ADR-0003)
-      "Audience": "credprox-proxy",          // mandatory: inbound tokens must be minted for THIS proxy
+      "InboundAudience": "credprox-proxy",    // mandatory: inbound tokens must be minted for THIS proxy
       "TokenEndpoint": "http://keycloak:8080/realms/credprox/protocol/openid-connect/token",
       "ClientId": "credprox-proxy",
       "ClientSecret": "secret:keycloak-proxy-secret",

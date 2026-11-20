@@ -10,7 +10,7 @@ steps see [docs/upgrading.md](upgrading.md).
 ## 1. Hosting
 
 - **TLS is your edge's job; validation is the library's.** A destination `Template` must be
-  an absolute http(s) address — anything else refuses startup (`DestinationBinder`). The
+  an absolute http(s) address — anything else refuses startup (the destination binder). The
   token-exchange and caller-token validators default `RequireHttpsMetadata = true` and refuse
   a plain-http `Authority`/`JwksUri` unless you explicitly opt out; the opt-out exists for
   loopback test hosts, not production (ADR-0003, `docs/adr/0003-token-exchange-require-https-metadata.md`).
@@ -55,7 +55,7 @@ steps see [docs/upgrading.md](upgrading.md).
   root-level `InboundKeyHeader`. Anything else under `CredProx:` refuses startup
   (`ConfigKeyValidator.RejectUnknownKeysAtStartup`); each section then validates its own
   contents, and the credential binders refuse a credential `Type` whose package is not
-  registered, naming the package to add (`CredentialBinder`).
+  registered, naming the package to add (the credential binder).
 - Consequences to plan for: a typo or an inert section **fails the container at startup**,
   it does not silently ignore. A deploy that cannot validate never receives traffic — that
   is the intended behaviour; the exception message names the section, key and rule. The
@@ -65,6 +65,9 @@ steps see [docs/upgrading.md](upgrading.md).
   without the `CredProx.Operations` package (or `CredProx:CallerAuth` without
   `CredProx.CallerKeys`, `CredProx:CallerToken` without `CredProx.CallerTokens`) fails
   startup naming the package — those features moved out of the core in 0.12 (ADR-0005).
+- `CredProx:Scrubbing:FailClosed=true` with `CredProx:Scrubbing:Enabled=false` fails
+  startup naming both keys: with scrubbing off nothing is inspected, so the fail-closed
+  knob could refuse nothing — the combination was inert and silent.
 
 ## 4. Health, metrics and audit
 
@@ -107,19 +110,38 @@ steps see [docs/upgrading.md](upgrading.md).
   while normalisation stays on lets unscrubbed vendor bytes into the `vendor_detail` field
   of normalised errors — that combination is documented in ADR-0006; the safe pair is both
   on, or off together with eyes open.
+- Fail-closed scrubbing (`CredProx:Scrubbing:FailClosed`, default `false`): a response the
+  scrubber cannot inspect — the classes the README's Security section lists, which
+  include a body in a charset the matcher cannot read (the `utf-16`/`utf-32` family,
+  stateful or unknown names; readable ASCII-compatible charsets are scrubbed normally)
+  — is refused with a
+  `credprox.response_uninspectable` problem response instead of forwarded, error
+  responses included: a refused 2xx/3xx answers `502`, a vendor 4xx/5xx keeps its
+  status, and a response with no body (empty, `HEAD`, a bodiless redirect) is never
+  refused — a declared non-zero `Content-Length` counts as a body except on a `HEAD`, where the method alone decides. Turn it on when an
+  echoed credential inside an unopened body is the worse outcome; a refusal logs one
+  warning saying the body was refused and naming the class and route, and the
+  once-per-route-and-shape pass-through warning stays only on responses that really
+  forwarded.
 - Per route, the YARP metadata `CredProx.ErrorNormalisation` with value `off`
   (case-insensitive) forwards vendor error bodies byte-identical; any other value —
   including a misspelling — normalises like every other route.
 - Normalisation reads at most `CredProx:Errors:MaxNormalisedBodyBytes` of a body; beyond
-  the cap the body is refused rather than buffered. These are the only two safety switches
-  in the pipeline: header hygiene, credential attach, the operation allow-list, the kill
+  the cap the body is refused rather than buffered. These are the only two switches that
+  turn pipeline protections off (tightening knobs like `FailClosed` only add refusal):
+  header hygiene, credential attach, the operation allow-list, the kill
   switch and refresh-on-401 have no off switch and stay non-replaceable (ADR-0006).
 
 ## 7. Logging levels that never leak
 
 - The caller-key header (`CredProx:InboundKeyHeader`, default `X-API-Key`) is stripped from
   every outbound request whatever the route; the caller-auth header (`CredProx:CallerAuth:HeaderName`,
-  default `X-CredProx-Key`) never travels upstream (`HeaderHygieneFeature`). Key material
+  default `X-CredProx-Key`) never travels upstream (`HeaderHygieneFeature`). The caller's own
+  `Authorization` and `Cookie` are stripped by default on every route — a route that must
+  forward them opts out with YARP metadata `CredProx.CallerHeaderStrip = "off"`
+  (case-insensitive; any other value strips like every other route). The credential
+  CredProx attaches is placed after the strip, so the vendor's own `Authorization` is
+  never affected. Key material
   is absent from logs and audit by construction: literal hashes are never echoed, the
   `secret:` indirection keeps plaintext out of configuration dumps, and audit redacts the
   built-in sensitive sets (`tests/CredProx.Tests` pin both the strip and the absence).
@@ -179,10 +201,13 @@ steps see [docs/upgrading.md](upgrading.md).
   source's change token and keeps the last good one serving when a rebind is
   refused, and the caller key table reloads with the caller registry
   (`CredProx:Callers:<callerId>:Keys`). That source is the configuration by
-  default, so reloads land; Callers additionally watch the configuration reload
-  token itself, and a host that replaces the secret source with one that does
-  not fire on configuration reload would not see config-only edits land without
-  a restart.
+  default, so reloads land. Callers additionally watch the configuration reload
+  token when their secret source does not already cover the configuration
+  (`CallerRegistryProvider`): a host that replaces the secret source with one
+  that does not fire on configuration reload therefore still sees config-only
+  edits land for Callers — the four others (Credentials, KillSwitch,
+  Destinations, Connections) rebind only on the source's change token and would
+  need a source that fires, or a restart, in that shape.
   Everything else is read once at startup: `CredProx:Scrubbing`, `CredProx:Errors`,
   `CredProx:Audit`, `CredProx:Health`, `CredProx:Throttling`, `CredProx:Resilience`,
   `CredProx:CallerAuth` and `CredProx:CallerToken` — changing those across a fleet

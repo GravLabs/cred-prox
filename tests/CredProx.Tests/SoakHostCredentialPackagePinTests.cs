@@ -65,10 +65,8 @@ public sealed class SoakHostCredentialPackagePinTests
         var hasCallers = doc.RootElement.GetProperty("CredProx").TryGetProperty("Callers", out var callers)
                          && callers.ValueKind == JsonValueKind.Object
                          && callers.EnumerateObject().Any();
-        if (!hasCallers)
-        {
-            return; // no caller admission in the config, no obligation on the host
-        }
+        Assert.True(hasCallers,
+            "SoakHost appsettings.json carries no CredProx:Callers section - the package-pin checks below would pass vacuously; the soak host admits callers on purpose.");
 
         var root = RepoRoot();
         var csproj = File.ReadAllText(Path.Combine(root, "tools", "m33-soak", "SoakHost", "SoakHost.csproj"));

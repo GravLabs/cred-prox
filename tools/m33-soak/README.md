@@ -3,7 +3,9 @@
 Runs the **repository's current CredProx** — the version this tree packs, from the local
 feed, not `src/` project references — under sustained load behind Toxiproxy,
 against WireMock stubs, inside the §5.5 machine budget: Σ container caps 6.0 CPU / 3.75 GiB,
-hourly `uptime` check with backoff at 5-min load > 40, and teardown on every exit path —
+`uptime` sampling every ≤60 s (run-soak.sh; 30–60 min in the phase drivers) with backoff when the 5-min load passes `SOAK_LOAD_LIMIT` (default 40):
+the run then stops its own label-tagged k6 one-off and reports a named load-gate failure
+(BACKOFF-GATE-FAIL), never a pass. Teardown runs on every exit path —
 no container outlives a scenario, clean or failed.
 
 **Phase A status: scaffold — not yet executed.** First action of Phase B is the `--smoke`
@@ -48,6 +50,7 @@ owner's OK.
 
 ```bash
 SOAK_RUN_DIR=... # the runner creates its own /tmp/m33-soak-<utc> dir and exports this itself
+SOAK_LOAD_LIMIT=40 # 5-min-load backoff threshold (every run-soak/phase-b* driver); set -1 to force the backoff branch on a short run
 tools/m33-soak/scripts/run-soak.sh --smoke              # 3 min smoke (Phase B step 0)
 tools/m33-soak/scripts/run-soak.sh                      # 4 h steady soak (240 min, 20 VUs)
 SOAK_RUN_DIR=/tmp/m33-soak-... tools/m33-soak/scripts/faults.sh vendor-429 set

@@ -185,7 +185,7 @@ public sealed class CredentialRedirectRefusalTests : IAsyncLifetime
         var options = new TokenExchangeOptions
         {
             Issuer = Issuer,
-            Audience = Audience,
+            InboundAudience = Audience,
             JwksUri = Idp("/.well-known/jwks-302.json"),
             RequireHttpsMetadata = false,
             TokenEndpoint = Idp("/token"),
@@ -219,7 +219,7 @@ public sealed class CredentialRedirectRefusalTests : IAsyncLifetime
         var options = new TokenExchangeOptions
         {
             Issuer = Issuer,
-            Audience = Audience,
+            InboundAudience = Audience,
             Authority = $"http://127.0.0.1:{_idpPort}/disc302",
             RequireHttpsMetadata = false,
             ClientId = "cid",
@@ -249,7 +249,7 @@ public sealed class CredentialRedirectRefusalTests : IAsyncLifetime
         var options = new TokenExchangeOptions
         {
             Issuer = Issuer,
-            Audience = Audience,
+            InboundAudience = Audience,
             JwksUri = Idp("/.well-known/jwks.json"),
             RequireHttpsMetadata = false,
             TokenEndpoint = Idp("/token-302"),
@@ -318,7 +318,7 @@ public sealed class CredentialRedirectRefusalTests : IAsyncLifetime
         {
             ["CredProx:Credentials:conn:Type"] = "TokenExchange",
             ["CredProx:Credentials:conn:Issuer"] = Issuer,
-            ["CredProx:Credentials:conn:Audience"] = Audience,
+            ["CredProx:Credentials:conn:InboundAudience"] = Audience,
             ["CredProx:Credentials:conn:JwksUri"] = Idp("/.well-known/jwks.json"),
             ["CredProx:Credentials:conn:RequireHttpsMetadata"] = "false",
             ["CredProx:Credentials:conn:TokenEndpoint"] = Idp("/token-302"),
@@ -386,7 +386,7 @@ public sealed class CredentialRedirectRefusalTests : IAsyncLifetime
         var options = new TokenExchangeOptions
         {
             Issuer = Issuer,
-            Audience = Audience,
+            InboundAudience = Audience,
             JwksUri = Idp("/.well-known/jwks.json"),
             RequireHttpsMetadata = false,
             TokenEndpoint = Idp("/token"),
@@ -414,7 +414,7 @@ public sealed class CredentialRedirectRefusalTests : IAsyncLifetime
         var options = new TokenExchangeOptions
         {
             Issuer = Issuer,
-            Audience = Audience,
+            InboundAudience = Audience,
             Authority = $"http://127.0.0.1:{_idpPort}",
             RequireHttpsMetadata = false,
             ClientId = "cid",
@@ -478,7 +478,7 @@ public sealed class CredentialRedirectRefusalTests : IAsyncLifetime
         var options = new TokenExchangeOptions
         {
             Issuer = Issuer,
-            Audience = Audience,
+            InboundAudience = Audience,
             Authority = $"http://127.0.0.1:{_idpPort}/disc302",
             RequireHttpsMetadata = false,
             ClientId = "cid",

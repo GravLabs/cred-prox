@@ -30,8 +30,12 @@ namespace CredProx;
 [Experimental("CREDPROX001")]
 public sealed class OAuthClientCredentialsProvider : ICredentialProvider<OAuthClientCredentialsOptions>
 {
-    /// <summary>The name of the HttpClient used for token calls.</summary>
-    public const string HttpClientName = "credprox-token";
+    /// <summary>
+    /// The name of the HttpClient used for token calls — the shared
+    /// <see cref="CredProxHttpClientNames.TokenClient"/> name, kept as this provider's
+    /// own constant for callers that register the client alongside it.
+    /// </summary>
+    public const string HttpClientName = CredProxHttpClientNames.TokenClient;
 
     // M38 C: the upper cap on any vendor-stated lifetime. An early refresh only re-mints, so
     // caching less than the vendor asked for is safe; caching more (a days-long "expires_in")

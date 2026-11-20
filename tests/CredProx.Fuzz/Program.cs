@@ -6,8 +6,8 @@ using Microsoft.Extensions.Configuration;
 
 using SharpFuzz;
 
-// M31 Phase B harness (plan 5.4): six targets, one per process, selected by argv:
-//   pathpatterns (default) | headerattach | scrub | sse | configkeys | parsers
+// M31 Phase B harness (plan 5.4): seven targets, one per process, selected by argv:
+//   pathpatterns (default) | headerattach | scrub | sse | configkeys | parsers | media
 // Each target is an invariant probe over a pure-or-cheap entry point; a crash means
 // either an unexpected exception type or a broken post-condition (InvariantViolation).
 // Documented validation rejections (ArgumentException/FormatException from the BCL
@@ -35,6 +35,9 @@ switch (target)
         break;
     case "parsers":
         Fuzzer.OutOfProcess.Run(Parsers);
+        break;
+    case "media":
+        Fuzzer.OutOfProcess.Run(Media);
         break;
     default:
         throw new ArgumentException($"unknown fuzz target: {target}");
@@ -293,8 +296,8 @@ static void ConfigKeys(string input)
     }
 }
 
-// Small parsers: HMAC component parsing, the header-newline defence behind the
-// canonical string, and media-type classification.
+// Small parsers: HMAC component parsing and the canonical-string separator-injection
+// probe. Media-type classification moved to its own target (Media).
 static void Parsers(string input)
 {
     try
@@ -314,9 +317,18 @@ static void Parsers(string input)
             }
         }
 
-        // canonical-string separator injection: two header layouts are distinct
-        // documents; they may only canonicalize identically if a value smuggled the
-        // separator — which the BCL header validator must make unconstructable.
+        // canonical-string separator injection: two header layouts that are distinct
+        // documents may only canonicalize identically if signing REFUSES (the boundary-
+        // binding rule of qitem-20261120025812-1841885579827f16: strings differ OR signing
+        // refuses — a collision without refusal is the finding).
+        // Values go on with TryAddWithoutValidation, DELIBERATELY skipping the BCL header
+        // validator: the validated shape was measured unreachable (2026-11-20) — a value
+        // prefixed with the separator is unconstructable through Headers.Add, so every
+        // input but the empty/separator-only shapes returned before any comparison and
+        // this oracle could never fire. Skipping validation asks the canonical layer its
+        // own question: can newline-bearing values collide two genuinely distinct
+        // documents into one canonical string? (Production attach goes through validated
+        // headers; that defence stays covered where it matters, by the unit battery.)
         var parts = input.Split('\u0001', 2);
         var v1 = parts[0];
         var v2 = parts.Length > 1 ? parts[1] : string.Empty;
@@ -327,26 +339,21 @@ static void Parsers(string input)
 
         var legit = new HttpRequestMessage(HttpMethod.Post, "http://vendor.example/api");
         var smuggled = new HttpRequestMessage(HttpMethod.Post, "http://vendor.example/api");
-        try
-        {
-            legit.Headers.Add("X-A", v1);
-            legit.Headers.Add("X-B", v2.Length == 0 ? string.Empty : "\n" + v2);
-            smuggled.Headers.Add("X-A", v1.Length == 0 ? string.Empty : v1 + "\n");
-            smuggled.Headers.Add("X-B", v2);
-        }
-        catch (Exception ex) when (ex is ArgumentException or FormatException)
-        {
-            return; // newline refused: the defence holds, nothing to compare
-        }
+        legit.Headers.TryAddWithoutValidation("X-A", v1);
+        legit.Headers.TryAddWithoutValidation("X-B", v2.Length == 0 ? string.Empty : "\n" + v2);
+        smuggled.Headers.TryAddWithoutValidation("X-A", v1.Length == 0 ? string.Empty : v1 + "\n");
+        smuggled.Headers.TryAddWithoutValidation("X-B", v2);
 
-        var legitCanonical = HmacSigner.BuildCanonicalString(components, legit, body, options, now);
-        var smuggledCanonical = HmacSigner.BuildCanonicalString(components, smuggled, body, options, now);
-        if (legitCanonical == smuggledCanonical)
+        // A refusal is the shipped fail-closed behaviour, not a crash: the oracle counts a
+        // finding only when distinct documents collide WITHOUT either side refusing.
+        var (legitCanonical, legitRefused) = TryBuild(components, legit, body, options, now);
+        var (smuggledCanonical, smuggledRefused) = TryBuild(components, smuggled, body, options, now);
+        if (!legitRefused && !smuggledRefused && legitCanonical == smuggledCanonical)
         {
             // Only a collision between genuinely distinct documents is a finding. When a
             // value is empty the ternaries above collapse both requests to the same header
-            // set (empty is valid for the BCL validator and carries no separator), and an
-            // identical-document 'collision' is an oracle artefact, not library behaviour.
+            // set (carrying no separator either way), and an identical-document
+            // 'collision' is an oracle artefact, not library behaviour.
             var legitPair = (
                 string.Join(",", legit.Headers.GetValues("X-A")),
                 string.Join(",", legit.Headers.GetValues("X-B")));
@@ -355,26 +362,108 @@ static void Parsers(string input)
                 string.Join(",", smuggled.Headers.GetValues("X-B")));
             if (legitPair != smuggledPair)
             {
-                throw new InvariantViolation($"separator smuggled through a header value: '{v1}' / '{v2}'");
+                throw new InvariantViolation($"separator smuggled through a header value without refusal: '{v1}' / '{v2}'");
             }
         }
 
-        // media-type classification: must never throw on a parsed value, and must be
-        // deterministic
-        if (System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(input, out var mediaType))
-        {
-            var first = (ResponseBodies.IsEventStream(mediaType), ResponseBodies.IsTextLike(mediaType), ResponseBodies.IsCharsetUtf8OrAscii(mediaType));
-            var again = (ResponseBodies.IsEventStream(mediaType), ResponseBodies.IsTextLike(mediaType), ResponseBodies.IsCharsetUtf8OrAscii(mediaType));
-            if (first != again)
-            {
-                throw new InvariantViolation("media classification nondeterministic");
-            }
-        }
     }
     catch (Exception ex) when (ex is ArgumentException or FormatException)
     {
         // documented validation rejects
     }
+
+    // The boundary rule says a component carrying the separator REFUSES to sign; that
+    // refusal is the shipped defence, so it is folded into a flag rather than reaching
+    // the oracle as an unexpected exception. Any other exception still escapes (the
+    // harness's crash signal).
+    static (string Canonical, bool Refused) TryBuild(
+        (HmacComponentKind, string)[] components, HttpRequestMessage request, byte[] body, HmacOptions options, DateTimeOffset now)
+    {
+        try
+        {
+            return (HmacSigner.BuildCanonicalString(components, request, body, options, now), false);
+        }
+        catch (HmacCanonicalAmbiguousException)
+        {
+            return (string.Empty, true);
+        }
+    }
+}
+
+// Media-type classification runs as its own target (qitem-20261120022245): inside the
+// old combined shape it only ever saw fuzz-bytes that MediaTypeHeaderValue.TryParse
+// refused, making the leg unreachable; its own corpus holds parseable media types so
+// classification actually executes. Must not throw on a parsed value — an exception
+// escaping here is the finding (nothing is caught).
+// The leg used to re-call the three shipped predicates and compare the two results.
+// That oracle is unfireable by construction — same pure calls, same argument — and a
+// check that cannot fail is not kept (qitem-20261120031636-7499bc7183b0f7e9). The leg
+// now compares the shipped classification against an independent reading of the same
+// documented mapping (the XML docs of ResponseBodies), computed here over the parsed
+// value with its own string logic. A disagreement — from a change on either side — is
+// the finding, and reddens the target inside the time box.
+static void Media(string input)
+{
+    if (System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(input, out var mediaType))
+    {
+        var shipped = (ResponseBodies.IsEventStream(mediaType), ResponseBodies.IsTextLike(mediaType), ResponseBodies.IsCharsetUtf8OrAscii(mediaType));
+        var documented = DocumentedClassification(mediaType);
+        if (shipped != documented)
+        {
+            throw new InvariantViolation($"media classification disagrees with the documented mapping for '{input}': shipped {shipped} vs documented {documented}");
+        }
+    }
+}
+
+// Independent restatement of the documented media-type mapping (ResponseBodies XML
+// docs), sharing no code with the shipped predicates: event-stream iff the media type
+// is text/event-stream; text-like iff text/* or the structured-text subtypes and the
+// enumerated exact subtypes; charset ok iff blank or utf-8/utf8/us-ascii/ascii.
+// Both sides read the same parsed MediaTypeHeaderValue, so the oracle compares the
+// MAPPING, not the BCL parser's view of odd input.
+static (bool EventStream, bool TextLike, bool CharsetOk) DocumentedClassification(System.Net.Http.Headers.MediaTypeHeaderValue mediaType)
+{
+    var mt = mediaType.MediaType;
+    var eventStream = string.Equals(mt, "text/event-stream", StringComparison.OrdinalIgnoreCase);
+    var textLike = false;
+    if (!string.IsNullOrEmpty(mt))
+    {
+        if (mt.StartsWith("text/", StringComparison.OrdinalIgnoreCase))
+        {
+            textLike = true;
+        }
+        else
+        {
+            var slash = mt.IndexOf('/');
+            if (slash >= 0)
+            {
+                var subtype = mt[(slash + 1)..];
+                textLike = subtype.EndsWith("+json", StringComparison.OrdinalIgnoreCase)
+                    || subtype.EndsWith("+xml", StringComparison.OrdinalIgnoreCase)
+                    || subtype.EndsWith("+javascript", StringComparison.OrdinalIgnoreCase)
+                    || IsOneOf(subtype, "json", "xml", "xhtml+xml", "javascript", "x-javascript", "ecmascript",
+                        "x-www-form-urlencoded", "yaml", "x-yaml", "ndjson", "x-ndjson");
+            }
+        }
+    }
+
+    var charset = mediaType.CharSet;
+    var charsetOk = string.IsNullOrWhiteSpace(charset)
+        || IsOneOf(charset.Trim(), "utf-8", "utf8", "us-ascii", "ascii");
+    return (eventStream, textLike, charsetOk);
+}
+
+static bool IsOneOf(string value, params string[] candidates)
+{
+    foreach (var candidate in candidates)
+    {
+        if (value.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 internal static class Probe

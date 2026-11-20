@@ -11,7 +11,14 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-19): `0.13.0` is **published on the registry** — ten packages at
+Current state (2026-11-20): `0.13.1` is **published on the registry** — the security patch
+for `0.13.0`: credential fetches refuse HTTP redirects, JSON-escaped credential echoes are
+scrubbed, the scrubber's pass-through classes warn, and provider-boundary messages carry the
+exception type only; no public API added, changed or removed. GitHub `main` and tag `0.13.1`
+sit on one squashed commit `61b6ef8eeabc5660582e7b74cf91539fefc00cbe` (noreply author, tree
+identical to the release tip `a8a700f`), appended on the previous public tip `4ac539b`; see
+the `0.13.1` history entry. The baseline rotation to the published `0.13.1` bytes ran with
+the `0.14.0` prep (ADR-0001). Previously: `0.13.0` was **published on the registry** — ten packages at
 one version; it fixes caller-key rotation under upper-cased configuration sources (0.12.0
 is affected), makes `CredProx:Health:Enabled=false` really off, removes the 0.12.0
 per-request attach allocation, and documents how to replace or turn off each built-in
@@ -19,8 +26,7 @@ per-request attach allocation, and documents how to replace or turn off each bui
 against the published `0.12.0` bytes. GitHub `main` and tag `0.13.0` sit on one squashed
 commit `4ac539bd5d00ae42fa11032a4f0d09294381b19e` (noreply author, tree identical to the
 internal release commit `9b23040`), appended on the previous public tip `5cc1a7e`; see the
-`0.13.0` history entry. The next baseline rotation, to the published `0.13.0` bytes, runs
-at the next release prep (ADR-0001). Previously: `0.12.0` was **published on the registry** — the minimal core
+`0.13.0` history entry. Previously: `0.12.0` was **published on the registry** — the minimal core
 with one package per optional feature (ADR-0005): **ten packages at one version**, six of
 them (`CredProx.CallerKeys`, `CredProx.CallerTokens`, `CredProx.Hmac`,
 `CredProx.LoginExchange`, `CredProx.OAuth`, `CredProx.Operations`) on the registry for the
@@ -63,10 +69,10 @@ plus the feature package), additive for everyone else — the CHANGELOG `[0.12.0
 entries are that contract; the CHANGELOG entries remain the consumer
 contract. The `0.7.1` known issues stay resolved (F1: CI-path-mapped PDBs; F2: packed from a
 publicly resident commit); the `0.7.0`/`0.7.1` published packages keep their historical
-metadata (immutable). The baseline rotation **ran with the `0.13.0` prep**: `build/baselines/`
-holds the published `0.12.0` bytes (all ten, sha256-verified; ADR-0001); every pack now
-validates all ten packages against them — the six that first shipped at `0.12.0` entered
-the folder at that rotation; the next rotation runs at the next release prep per the rule below.
+metadata (immutable). The latest baseline rotation **ran with the `0.14.0` prep**: `build/baselines/`
+holds the published `0.13.1` bytes (all ten, sha256-verified; ADR-0001); every pack
+validates all ten packages against them; the next rotation runs at the next release prep
+per the rule below.
 
 ## What gets published
 
@@ -342,11 +348,90 @@ all ten packages against nuget.org alone, per-package provenance asserted from e
   baseline. A fresh-obj pack must show zero diagnostics **beyond the file's entries** and
   zero unnecessary-suppression warnings. Pre-1.0 the CHANGELOG
   preamble is the consumer contract.
+- **Public-surface witness for a release that changes the API** (since `0.14.0`): beside
+  APICompat, dump the public surface of the release tip and of the previously published
+  bytes with two independent reflection dumpers, and diff on member identity (kind,
+  assembly, owning type, member name), not line text. Each dumper has a blind spot the
+  other covers: one emits no operator members, the other no base-type or interface
+  lines. So the witness is the **union** of both diffs, and every line in it must map to
+  a CHANGELOG entry. APICompat stays the packaged check (CP0008 covers base-list changes).
+  The previously published bytes are the ones the registry serves: nothing is on nuget.org
+  until that route is opened. Restore them outside the repo tree with a sha256 check
+  against the release's recorded list. Inside the repo, the NuGet.Config maps `CredProx*`
+  to the local folder feed of dev builds, so a restore there never reaches the registry.
 - A credential failure in the library answers `502` (§3.4) — the status codes in
   `README`/plan are the contract; changing one is a plan change, not a packaging fix.
 
 ## Release history
 
+- `0.13.1` (GitHub `61b6ef8eeabc5660582e7b74cf91539fefc00cbe`, release tip `a8a700f`, merged
+  into `main` as `ecf965d`): **published 2026-11-20** — the M45 security patch. Security:
+  credential acquisition and caller-token validation refuse HTTP redirects (affected:
+  credential acquisition `0.3.0-preview.1`..`0.13.0`, caller-token validation
+  `0.11.0`..`0.13.0`); JSON-escaped credential echoes are scrubbed (`0.7.0`..`0.13.0`); the
+  scrubber's pass-through classes warn; provider-boundary messages carry the exception type
+  only. Documentation: the production checklist, the credential-rotation runbook and the
+  upgrade guide. No public API added, changed or removed. Prep (`a5e3f06`..`a8a700f`): the
+  baseline rotation to the ten published `0.13.0` nupkgs, sha256-verified 10/10 (and
+  re-derived by the checker from a fresh registry download); version `0.13.1` with the nine
+  `CredProx*` pins; the CHANGELOG `[0.13.1]` entry; `main` merged in so the release tree
+  carries the fixed soak harness (src unchanged: `git diff 691a484 a8a700f -- src` empty).
+  Gates at `a8a700f`, run by the builder and re-derived independently by the checker:
+  APICompat 10/10 (success phrase and package-validation target counted separately); a
+  reflection diff of the public surface against the `0.13.0` dlls, additions 0 and
+  removals 0 over all ten (814 entries, two independent dumpers); the build 0W/0E; the
+  battery green, line coverage 0.9845 by the cobertura line-rate; all 18 sample smokes and
+  `CredProx.SampleSmokes` 86/86 with every stamp `0.13.1+a8a700f…`; consumer compatibility
+  against the published `0.13.0` bytes; disclosure scans zero hits. Release determinism holds
+  at payload level (dll, pdb and nuspec byte-identical across packs); the nupkg container
+  hash differs between packs only by NuGet's random core-properties name. Bench: the
+  2026-11-19 differential at identical src (accepted delta `OAuthCacheHitScrub` +27..35 B/op,
+  the cost of scrubbing escaped echoes; docs/benchmarks.md). Soak: the 4 h run at the
+  security-fix src (2026-11-19 19:09-23:09Z) authenticated and proxied all 993,599 requests
+  (k6 checks 993,599/993,599, proxy-log forwards equal to iterations, zero host refusals or
+  caller-auth failures, zero secret-scan hits), and a 10-min run at `a8a700f` graded by that
+  tree's own gate passed 41,399/41,399 with forwards equal to iterations. An earlier
+  2026-11-19 soak was void (every request refused 401) and is not counted.
+  Ceremony (2026-11-20): GitHub ONE squashed commit `61b6ef8` on the previous public tip
+  `4ac539b`, noreply author and committer, tree identical to the release tip `a8a700f`; the
+  annotated tag `c3c9b60` built with `git mktag` (noreply tagger, `+0000`, header
+  `tag 0.13.1`), checked with `git cat-file -p` before the push (zero private-email hits).
+  CI on the public commit, Actions run 44655029515: green on all three jobs, first attempt.
+  Packed **once** from a clean detached worktree at the public commit,
+  `-p:ContinuousIntegrationBuild=true`, fresh obj, isolated package cache: ten packages,
+  every pack `cp=0 unnecessary=0`, and the APICompat success line on all ten. Sanity over all
+  twenty packages (121 members): SourceLink carries the full public SHA and the `/_/` mapping
+  in every symbol package, every nuspec names the public commit, every dll reads
+  `0.13.1+61b6ef8…`, lib shape `net10.0`-only, zero private-path, private-mail, internal-host
+  or key-material hits. The registry served nothing at `0.13.1` before the push. Push round:
+  ten nupkgs, each exactly once; all twenty PUTs answered `201 Created`. Nupkg sha256:
+  `CredProx` `740dc87f35af29cc59c3349deb2f350df76bd218c4ad5a723f661650223e30c6`,
+  `CredProx.Abstractions` `569d42bd100946993272b34e17ed04f248af1788a1acba720577ffa7c9c2caa3`,
+  `CredProx.AzureKeyVault` `b45fe46c942db33e6ef9e98572f28866fae7451dd30a68100d659ecfb267a9e8`,
+  `CredProx.CallerKeys` `ed85f747f9550cfcda2c8e6d9d079b60eeee2842556681815d06d2c9ae8cb001`,
+  `CredProx.CallerTokens` `5ec9a232d6273aa456e9d03e0c42594a9d741d6d4fcfe84e825babe226ea1551`,
+  `CredProx.Hmac` `5ea460ef2cb1efeffeca58ece6c7707f1ccaabadfe7a079f4bc5b683b8856d2d`,
+  `CredProx.LoginExchange` `17143d012c4e62ab5c1db42d56aa213c69ca3221bcc5793028ce76c5f83acc8f`,
+  `CredProx.OAuth` `9235ca2197b5e174ec6e40b821de0d3d60145b7e86d90246abf07a5072cbefd1`,
+  `CredProx.Operations` `95fdbdef11a5b679705a5c624e8e8a9522ceae08db8b891241f394886dfefa9e`,
+  `CredProx.Testing` `fe1f33a6221cb0f269be6ca92c2c9cac0a3ba72f8197f6315c30c3bc2bf1eb9e`.
+  Consumer verification: an isolated package cache with a cleared http-cache restored all
+  ten from the registry, byte-identical 10/10 to the pushed files; the QuickStart smoke
+  passed on those downloaded bytes (3/3, loaded `CredProx` `0.13.1+61b6ef8…`). **Not
+  verified at publish:** the SourceLink debugger step-through (CI asserts the path form) and
+  the consumer-side `.snupkg` download path. **Known gap:** the nightly fuzz job's `parsers`
+  target recorded zero executions on 2026-11-19 (the harness instrumented `CredProx.dll` but
+  not `CredProx.Hmac.dll`, which the target reaches first since the `0.12.0` package split,
+  so the fuzzer aborted before its first case; no crash found). The gate that fails on zero
+  executions arrived in `0.13.0`, so before it the same no-op run passed silently: the
+  parsers target has likely not fuzzed anything since `0.12.0`. The other five targets,
+  including the scrubber, ran green. Restoring executions alone would not have made the
+  target able to report on its two header invariants either: the BCL header validator
+  refused every value carrying the separator, so the canonical-string comparison could
+  never be handed two genuinely distinct requests, and the media-type leg only ever saw
+  bytes the media-type parser refused — both were made reachable on 2026-11-20 (values
+  fed via `TryAddWithoutValidation`; media split into its own target with its own
+  corpus).
 - `0.13.0` (GitHub `4ac539bd5d00ae42fa11032a4f0d09294381b19e`, internal release commit
   `9b23040`, the merge of `release-0.13.0` at `302219d`): **published 2026-11-19** — M43.
   Fixed: caller-key rotation under upper-cased configuration sources (the published `0.12.0`

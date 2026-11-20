@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CredProx;
@@ -10,8 +11,28 @@ namespace CredProx;
 /// </summary>
 internal sealed class HmacOptionsValidator : IValidateOptions<HmacOptions>
 {
+    private readonly ILogger<HmacOptionsValidator>? _logger;
+
+    public HmacOptionsValidator(ILogger<HmacOptionsValidator>? logger = null) =>
+        _logger = logger;
+
     public ValidateOptionsResult Validate(string? name, HmacOptions options)
     {
+        // An empty Separator stays VALID: vendor schemes exist that sign a bare
+        // concatenation of components, and refusing to sign would make the library
+        // unusable for them. The separator check cannot apply then — every value
+        // "contains" the empty string — so the operator must hear that consequence
+        // at startup instead; the other ambiguity refusals (a multi-value header
+        // whose values contain a comma, a signed name on both header collections)
+        // still fire. One warning per validation of the credential, naming it;
+        // the binder validates each credential once per bind.
+        if (options.Separator.Length == 0)
+        {
+            _logger?.LogWarning(
+                "The HMAC credential '{Credential}' uses an empty Separator: components are concatenated with no boundary byte, so a value ending where the next begins lets two distinct requests sign identically. CredProx keeps signing such requests for vendor compatibility; choose a separator that cannot occur inside component values to keep boundary protection.",
+                name ?? "default");
+        }
+
         var failures = new List<string>();
 
         if (string.IsNullOrEmpty(options.Secret))

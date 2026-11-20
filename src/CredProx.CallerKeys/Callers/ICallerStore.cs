@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
+using CredProx.Abstractions;
 
-namespace CredProx.Abstractions;
+namespace CredProx.CallerKeys;
 
 /// <summary>
 /// The result of a successful key lookup: who the key belongs to. Deliberately carries no

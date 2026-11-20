@@ -61,9 +61,11 @@ public sealed class TokenExchangeOptions : IHasAttachment, IHasPartitionConfig, 
     /// <summary>
     /// The required inbound token audience — mandatory. Without an audience check any token
     /// the issuer minted for any other client becomes exchangeable (token confusion).
+    /// The name says which side it reads: the caller's inbound token, not the requested
+    /// token's audience (<see cref="RequestedAudience"/>) or another bag's assertion audience.
     /// Accepts the <c>{partition}</c> and <c>{secret:...}</c> template forms.
     /// </summary>
-    public string? Audience { get; set; }
+    public string? InboundAudience { get; set; }
 
     /// <summary>
     /// The claim carrying the user subject for the per-user cache key and audit.
@@ -121,7 +123,7 @@ public sealed class TokenExchangeOptions : IHasAttachment, IHasPartitionConfig, 
 
     /// <summary>
     /// RFC 8693 <c>aud</c> — the audience of the <em>requested</em> token (distinct from the
-    /// inbound <see cref="Audience"/> that is validated); <see langword="null"/> omits it.
+    /// inbound <see cref="InboundAudience"/> that is validated); <see langword="null"/> omits it.
     /// </summary>
     public string? RequestedAudience { get; set; }
 
@@ -192,6 +194,8 @@ public sealed class TokenExchangeOptions : IHasAttachment, IHasPartitionConfig, 
 /// configurable. Microsoft's Entra on-behalf-of profile was removed (owner decision
 /// 2026-11-03, <c>docs/adr/0002-remove-entra-obo.md</c>): a config still naming the removed
 /// mode fails binding at startup — it never degrades to a silent RFC 8693 exchange.
+/// A single-member enum on purpose: the wire shape stays an option knob here, so a future
+/// shape adds a member instead of reshaping the options type.
 /// </summary>
 [Experimental("CREDPROX001")]
 public enum TokenExchangeMode

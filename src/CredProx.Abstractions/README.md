@@ -20,7 +20,6 @@ APIs marked `[Experimental]` may change before 1.0.
 | `IAuditSink` | where credential-use audit records go |
 | `IPipelineFeature` / `IRequestFeature` / `IResponseFeature` / `IConnectionFeature` | pipeline behaviour at a declared `Stage` |
 | `ITokenCache` | a distributed token cache backing |
-| `ICallerStore` | caller identity from somewhere other than configuration |
 | `ICredentialHealthProbe` | vendor-specific health checking |
 
 Providers can also name an outcome precisely with the sealed signal exceptions:

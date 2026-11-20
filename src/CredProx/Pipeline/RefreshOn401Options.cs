@@ -19,7 +19,8 @@ public sealed class RefreshOn401Options
 
     /// <summary>
     /// Maximum request body size that may be buffered for a retry. Bodies above this size
-    /// are never retried. Default 64 KiB.
+    /// are never retried. Default 1 MiB — the same cap the resilience retry path applies
+    /// (<c>ResilienceOptions.MaxRetriedBodyBytes</c>), so both retry paths share one size rule.
     /// </summary>
-    public long MaxRetriedBodyBytes { get; set; } = 64 * 1024;
+    public long MaxRetriedBodyBytes { get; set; } = 1024 * 1024;
 }

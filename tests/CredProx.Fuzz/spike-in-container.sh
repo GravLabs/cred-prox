@@ -1,7 +1,7 @@
 #!/bin/bash
 # M31 spike + Phase B runner (plan 5.4): instrument the published harness inside the pinned
 # AFL++ container and run afl-fuzz against ONE target (argv: pathpatterns | headerattach |
-# scrub | sse | configkeys | parsers; default pathpatterns; legacy `canary` = pathpatterns
+# scrub | sse | configkeys | parsers | media; default pathpatterns; legacy `canary` = pathpatterns
 # seeded-violation mode). Quick rot check without any fuzzing (the nightly fuzz-build job
 # runs exactly this; the project is outside CredProx.slnx so the solution build never sees it):
 #   dotnet build tests/CredProx.Fuzz/CredProx.Fuzz.csproj -c Release
@@ -34,7 +34,26 @@ if [ "$TARGET" = canary ]; then
   CANARY=canary
 fi
 cp -r publish instr
-sharpfuzz instr/CredProx.dll
+# Every CredProx assembly the harness can reach must be instrumented. Even a parsers
+# seed that returns early runs CredProx.Hmac code before any target parse: the
+# HmacOptions ctor and the HmacComponentKind[] array construction in the parsers target
+# (TryParseComponent is reached only later, via BuildCanonicalString). If that assembly is
+# not instrumented, a dry-run seed whose whole path stays in uninstrumented code gives afl
+# an empty coverage map, and afl then aborts the run before writing any stats (PROGRAM
+# ABORT: No instrumentation detected in the dry run, execs/edges never recorded).
+# Witnessed 2026-11-20 with corpus/parsers/seed1. The per-file loop over the glob is the
+# guard: any new CredProx assembly the harness references is instrumented automatically —
+# a hand-list lets the zero-case class come back (measured 2026-11-20: one invocation over
+# the expanded glob, `sharpfuzz instr/CredProx*.dll`, left the dry run with an empty
+# coverage map and afl ABORTed as in the uninstrumented case). One deliberate exclusion:
+# CredProx.Fuzz.dll is the entry assembly afl forks — instrumenting it aborts dotnet at
+# startup (rc=134, "Fork server crashed with signal 6"); every other CredProx*.dll in the
+# publish set was probed and runs clean instrumented. A sharpfuzz error stops the spike
+# loudly instead of riding into the fuzz step silently.
+for d in instr/CredProx*.dll; do
+  [ "$d" = instr/CredProx.Fuzz.dll ] && continue
+  sharpfuzz "$d" || { echo "SPIKE-FAIL: sharpfuzz $d"; exit 1; }
+done
 echo "== instrumented =="
 mkdir -p findings
 # afl-fuzz only reads the input directory, so the read-only /work/corpus mount is used

@@ -75,7 +75,7 @@ public sealed class TokenExchangeProviderM31Tests
         Mode = mode,
         Issuer = Issuer,
         JwksUri = JwksUrl,
-        Audience = Audience,
+        InboundAudience = Audience,
         TokenEndpoint = TokenUrl,
         ClientId = "cid",
         ClientSecret = "csec",

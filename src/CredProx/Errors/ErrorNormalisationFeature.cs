@@ -17,7 +17,8 @@ namespace CredProx;
 /// <c>vendor_content_type</c>, so nothing a caller or a vendor's support desk needs is
 /// discarded. Runs at <see cref="Stage.ShapeResponse"/> <b>after</b> the scrubber, so
 /// an injected credential a vendor reflects inside its error body is already
-/// <c>[redacted]</c> before anything is embedded. On by default
+/// <c>[redacted]</c> before anything is embedded; a response the scrubber refused
+/// (<c>CredProx:Scrubbing:FailClosed</c>) keeps its refusal document untouched. On by default
 /// (<c>CredProx:Errors:Enabled=false</c> globally, route metadata
 /// <c>CredProx.ErrorNormalisation = "off"</c> per route).
 /// </summary>
@@ -93,6 +94,11 @@ public sealed class ErrorNormalisationFeature : IResponseFeature
         if ((int)response.StatusCode < 400)
         {
             return; // only errors get normalised; successes flow untouched
+        }
+
+        if (context.Features.Get<ScrubRefusalMarker>() is not null)
+        {
+            return; // M47 F-3: a scrubber refusal is already CredProx's own problem shape
         }
 
         if (HttpMethods.IsHead(context.Request.Method))

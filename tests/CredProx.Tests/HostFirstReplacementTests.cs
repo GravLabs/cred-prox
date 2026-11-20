@@ -2,15 +2,18 @@ using System.Security.Claims;
 using System.Threading;
 using CredProx;
 using CredProx.Abstractions;
+using CredProx.CallerKeys;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
+using Yarp.ReverseProxy.Configuration;
 using Yarp.ReverseProxy.Forwarder;
 
 namespace CredProx.Tests;
@@ -149,7 +152,83 @@ public sealed class HostFirstReplacementTests
         Assert.IsType<HostForwarderFactory>(provider.GetRequiredService<IForwarderHttpClientFactory>());
     }
 
+    // ---- the AddCredProx factory descriptors: dedupe, host-factory entries, the hosted delegate ----
+
+    [Fact]
+    public void RepeatedAddCredProx_FactoryRegistrationsDedupe()
+    {
+        var config = Config();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(config);
+        // The default stack the real host calls first (token cache, secrets, credentials).
+        services.AddCredProx(config);
+        var builder = services.AddReverseProxy();
+        builder.AddCredProx(config);
+        builder.AddCredProx(config);
+
+        using var provider = services.BuildServiceProvider();
+
+        // Each factory-registered built-in resolves exactly once across the repeated calls:
+        // the dedup compares the METHOD behind the factory delegate, not the delegate
+        // instance — the same lambda compiles to one method, so even a capturing lambda
+        // (a fresh delegate object per call) dedupes. The factory shape therefore keeps the
+        // type-activation dedup semantics.
+        Assert.Single(provider.GetServices<IRequestFeature>().OfType<DestinationResolutionFeature>());
+        Assert.Single(provider.GetServices<Yarp.ReverseProxy.Transforms.Builder.ITransformProvider>()
+            .OfType<CredProxTransformProvider>());
+        Assert.Single(provider.GetServices<IConfigValidator>().OfType<CredProxConfigValidator>());
+        Assert.Single(provider.GetServices<IHostedService>().OfType<CredProxStartupValidator>());
+    }
+
+    [Fact]
+    public void HostFactoryConfigValidatorBeforeAddCredProx_KeepsBothEntries()
+    {
+        var config = Config();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddSingleton<IConfigValidator>(sp => new HostConfigValidator());
+        services.AddCredProx(config);
+        services.AddReverseProxy().AddCredProx(config);
+
+        using var provider = services.BuildServiceProvider();
+
+        // A factory-registered descriptor only dedupes against the identical registration,
+        // so the host's factory entry stands untouched and CredProx's built-in validator
+        // still runs beside it — host-first means the host's entry is never replaced, and
+        // validators are enumerate services where both run.
+        Assert.Single(provider.GetServices<IConfigValidator>().OfType<HostConfigValidator>());
+        Assert.Single(provider.GetServices<IConfigValidator>().OfType<CredProxConfigValidator>());
+    }
+
+    [Fact]
+    public void StartupValidator_HostedEntrySharesTheRegisteredSingleton()
+    {
+        var config = Config();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddCredProx(config);
+        services.AddReverseProxy().AddCredProx(config);
+
+        using var provider = services.BuildServiceProvider();
+
+        // The hosted-service descriptor delegates: the instance the host starts is the same
+        // object registered for direct resolution, so the gate the host runs and the gate
+        // anything else resolves are one instance.
+        var validator = provider.GetRequiredService<CredProxStartupValidator>();
+        Assert.Same(validator,
+            Assert.Single(provider.GetServices<IHostedService>().OfType<CredProxStartupValidator>()));
+    }
+
     // ---- stubs ----
+
+    private sealed class HostConfigValidator : IConfigValidator
+    {
+        public ValueTask<IList<Exception>> ValidateRouteAsync(RouteConfig route) =>
+            new(Array.Empty<Exception>());
+
+        public ValueTask<IList<Exception>> ValidateClusterAsync(ClusterConfig cluster) =>
+            new(Array.Empty<Exception>());
+    }
 
     private sealed class HostTokenCache : ITokenCache
     {

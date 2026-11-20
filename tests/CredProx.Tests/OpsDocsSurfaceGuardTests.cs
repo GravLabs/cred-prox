@@ -61,6 +61,10 @@ public sealed class OpsDocsSurfaceGuardTests
                 .IsAssignableFrom(m.GetParameters()[0].ParameterType))
             .Select(m => m.Name)
             .ToHashSet(StringComparer.Ordinal);
+        // Guard domain: the literal "(...)" arity carve-out below (names must ship, arity of
+        // "fill in your arguments" rows does not), Options-member resolution by public
+        // instance property with IgnoreCase, and the fact that the rotation runbook as
+        // shipped prints exactly one Options.Member pair today.
         // Arity per documented call: "(builder.Configuration)" → 1, "()" → 0 (the extension
         // receiver is not counted; args split on commas outside generics).
         foreach (var match in System.Text.RegularExpressions.Regex.Matches(doc, @"(AddCredProx[A-Za-z0-9]*)\(([^()]*(?:<[^<>]*>[^()]*)*)\)").Cast<System.Text.RegularExpressions.Match>())

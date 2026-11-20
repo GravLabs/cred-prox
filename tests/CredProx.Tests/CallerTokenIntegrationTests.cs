@@ -416,11 +416,13 @@ public sealed class CallerTokenIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeyAndBearer_KeyWins_CallerBearerStillForwarded()
+    public async Task KeyAndBearer_KeyWins_CallerBearerNowStripped()
     {
-        // Pinned deliberately (and disclosed on the handoff): on the KEY path nothing
-        // strips Authorization — existing caller-header semantics are byte-for-byte.
-        // Only the token path strips it, because there the bearer IS the credential.
+        // Superseded by M47 F-4 (the deliberate default change): the key still wins
+        // authentication, but the caller's own Authorization no longer rides on any
+        // route — the key path and the token path now behave alike upstream. A host
+        // that wants the old ride opts the route in with
+        // CredProx.CallerHeaderStrip = "off" (pinned in CallerHeaderRideTests).
         ResetUpstream();
         var (host, _) = StartProxyHost(routes: [PlainRoute]);
 
@@ -431,7 +433,7 @@ public sealed class CallerTokenIntegrationTests : IAsyncLifetime
         var response = await host.GetTestClient().SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("Bearer " + callerJwt, Assert.Single(_upstreamHeaders)["Authorization"]);
+        Assert.True(string.IsNullOrEmpty(Assert.Single(_upstreamHeaders)["Authorization"]));
     }
 
     [Fact]

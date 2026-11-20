@@ -14,7 +14,7 @@ partitions, per-partition secrets and a strict allow-list.
   `ResponseField: CRMSESSION` to capture the login's session cookie, and
   `Location: Cookie` to replay it. The credential is cached, refreshed on 401 and
   partitioned like every other type — nothing about cookie placement is special-cased
-  in the pipeline. `Lifetime: 00:55:00` carries a typical assumed session lifetime.
+  in the pipeline. `DefaultLifetime: 00:55:00` carries a typical assumed session lifetime.
 - **Per-environment partitions** (`Partition: From header:X-API-Env`,
   `Allowed: [sandbox, production]`): one credential serves every environment. The
   `{partition}` template reaches the login endpoint, the service account

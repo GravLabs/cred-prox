@@ -210,7 +210,9 @@ public static class CredProxServiceCollectionExtensions
     /// never registered is safe. <c>AddCredProxCallerAuthentication</c> from
     /// CredProx.CallerKeys registers the policy itself; hosts that authenticate through a
     /// third-party <see cref="ICallerAuthenticator"/> and prefer middleware enforcement
-    /// call this directly.
+    /// call this directly. Ordering: host-first, like ADR-0006 — a policy the host already
+    /// registered under this name is kept, and a host definition added later replaces the
+    /// CredProx one, so the host definition wins in either registration order.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
@@ -218,12 +220,21 @@ public static class CredProxServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddAuthorization(options => options.AddPolicy(
-            CredProxAuth.CallerPolicy,
-            policy => policy
-                .AddAuthenticationSchemes(CredProxAuth.CallerKeyScheme, CredProxAuth.CallerTokenScheme)
-                .RequireAuthenticatedUser()
-                .RequireClaim(CallerIdentity.CallerClaimType)));
+        services.AddAuthorization(options =>
+        {
+            // Host-first (ADR-0006 in spirit): a policy the host already registered under
+            // this name is kept; a host callback registered later runs later and replaces
+            // this one. Either way the host definition wins.
+            if (options.GetPolicy(CredProxAuth.CallerPolicy) is null)
+            {
+                options.AddPolicy(
+                    CredProxAuth.CallerPolicy,
+                    policy => policy
+                        .AddAuthenticationSchemes(CredProxAuth.CallerKeyScheme, CredProxAuth.CallerTokenScheme)
+                        .RequireAuthenticatedUser()
+                        .RequireClaim(CallerIdentity.CallerClaimType));
+            }
+        });
         return services;
     }
 

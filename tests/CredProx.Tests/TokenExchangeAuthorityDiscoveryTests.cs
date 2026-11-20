@@ -77,7 +77,7 @@ public sealed class TokenExchangeAuthorityDiscoveryTests
     {
         Authority = "https://idp.example/", // trailing slash: TrimEnd must land exactly once
         Issuer = optionsIssuer,
-        Audience = Audience,
+        InboundAudience = Audience,
         ClientId = "cid",
         ClientSecret = "csec",
         // TokenEndpoint and JwksUri deliberately unset: discovery must supply them.

@@ -39,7 +39,7 @@ public sealed class CredProxConfigValidator : IConfigValidator
     /// <param name="destinations">The reload-aware destination registry.</param>
     /// <param name="connections">The reload-aware connection registry.</param>
     /// <param name="configuration">The application configuration root.</param>
-    public CredProxConfigValidator(
+    internal CredProxConfigValidator(
         CredentialRegistryProvider credentials,
         DestinationRegistryProvider destinations,
         ConnectionRegistryProvider connections,

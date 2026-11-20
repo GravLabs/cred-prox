@@ -11,6 +11,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 STEADY_MINUTES="${STEADY_MINUTES:-270}"
 WINDOW_MINUTES="${WINDOW_MINUTES:-5}"
 VUS="${VUS:-20}"
+LOAD_LIMIT="${SOAK_LOAD_LIMIT:-40}"
 
 RUN="/tmp/m33-soak-$(date -u +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN/journal" "$RUN/faults"; touch "$RUN/stats.csv" "$RUN/k6-line.csv"
@@ -20,7 +21,10 @@ chmod 777 "$RUN"; chmod 666 "$RUN/k6-line.csv" "$RUN/stats.csv" "$RUN/k6-summary
 export SOAK_RUN_DIR="$RUN" SOAK_VUS="$VUS"
 cd "$HERE/compose" || exit 2
 
+WATCH=""
 cleanup() {
+  # stop the watchdog FIRST: the loop alone was harmless, its sleep held stdout
+  [ -n "$WATCH" ] && kill "$WATCH" 2>/dev/null
   docker compose logs --no-color soakhost > "$RUN/logs/soakhost.log" 2>/dev/null
   curl -fsS http://127.0.0.1:18081/__admin/requests | gzip > "$RUN/journal/wiremock-final.json.gz" 2>/dev/null
   bash "$HERE/scripts/teardown.sh"
@@ -43,26 +47,36 @@ TOTAL=$(( STEADY_MINUTES + 12 * (2 * WINDOW_MINUTES) + 30 ))
 (
   end=$(( $(date +%s) + TOTAL * 60 ))
   tick=0
+  # the loop's TERM trap reaps the sleep IT started: killing only the loop orphaned the
+  # sleep, which held the caller's stdout pipe after TEARDOWN-DONE (qitem-20261120004151)
+  s=""
+  trap '[ -n "$s" ] && kill "$s" 2>/dev/null; exit 0' TERM INT HUP
   while [ "$(date +%s)" -lt "$end" ]; do
-    sleep 60
+    sleep 60 &
+    s=$!
+    wait "$s"
+    s=""
     tick=$((tick + 1))
     for c in m33-soak-soakhost-1 m33-soak-wiremock-1 m33-soak-toxiproxy-1; do
       st="$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo gone)"
       if [ "$st" != running ]; then
         echo "WATCHDOG-CONTAINER-DEAD $c=$st at $(date -u +%H:%M:%SZ)"
         touch "$RUN/ABORT"
-        docker compose stop k6 >/dev/null 2>&1
+        # stop exactly this run's one-off k6 containers: `compose stop k6` never touches a
+        # `compose run --rm` one-off and host pkill cannot see into its namespace (qitem-20261120021049)
+        ids="$(docker ps -q --filter "label=m33-soak-run=$RUN" 2>/dev/null || true)"
+        if [ -n "$ids" ]; then docker stop $ids 2>/dev/null || true; fi
         exit 0
       fi
     done
     if [ $((tick % 60)) -eq 0 ]; then
       load5="$(awk '{print int($1)}' /proc/loadavg)"
       echo "watchdog: 5-min load $load5"
-      if [ "$load5" -gt 40 ]; then
-        echo "BACKOFF: load $load5 > 40 - stopping load generator"
+      if [ "$load5" -gt "$LOAD_LIMIT" ]; then
+        echo "BACKOFF: load $load5 > $LOAD_LIMIT - stopping load generator"
         touch "$RUN/ABORT"
-        docker compose stop k6 >/dev/null 2>&1
-        pkill -f 'k6 run /k6/soak.js' 2>/dev/null
+        ids="$(docker ps -q --filter "label=m33-soak-run=$RUN" 2>/dev/null || true)"
+        if [ -n "$ids" ]; then docker stop $ids 2>/dev/null || true; fi
         exit 0
       fi
     fi
@@ -78,13 +92,13 @@ jreset() { curl -fsS -X DELETE http://127.0.0.1:18081/__admin/requests >/dev/nul
 jsave() { curl -fsS http://127.0.0.1:18081/__admin/requests | gzip > "$RUN/journal/journal-$1.json.gz"; }
 
 k6_window() { # k6_window <label> ; VUs/duration fixed, summary collected per window
-  SOAK_MINUTES="$WINDOW_MINUTES" docker compose --profile load run --rm k6 \
+  SOAK_MINUTES="$WINDOW_MINUTES" docker compose --profile load run --rm --label "m33-soak-run=$RUN" k6 \
     && cp "$RUN/k6-summary.json" "$RUN/faults/k6-summary-$1.json" 2>/dev/null
 }
 
 # Steady soak (k6 summary is the soak's own; fault windows collect into faults/).
 # SOAK_STRICT=1 arms k6's mid-run error-rate abort (see soak.js thresholds).
-SOAK_MINUTES="$STEADY_MINUTES" SOAK_STRICT=1 docker compose --profile load run --rm k6
+SOAK_MINUTES="$STEADY_MINUTES" SOAK_STRICT=1 docker compose --profile load run --rm --label "m33-soak-run=$RUN" k6
 if [ $? -ne 0 ]; then
   aborted && echo "K6-STEADY-FAIL (watchdog abort)" || echo "K6-STEADY-FAIL"
   kill "$WATCH" 2>/dev/null; exit 1

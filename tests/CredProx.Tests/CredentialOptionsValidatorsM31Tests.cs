@@ -1,4 +1,5 @@
 using CredProx;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace CredProx.Tests;
@@ -248,5 +249,49 @@ public sealed class CredentialOptionsValidatorsM31Tests
         options.Components = ["method", "bodyHash"];
 
         Assert.True(new HmacOptionsValidator().Validate("c", options).Succeeded);
+    }
+
+    [Fact]
+    public void Hmac_EmptySeparator_StillValid_AndWarnsExactlyOnceNamingTheCredential()
+    {
+        // The vendor-compatibility rule: an empty Separator is never a failure —
+        // refusing would make vendor schemes that sign a bare concatenation unusable.
+        // The consequence is instead heard once at startup, naming the credential,
+        // because the per-request refusal cannot apply to an empty separator.
+        var logger = new CapturingValidatorLogger();
+        var options = HmacValid();
+        options.Separator = string.Empty;
+
+        var result = new HmacOptionsValidator(logger).Validate("concat-cred", options);
+
+        Assert.True(result.Succeeded);
+        var warning = Assert.Single(
+            logger.Entries, e => e.Level == LogLevel.Warning);
+        Assert.Contains("concat-cred", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("empty Separator", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("sign identically", warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Hmac_DefaultSeparator_LogsNoWarning()
+    {
+        // The warning must not fire for every HMAC credential — only for the
+        // empty-separator configuration. Without this arm a always-warn mutant survives.
+        var logger = new CapturingValidatorLogger();
+
+        Assert.True(new HmacOptionsValidator(logger).Validate("c", HmacValid()).Succeeded);
+        Assert.Empty(logger.Entries);
+    }
+
+    private sealed class CapturingValidatorLogger : ILogger<HmacOptionsValidator>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

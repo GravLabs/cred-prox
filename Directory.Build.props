@@ -95,7 +95,13 @@
        Breaking entries carried — src/CredProx/ 45 entries, src/CredProx.Abstractions/ 2,
        one per type or member removal of the caller-contract collapse and the package-split
        moves — were deleted at the 0.13.0 baseline rotation; the removals they describe are
-       inside the published 0.13.0 bytes, so no suppressions exist at this baseline.
+       inside the published 0.13.0 bytes. The 1.0 surface pass (0.14.0) added the current
+       set: src/CredProx/ 22 entries (the thirteen internalized types, the eight internal
+       constructors, the internalized Destination getter), src/CredProx.CallerKeys/ 5 (the
+       two moved namespace names, the two members that only name them, and ConfigCallerStore
+       under its old base list), and 2 each in src/CredProx.OAuth/ and
+       src/CredProx.LoginExchange/ (the renamed options members' accessors) — all named
+       removals from the CHANGELOG Breaking (experimental API) table.
        A fresh-obj pack must show zero diagnostics and
        zero unnecessary-suppression warnings; future intentional
        removals regenerate them
@@ -112,7 +118,7 @@
     <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
     <EnableSourceLink>true</EnableSourceLink>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.13.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.13.1</PackageValidationBaselineVersion>
     <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
          entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
          $(MSBuildProjectName) equals $(PackageId) for all ten packable projects. -->

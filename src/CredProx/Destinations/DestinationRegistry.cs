@@ -9,7 +9,7 @@ namespace CredProx;
 /// forwarding.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class DestinationEntry
+internal sealed class DestinationEntry
 {
     internal DestinationEntry(string name, DestinationDefinition definition, PartitionSourceBinding? partition)
     {
@@ -48,7 +48,7 @@ public sealed class DestinationEntry
 /// the route metadata reference <c>CredProx.Destination</c>.
 /// </summary>
 [Experimental("CREDPROX001")]
-public sealed class DestinationRegistry
+internal sealed class DestinationRegistry
 {
     private readonly Dictionary<string, DestinationEntry> _entries;
 

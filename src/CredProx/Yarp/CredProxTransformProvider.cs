@@ -36,7 +36,7 @@ public sealed class CredProxTransformProvider : ITransformProvider
     /// The audit recorder; started before the pipeline so every processed request —
     /// including one a feature short-circuits — gets its record.
     /// </param>
-    public CredProxTransformProvider(
+    internal CredProxTransformProvider(
         CredProxPipeline pipeline,
         ILogger<CredProxTransformProvider> logger,
         CredProxAuditRecorder audit)

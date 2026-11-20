@@ -8,7 +8,7 @@ OAuth credential add-on for [CredProx](https://github.com/GravLabs/cred-prox):
 - **`TokenExchange`** — the RFC 8693 token exchange: the caller's inbound bearer token is
   validated first (Authority discovery, or explicit Issuer+JwksUri over https per
   [ADR-0003](https://github.com/GravLabs/cred-prox/blob/main/docs/adr/0003-token-exchange-require-https-metadata.md)),
-  then exchanged for the vendor token. The mandatory `Audience` pins which tokens are
+  then exchanged for the vendor token. The mandatory `InboundAudience` pins which tokens are
   exchangeable; the removed Entra OBO mode stays refused
   ([ADR-0002](https://github.com/GravLabs/cred-prox/blob/main/docs/adr/0002-remove-entra-obo.md)).
 - **`JwtAssertion`** — a signed client assertion in the client-credentials grant: HS256

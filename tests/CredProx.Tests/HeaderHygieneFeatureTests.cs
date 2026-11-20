@@ -6,8 +6,10 @@ namespace CredProx.Tests;
 
 /// <summary>
 /// The <see cref="Stage.ShapeHeaders"/> feature (§3.2, §5.2 "Header hygiene"): the inbound
-/// caller key never reaches the upstream, and the partition header is stripped only when
-/// the resolved destination declares <c>StripHeader: true</c>.
+/// caller key never reaches the upstream, the caller's own <c>Authorization</c> and
+/// <c>Cookie</c> are stripped on every route unless the route opts out with
+/// <c>CredProx.CallerHeaderStrip = "off"</c> (M45 F-4), and the partition header is
+/// stripped only when the resolved destination declares <c>StripHeader: true</c>.
 /// </summary>
 public sealed class HeaderHygieneFeatureTests
 {
@@ -64,6 +66,52 @@ public sealed class HeaderHygieneFeatureTests
         await Feature().ApplyAsync(context, default);
 
         Assert.True(proxyRequest.Headers.Contains("X-Env"));
+    }
+
+    [Fact]
+    public async Task CallerAuthorizationAndCookie_AreStrippedByDefault()
+    {
+        // M47 finding F-4: the caller's own credentials no longer ride to the vendor.
+        var context = M4Contexts.Create(out var proxyRequest);
+        proxyRequest.Headers.Add("Authorization", "Bearer caller-own");
+        proxyRequest.Headers.Add("Cookie", "sess=caller");
+        proxyRequest.Headers.Add("X-Trace", "keep-me");
+
+        await Feature().ApplyAsync(context, default);
+
+        Assert.False(proxyRequest.Headers.Contains("Authorization"));
+        Assert.False(proxyRequest.Headers.Contains("Cookie"));
+        Assert.True(proxyRequest.Headers.Contains("X-Trace")); // only the credential-bearing headers go
+    }
+
+    [Fact]
+    public async Task CallerHeaders_KeptWhenRouteSwitchIsOff()
+    {
+        // ADR-0006: a switch that says off is off — this route keeps the old ride.
+        // The name match is case-insensitive, like every other route-metadata switch.
+        var context = M4Contexts.Create(
+            out var proxyRequest, new() { [CredProxMetadata.CallerHeaderStrip] = "OFF" });
+        proxyRequest.Headers.Add("Authorization", "Bearer caller-own");
+        proxyRequest.Headers.Add("Cookie", "sess=caller");
+
+        await Feature().ApplyAsync(context, default);
+
+        Assert.True(proxyRequest.Headers.Contains("Authorization"));
+        Assert.True(proxyRequest.Headers.Contains("Cookie"));
+    }
+
+    [Fact]
+    public async Task CallerHeaders_StrippedWhenSwitchValueIsNotOff()
+    {
+        var context = M4Contexts.Create(
+            out var proxyRequest, new() { [CredProxMetadata.CallerHeaderStrip] = "no" });
+        proxyRequest.Headers.Add("Authorization", "Bearer caller-own");
+        proxyRequest.Headers.Add("Cookie", "sess=caller");
+
+        await Feature().ApplyAsync(context, default);
+
+        Assert.False(proxyRequest.Headers.Contains("Authorization"));
+        Assert.False(proxyRequest.Headers.Contains("Cookie"));
     }
 
     [Fact]

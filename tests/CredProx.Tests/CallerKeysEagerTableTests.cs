@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CredProx;
 using CredProx.Abstractions;
+using CredProx.CallerKeys;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
