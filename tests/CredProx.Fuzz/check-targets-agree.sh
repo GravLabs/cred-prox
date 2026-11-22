@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fuzz target names have three homes (qitem-20261120031636-7499bc7183b0f7e9 unit 3):
+# Fuzz target names have three homes (fuzz-target audit unit 3, 2026-11-20):
 # the Program.cs dispatch labels, run-targets.sh TARGETS, and the Nightly workflow
 # matrix. A drift is silent by construction: a matrix name with no dispatch case
 # makes afl fork a harness that exits(1) on the unknown target - the crash class the

@@ -24,11 +24,13 @@ and the core stages. Caller budgets and the kill switch stay core caller policy.
 ## Setup
 
 ```csharp
-builder.Services.AddCredProx(configuration);
-builder.Services.AddCredProxThrottling(configuration);
-builder.Services.AddCredProxResilience(configuration);
-builder.Services.AddCredProxHealthProbes(configuration);
+builder.Services.AddCredProx(configuration)
+    .AddOperations();
 ```
+
+One chained call arms all three legs — and each leg arms only when its own section is
+present: no `CredProx:Throttling`, no limiter; no `CredProx:Resilience`, no retry or
+breaker; no `CredProx:Health`, no probes.
 
 Configuration is unchanged from the core era (`CredProx:Throttling`,
 `CredProx:Resilience`, `CredProx:Health` — see the

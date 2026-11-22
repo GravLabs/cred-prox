@@ -37,7 +37,7 @@ plain config; the Salesforce integration is vendor facts, not vendor C#.
 ```bash
 cd samples/AgentEgress
 (cd StubApi && dotnet run &)   # the vendor stand-in
-dotnet run
+ASPNETCORE_ENVIRONMENT=Development dotnet run   # offline: appsettings.Development.json repoints both endpoints at the stub
 ```
 
 Then call through the gateway as the CRM agent — with only its own key:

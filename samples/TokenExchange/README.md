@@ -98,7 +98,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ALICE" http:
 ```jsonc
 "CredProx": {
   "Callers": {
-    "app-a": { "Keys": [ { "KeyId": "app-a-key-1", "KeyHash": "sha256:9743f3dc…" } ] }
+    "app-a": { "Keys": [ { "KeyId": "app-a-key-1", "KeyHash": "sha256:9743f3dc7e79656516f9e24981dc4c3a613c45480c93ed4dffa9dfd936b5895b" } ] }
   },
   "Credentials": {
     "downstream": {

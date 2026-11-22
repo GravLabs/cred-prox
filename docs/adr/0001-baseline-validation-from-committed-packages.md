@@ -6,7 +6,7 @@ Status: accepted (M25, GitHub public pivot)
 ## Context
 
 Every `dotnet pack` runs APICompat against the last published release
-(`<PackageValidationBaselineVersion>`, currently `0.13.1`) so a public-surface removal
+(`<PackageValidationBaselineVersion>`, currently `0.15.0`) so a public-surface removal
 fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
 Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
 declared the internal LAN NuGet registry (anonymous download), and the SDK's
@@ -22,16 +22,12 @@ Commit the **published baseline packages** under `build/baselines/` and point
 `<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
 
 ```
-build/baselines/CredProx.0.13.1.nupkg               740dc87f35af29cc59c3349deb2f350df76bd218c4ad5a723f661650223e30c6
-build/baselines/CredProx.Abstractions.0.13.1.nupkg  569d42bd100946993272b34e17ed04f248af1788a1acba720577ffa7c9c2caa3
-build/baselines/CredProx.AzureKeyVault.0.13.1.nupkg b45fe46c942db33e6ef9e98572f28866fae7451dd30a68100d659ecfb267a9e8
-build/baselines/CredProx.CallerKeys.0.13.1.nupkg    ed85f747f9550cfcda2c8e6d9d079b60eeee2842556681815d06d2c9ae8cb001
-build/baselines/CredProx.CallerTokens.0.13.1.nupkg  5ec9a232d6273aa456e9d03e0c42594a9d741d6d4fcfe84e825babe226ea1551
-build/baselines/CredProx.Hmac.0.13.1.nupkg          5ea460ef2cb1efeffeca58ece6c7707f1ccaabadfe7a079f4bc5b683b8856d2d
-build/baselines/CredProx.LoginExchange.0.13.1.nupkg 17143d012c4e62ab5c1db42d56aa213c69ca3221bcc5793028ce76c5f83acc8f
-build/baselines/CredProx.OAuth.0.13.1.nupkg         9235ca2197b5e174ec6e40b821de0d3d60145b7e86d90246abf07a5072cbefd1
-build/baselines/CredProx.Operations.0.13.1.nupkg    95fdbdef11a5b679705a5c624e8e8a9522ceae08db8b891241f394886dfefa9e
-build/baselines/CredProx.Testing.0.13.1.nupkg       fe1f33a6221cb0f269be6ca92c2c9cac0a3ba72f8197f6315c30c3bc2bf1eb9e
+build/baselines/CredProx.0.15.0.nupkg               b3c5abb8cf0e5a252e854a21e32faada59fd681c0ca938c23dfe2f320db0b8ab
+build/baselines/CredProx.Abstractions.0.15.0.nupkg  8ee75ef2b01b1fcfbedf1a3a233ed9d3341c5657f995e39db0825afa532799c8
+build/baselines/CredProx.Azure.0.15.0.nupkg         92d25c672f5da4a4620334ee99f91610a2cf30f2298b3aab015fdae4b3950b9e
+build/baselines/CredProx.Identity.0.15.0.nupkg      b8e7a7c82cedb65137779800db2ebece8c9d42f5bf07c0c54123f78161a208b5
+build/baselines/CredProx.Operations.0.15.0.nupkg    7400efad216bb524c4f62386bf574eedeffdf3453d8b13622a3bc90117675d6b
+build/baselines/CredProx.Testing.0.15.0.nupkg       703b1602e9ece48196b563caf95df3e3b919a41e7ad5964916d13edb4ca217a2
 ```
 
 The files are the bytes downloaded from the registry that published them (sha256 above;
@@ -41,7 +37,7 @@ non-empty `PackageValidationBaselinePath` **skips the feed-based restore entirel
 (`Microsoft.NET.ApiCompat.targets`); the version property stays as the baseline identity
 and the filename convention. Each release bumps the baseline to the previously published
 version: download its published nupkgs from the registry (four through `0.11.0`, ten
-from `0.12.0`), replace the folder, update this list.
+from `0.12.0`, four from `0.14.0`, all six ids from `0.15.0`, the packages that keep their identity under ADR-0007), replace the folder, update this list.
 Rotations executed: `0.6.0` at M25 (2026-10-30, hashes in git history at that commit);
 `0.7.0` for the 0.7.1 metadata release (2026-10-30; hashes in git history at that
 commit). `0.7.1` **deliberately skipped** for the 0.8.0 release (2026-11-04, release
@@ -100,7 +96,18 @@ history at that commit. `0.13.1` rotated at the `0.14.0` prep (2026-11-20, owner
 "start 0.14.0 after the gpu-rig is done testing the engine"): those registry-served `0.13.1`
 bytes — all ten, sha256 verified 10/10 equal to the published artifacts recorded in
 PUBLISHING.md's release history — replace the `0.13.0` set, whose entries are in git history
-at that commit. Pack the
+at that commit. `0.14.0` rotated at the `0.15.0` prep (M49, 2026-11-21, owner word "yes do
+this next for 0.15"): ADR-0007 retires six package ids, so four baselines remain — `CredProx`,
+`CredProx.Abstractions`, `CredProx.Operations` and `CredProx.Testing`, the registry-served `0.14.0`
+bytes, sha256 verified 4/4 equal to the published artifacts recorded in PUBLISHING.md's release
+history. `CredProx.Identity` and `CredProx.Azure` are new ids and ship without a baseline. The
+`0.13.1` set's entries are in git history at that commit. `0.15.0` rotated at the `0.15.1`
+prep (2026-11-22, owner publish approval d-bd67e0f3 to the registry and GitHub): those
+registry-served `0.15.0` bytes — all six, sha256 verified 6/6 equal to the published
+artifacts recorded in PUBLISHING.md's release history — replace the `0.14.0` set, whose
+entries are in git history at that commit. `CredProx.Identity` and `CredProx.Azure` now
+carry published bytes, so all six packable ids validate against committed baselines and
+the two baseline-less csproj overrides are gone. Pack the
 **fresh**
 `obj/` after rotating (see
 Consequences): a repack on an untouched obj skips validation silently.

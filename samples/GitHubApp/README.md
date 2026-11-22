@@ -31,6 +31,9 @@ export CredProx__Secrets__github-app-signing-key="$(cat /path/to/github-app-priv
 dotnet run
 ```
 
+Offline, use `./smoke.sh`: the stand-in this sample checks against is the cells' private
+project, and its documented offline path runs it for you.
+
 Then call through the proxy — GitHub answers as the App installation:
 
 ```bash
@@ -83,6 +86,11 @@ set above.
    `https://api.github.com/app/installations/<installation-id>/access_tokens`.
 4. Call `GET /github/repos/<owner>/<repo>` through the proxy — GitHub answers as the
    App installation.
+
+GitHub requires a `User-Agent` on **every** API call — a request without one is refused
+403 at the administrative edge, before the credential is even read. Your caller must send
+one (curl and every standard HTTP client do); CredProx forwards the caller's unchanged
+and sends its own (`CredProx/<version>`) on the token exchange it originates.
 
 Until the key is set, the host starts but every request answers
 `credprox.credential_unavailable` — a cell pins that refusal (and that no key or token

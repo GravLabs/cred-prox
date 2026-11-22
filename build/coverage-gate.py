@@ -33,12 +33,9 @@ GATE_RATES = {
     "CredProx": (0.90, 0.80),
     "CredProx.Abstractions": (0.80, None),
     "CredProx.Testing": (0.80, None),
-    "CredProx.AzureKeyVault": (0.80, None),
-    "CredProx.CallerTokens": (0.80, None),
-    "CredProx.CallerKeys": (0.80, None),
-    "CredProx.Hmac": (0.80, None),
-    "CredProx.LoginExchange": (0.80, None),
-    "CredProx.OAuth": (0.80, None),
+    "CredProx.Operations": (0.80, None),
+    "CredProx.Identity": (0.80, None),
+    "CredProx.Azure": (0.80, None),
 }
 DEFAULT_RATES = (0.80, None)
 

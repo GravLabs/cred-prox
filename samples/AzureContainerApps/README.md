@@ -87,9 +87,18 @@ docker build -f samples/AzureContainerApps/Dockerfile -t credprox-aca:latest .
    `CredProx--Secrets--acme-vendor-key` → the real vendor key. Rename the config
    entries to fit your callers and vendor — they are plain config keys.
 4. **The app.** `az containerapp create` with `--ingress internal` (zero public
-   listeners — callers reach the internal FQDN), `--target-port 8080` (the image bakes
-   `ASPNETCORE_URLS`), `--secrets` free (secrets come from the vault, not from app
-   secrets), and `KeyVault__Uri=https://<your-vault>.vault.azure.net/` in env.
+   listeners — callers reach the internal FQDN), `--target-port 8080`, `--secrets`
+   free (secrets come from the vault, not from app secrets),
+   `KeyVault__Uri=https://<your-vault>.vault.azure.net/` in env,
+   `AZURE_CLIENT_ID=<the identity's client id>` in env (the `DefaultAzureCredential`
+   setting that names the user-assigned identity; **required whenever the app's identity
+   is user-assigned** — unset, the credential reaches for the system-assigned identity
+   the app does not have, so it cannot read the vault and the app never serves a
+   request), **and**
+   `--args --urls http://+:8080`. The args part is not optional: the shipped
+   `appsettings.json` `Urls` pin (`http://localhost:5097`, for the offline run)
+   beats the `ASPNETCORE_URLS` the image bakes — verified empirically on a real
+   deploy 2026-11-22 — so only the start arg moves the bind to the target port.
 5. **Probes.** Point liveness and readiness at `/health` (plain 200, GET, no
    credential).
 6. **Call it** from inside the VPC: `curl https://<internal-fqdn>/acme/thing -H

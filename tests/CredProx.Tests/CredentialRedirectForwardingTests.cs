@@ -161,14 +161,15 @@ public sealed class CredentialRedirectForwardingTests : IAsyncLifetime
 
     // ---- the acceptance rule, at the unit ------------------------------
     //
-    // The guard exists as one internal copy per package assembly (core, OAuth,
-    // LoginExchange) with the same namespace, so the name is ambiguous from a test
-    // project that references all three; these units reach the OAuth copy — the one
-    // the OAuth mint path compiles against — through its own assembly.
+    // The guard exists as one internal copy per package assembly: the core's
+    // `CredProxRedirectGuard` and Identity's `IdentityRedirectGuard` — from 0.15
+    // the OAuth and LoginExchange copies ride the Identity assembly (ADR-0007).
+    // These units reach the Identity copy — the one the OAuth mint path compiles
+    // against — through its own assembly.
 
     private static readonly System.Reflection.MethodInfo EndsElsewhereMethod =
         typeof(OAuthClientCredentialsProvider).Assembly
-            .GetType("CredProx.CredProxRedirectGuard", throwOnError: true)!
+            .GetType("CredProx.IdentityRedirectGuard", throwOnError: true)!
             .GetMethod("EndsElsewhere", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
 
     private static bool EndsElsewhere(HttpResponseMessage response, Uri configured) =>

@@ -13,6 +13,7 @@ battery as a Container Apps Job — zero public listeners anywhere (G2).
 | `--mode proxy` | CredProx forwarder on `ASPNETCORE_URLS`. Routes: `/arm/*` (TokenCredential → ARM with the managed identity), `/jwt/*`, `/hmac/*`, `/mtls/*` → counterparty. Every route demands a caller key. |
 | `--mode counterparty` | The verifiers: RS256 client-assertion check against the PINNED public key, independent HMAC canonical-string recomputation, mTLS client-cert chain pinned to the CA + CN echo. Owns its ports in code (`8082` http, `8443` https strict client-cert). |
 | `--mode battery --proxy https://<internal-fqdn> [--phase all\|jwtprobe]` | Console probe, no listener. Prints one `P<n> PASS/FAIL` line per plan phase (`all`) or just the JWT-lifetime probe (`jwtprobe`, for the rotation witness). Caller key from vault secret `CredProx--Secrets--caller-key` (needs `KeyVault__Uri` + identity) or `CREDPROX_SMOKE_CALLER_KEY`. Strict TLS — an internal-ingress chain failure is a finding, not retried around. |
+| `--mode acacheck --proxy https://<internal-fqdn>` | Console probe, no listener (M46): checks the **shipped** `samples/AzureContainerApps` host. C1 `/health` 200 unauthenticated; C2 an `X-API-Key` call (the sample's own caller header, not the library default) through `/acme/*` comes back 200 with the vendor `Authorization` shown as `Bearer [redacted]` and no trace of the caller key in the body; C3 no caller key → 401. Prints the anchor `acacheck UTC <ts> build <digest|unstamped>`, one `{id} PASS/FAIL …` line per check, then terminal `ACACHECK OK` / `ACACHECK FAILED` (exit-coded). Caller key from vault (`KeyVault__Uri` + identity, secret `CredProxTest--aca-caller-key`) or `CREDPROX_SMOKE_CALLER_KEY`; vendor key likewise (`CredProx--Secrets--acme-vendor-key` / `CREDPROX_SMOKE_VENDOR_KEY`) — its absence is a warning only and C2 still runs. |
 | `--mode proxy --smoke` | Offline proof in one process: counterparty + proxy + battery checks with generated material, no vault, no Azure. Exit 0 prints `SMOKE OK:`. |
 | `--mode reloadproof` | Offline VAULT-PROVIDER RELOAD proof: the real provider + a real `SecretClient` + its real polling loop poll a loopback Key-Vault REST stub (`tools/keyvault-stub.py`) with ONLY the transport swapped. Rewrite the stub's file mid-run: the reload token fires and the value changes without a restart. Exit 0 prints `RELOAD PROOF OK`. Recipe below. |
 
@@ -24,7 +25,8 @@ first (the Dockerfile header lists these too):
 ```bash
 dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
 dotnet pack src/CredProx -c Release -o artifacts/packages
-dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
+dotnet pack src/CredProx.Azure -c Release -o artifacts/packages
+dotnet pack src/CredProx.Identity -c Release -o artifacts/packages
 docker build -f tools/aca-live-harness/Dockerfile -t credprox-m29:latest .
 docker run --rm credprox-m29:latest --mode proxy --smoke
 ```
@@ -55,8 +57,10 @@ the running process), not Azure-side latency.
 ## Configuration truth
 
 - Secret material arrives ONLY from Key Vault through the stock provider
-  chain (`AddAzureKeyVault` + `AddCredProxConfigurationSecrets`, the shipped
-  MicrosoftGraph pattern): vault secret `CredProx--Secrets--<name>` answers
+  chain (`AddAzureKeyVault` feeding configuration, then `AddCredProx(...)`
+  resolving the `secret:` refs — the shipped MicrosoftGraph pattern; since
+  0.15.0 the secret resolver is folded into the one core entry and is not a
+  separate call): vault secret `CredProx--Secrets--<name>` answers
   `secret:<name>` in `appsettings.json`. Consumed: `jwt-signing-key`,
   `hmac-key`, `mtls-client-cert` (+`-password`), and on the counterparty
   `cp-server-cert` (+`-password`); the battery reads `caller-key`. Pinning
@@ -103,6 +107,17 @@ the running process), not Azure-side latency.
 - The vault is treated as a custodian/deliverer only — no HSM, no
   never-exports claim is made about the keys (they travel as PEM/PFX to the
   consuming process, which is what this test is actually about).
+- acacheck's C2 is a caller-side observation: it asserts what the response body
+  shows (`Bearer [redacted]`) and that the caller key is absent from it. The
+  stand-in not echoing `Authorization` at the vendor is shipped sample behavior the
+  probe rides on, not something acacheck itself proves.
+- `build <digest|unstamped>` stamps the DEPLOY_IMAGE_DIGEST the deploy step sets on
+  the job from the digest its push read back; without that env it prints
+  `unstamped` — the checks still run, the stamp evidence is simply absent.
+- The offline loopback cell in `tests/CredProx.LiveTests` runs acacheck against the
+  shipped host and shipped stand-in on localhost: it proves the probe and the
+  sample's shipped configuration. The cluster wiring — managed identity to vault,
+  secret references, internal ingress — is proven only by the live run.
 - A rotated vault value reaches a running process only because
   `AddAzureKeyVault` is called with `ReloadInterval` set (all sites here set
   30s); the provider default never polls. Without it (or a restart), the old

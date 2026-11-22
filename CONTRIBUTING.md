@@ -49,7 +49,7 @@ breaking change (PUBLISHING.md rule).
 | Sample cells — every sample's offline behavior | `dotnet test tests/CredProx.SampleSmokes` | yes |
 | Coverage (floors below) | the three lines under it | no |
 | Pack + APICompat | the `dotnet pack` gate above | no |
-| Consumer-compat, plain default run | `scripts/consumer-compat.sh` | no |
+| Consumer-compat, plain default run | `scripts/consumer-compat.sh` | yes |
 
 Every sample also has a one-line `smoke.sh` that runs its own cells from the test
 project. CI runs each sample's cells as its own filtered process **and** one
@@ -59,7 +59,10 @@ that one fixture leaves behind for the next. A whole-project run needs the sampl
 vendor stub projects, which are not in `CredProx.slnx`: building
 `dotnet build tests/CredProx.SampleSmokes -c <configuration>` builds them, so run it
 first in the configuration you smoke in (never pair the whole-project run with
-`--no-build` on a tree where they were not built).
+`--no-build` on a tree where they were not built). `tests/CredProx.LiveTests` is
+likewise outside `CredProx.slnx`: it talks to real vendors only on demand via
+`scripts/live-run.sh` and must never run in CI (the guard cells in `CredProx.Tests`
+keep it out of the solution and out of every workflow).
 
 Coverage gates run from the repo root:
 
@@ -77,7 +80,7 @@ the definition of "tested".
 
 ## Versions
 
-`main` carries the next version with a `-dev` suffix (say `0.14.0-dev`). Release prep
+`main` carries the next version with a `-dev` suffix (say `0.16.0-dev`). Release prep
 sets the real number at tag time; until then nothing on `main` is publishable. The
 public API is stable within a minor version (`0.x.*`); API still settling carries
 `[Experimental("CREDPROX001")]` until 1.0.
@@ -96,14 +99,12 @@ public API is stable within a minor version (`0.x.*`); API still settling carrie
 
 ```
 src/CredProx.Abstractions/   public contracts (stages, providers, sources) — no dependencies
-src/CredProx/                the core host pieces: pipeline, cache, secret refs, StaticKey, audit
-src/CredProx.CallerKeys/     add-on: inbound caller authentication by API key
-src/CredProx.CallerTokens/   add-on: inbound caller authentication by short-lived Entra/OIDC tokens
-src/CredProx.OAuth/          add-on: the three OAuth credential types
-src/CredProx.Hmac/           add-on: the Hmac request-signing credential type
-src/CredProx.LoginExchange/  add-on: the LoginExchange credential type
+src/CredProx/                the core host pieces: pipeline, cache, secret refs, the StaticKey,
+                             Hmac and LoginExchange credential types, caller API keys, audit
+src/CredProx.Identity/       add-on: the OAuth credential types + inbound caller authentication
+                             by short-lived Entra/OIDC tokens
 src/CredProx.Operations/     add-on: throttling, retries/circuit breakers, health probes
-src/CredProx.AzureKeyVault/  add-on: the TokenCredential credential type
+src/CredProx.Azure/          add-on: the TokenCredential credential type
 src/CredProx.Testing/        fakes + conformance suites for plugin authors
 tests/CredProx.Tests/        unit + integration
 tests/CredProx.SecurityTests/ tests/CredProx.ConformanceTests/ tests/CredProx.E2ETests/

@@ -43,7 +43,7 @@ is plain config — no vendor-specific C#.
 ```bash
 cd samples/AiGateway
 (cd StubApi && dotnet run &)   # the provider stand-in
-dotnet run
+ASPNETCORE_ENVIRONMENT=Development dotnet run   # offline: appsettings.Development.json repoints both endpoints at the stub
 ```
 
 Then call through the gateway with a caller key and no provider key of your own:
@@ -72,7 +72,7 @@ provider reflects back.
    (OpenAI-style: keep `Authorization` + `Bearer `).
    For Anthropic-style, set the credential to `Name: "x-api-key"` with no `Prefix`,
    add the provider's version header via a route transform
-   `{ "RequestHeaderValue": "anthropic-version", "Set": "2023-06-01" }`, and point the
+   `{ "RequestHeader": "anthropic-version", "Set": "2023-06-01" }`, and point the
    address at `https://api.anthropic.com/`.
 3. Keep the `PathRemovePrefix: /ai` transform or drop it and mount the route at
    `/{**catch-all}` — the provider path is whatever follows the prefix.

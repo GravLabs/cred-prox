@@ -23,6 +23,11 @@
     <!-- The conformance project dogfoods the shipped suites against the built-ins,
          which are internal since the 1.0 surface freeze. -->
     <InternalsVisibleTo Include="CredProx.ConformanceTests" />
+    <!-- M49 (ADR-0007): the companion packages ship in lockstep with the core and
+         wire through its internal registration primitives; the public setup surface
+         is the entry, the builder chains and the With* seams. -->
+    <InternalsVisibleTo Include="CredProx.Identity" />
+    <InternalsVisibleTo Include="CredProx.Azure" />
   </ItemGroup>
 
   <PropertyGroup>

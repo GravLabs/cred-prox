@@ -17,8 +17,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CredProx" />
-    <PackageReference Include="CredProx.CallerKeys" />
-    <PackageReference Include="CredProx.OAuth" />
+    <PackageReference Include="CredProx.Identity" />
   </ItemGroup>
 
 </Project>

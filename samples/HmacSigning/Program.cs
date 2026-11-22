@@ -8,15 +8,13 @@ var builder = WebApplication.CreateBuilder(args);
 // recipe lives entirely in appsettings.json — method, path, timestamp and body hash,
 // HMAC-SHA256, written to X-Signature/X-Timestamp. Buffering is opt-in with a size cap.
 
-// AddCredProx registers the core defaults; the Hmac credential type joins them as an
-// add-on.
+// AddCredProx registers the core defaults, the Hmac credential type among them.
 builder.Services.AddCredProx(builder.Configuration);
-builder.Services.AddCredProxHmac();
 
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 

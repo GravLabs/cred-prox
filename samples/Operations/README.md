@@ -70,7 +70,7 @@ probe succeeds and the circuit closes. `MaxRetries: 0` keeps the counting honest
 (idempotent methods only) are the default elsewhere.
 
 **`/health` — credential health.**
-`AddCredProxHealthProbes` runs the token-obtainable and certificate-expiry probes on a
+The health leg of `.AddOperations()` runs the token-obtainable and certificate-expiry probes on a
 background loop (here every 5 s) and feeds the `credprox` ASP.NET Core health check. An
 expiring client certificate turns it `Degraded` before it expires; a credential that
 cannot produce a token turns it `Unhealthy` — and the token probe goes through the cache,

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Startup-hook observer for the live runs: the host loads it via
+         DOTNET_STARTUP_HOOKS, it attaches a MeterListener to CredProx's own meter
+         inside the host process and appends token-cache observations to the file
+         named by CREDPROX_LIVE_WITNESS_FILE. Dependency-free by design: only the
+         shared framework, so it loads into any net10.0 host. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>

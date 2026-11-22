@@ -455,9 +455,17 @@ public sealed class CallerTokenIntegrationTests : IAsyncLifetime
     public async Task KeyOnlyHost_KeepsTheExactLegacy401Detail()
     {
         // A host that never ran AddCredProxCallerTokenAuthentication keeps the original
-        // problem detail text — byte-for-byte, no "or caller token".
+        // problem detail text — byte-for-byte, no "or caller token". R1 (M49) refuses a
+        // token-only caller on such a host at startup, so agent-3 gets a key here — the
+        // test is about the 401 detail, not about the refusal.
         ResetUpstream();
-        var (host, _) = StartProxyHost(tokenAuth: false);
+        var (host, _) = StartProxyHost(
+            tokenAuth: false,
+            callerEntries: new Dictionary<string, string?>
+            {
+                ["CredProx:Callers:agent-3:Keys:0:KeyId"] = "k3",
+                ["CredProx:Callers:agent-3:Keys:0:KeyHash"] = Hash("key-c-for-key-only-host"),
+            });
 
         var response = await host.GetTestClient().GetAsync("http://proxy/api/thing");
 

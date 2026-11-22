@@ -988,6 +988,10 @@ public sealed class CredentialAttachFeatureTests
         const string Nested = "pw-nested-login-42";
         var (_, feature, login) = BuildLoginConsent(
             ("Credentials:contoso:Type", "LoginConsent"),
+            // The stub reuses LoginExchangeOptions for its nesting shape, and since M49
+            // the built-in batch brings that options type's validator — the endpoint is
+            // the one field it requires; the stub never calls it.
+            ("Credentials:contoso:LoginEndpoint", "https://id.example/login"),
             ("Credentials:contoso:Basic:User", "svc@example.com"),
             ("Credentials:contoso:Basic:Password", Nested));
         login.FailWith = new ConsentRequiredException(

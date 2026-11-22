@@ -18,7 +18,7 @@ namespace CredProx;
 /// <para>
 /// A contributor sees only the accepted <see cref="CallerRegistry"/> — configuration the
 /// validators refused never reaches it. Register through
-/// <c>AddCredProxCallerRegistryContributor&lt;TContributor&gt;()</c> (or the plain singleton
+/// <c>WithCallerRegistryContributor&lt;TContributor&gt;()</c> (or the plain singleton
 /// registration), the same way validators are contributed.
 /// </para>
 /// <para>

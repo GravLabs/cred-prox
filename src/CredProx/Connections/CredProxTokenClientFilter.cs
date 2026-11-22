@@ -21,11 +21,20 @@ namespace CredProx;
 /// rotated certificate is picked up the same way.
 /// </para>
 /// <para>
-/// The filter owns the <c>credprox-token:</c> name space and sets the primary handler
-/// after the client's own configuration, so a per-connection client always presents the
-/// connection's certificate. A name whose connection is not (or no longer) configured
-/// fails when its handler is built — the token call surfaces the failure rather than
-/// silently presenting no certificate.
+/// The filter owns the <c>credprox-token:</c> name space for the primary handler and
+/// sets it after the client's own configuration, so a per-connection client always
+/// presents the connection's certificate. A name whose connection is not (or no longer)
+/// configured fails when its handler is built — the token call surfaces the failure
+/// rather than silently presenting no certificate.
+/// </para>
+/// <para>
+/// It also owns the default User-Agent for the whole <c>credprox-token</c> name space —
+/// the plain client and every <c>credprox-token:&lt;name&gt;</c> client alike (product
+/// bug 2026-11-22: GitHub answers a UA-less token exchange 403 at its administrative
+/// edge, before any credential is read). The stamp is appended after the client's own
+/// configuration and stamps only when the request carries no User-Agent, so a host's
+/// explicit value always wins; the plain client's primary handler stays whatever the
+/// client's own registration configured.
 /// </para>
 /// </remarks>
 [Experimental("CREDPROX001")]
@@ -42,9 +51,20 @@ public sealed class CredProxTokenClientFilter : IHttpMessageHandlerBuilderFilter
 
             next(builder);
 
-            if (builder.Name is not { } clientName
-                || !clientName.StartsWith(CredProxHttpClientNames.ConnectionPrefix, StringComparison.Ordinal))
+            if (builder.Name is not { } clientName)
             {
+                return;
+            }
+
+            if (!clientName.StartsWith(CredProxHttpClientNames.ConnectionPrefix, StringComparison.Ordinal))
+            {
+                // The plain token client gets the default User-Agent and nothing else —
+                // its primary handler stays exactly what its own registration configured.
+                if (string.Equals(clientName, CredProxHttpClientNames.TokenClient, StringComparison.Ordinal))
+                {
+                    builder.AdditionalHandlers.Add(new CredProxUserAgentHandler());
+                }
+
                 return;
             }
 
@@ -65,6 +85,7 @@ public sealed class CredProxTokenClientFilter : IHttpMessageHandlerBuilderFilter
                 SslOptions = { ClientCertificates = new X509Certificate2Collection(connection.Certificate) },
             };
             builder.AdditionalHandlers.Add(new CredProxRedirectGuard());
+            builder.AdditionalHandlers.Add(new CredProxUserAgentHandler());
         };
     }
 }

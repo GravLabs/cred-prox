@@ -137,14 +137,11 @@ EOF
 using CredProx;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-builder.Services.AddCredProxBuiltInCredentials();
-builder.Services.AddCredProxCredentials(builder.Configuration);
+builder.Services.AddCredProx(builder.Configuration);
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 builder.WebHost.UseUrls("http://127.0.0.1:5080");
 var app = builder.Build();
 app.MapReverseProxy();
@@ -178,9 +175,9 @@ EOF
 
 add_credprox_pkg() { # dir pkg...
   # No --source here: the SDK resolves it as a path/URL, not a configured-source name.
-  # The machine's user-level NuGet config supplies the `credprox` source; a machine
-  # without it fails restore and the cell records FAIL honestly. The URL never
-  # appears in this file either way.
+  # The scratch project's own NuGet.config (write_local_feed_config) supplies the
+  # `credprox-build` source pointing at artifacts/packages; without a built feed
+  # the restore fails and the cell records FAIL honestly.
   local dir=$1; shift
   local p out code
   for p in "$@"; do
@@ -255,13 +252,10 @@ cell_webapi() {
 import sys, pathlib
 p = pathlib.Path(sys.argv[1])
 s = p.read_text()
-s = s.replace("var app = builder.Build();", """builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-builder.Services.AddCredProxBuiltInCredentials();
-builder.Services.AddCredProxCredentials(builder.Configuration);
+s = s.replace("var app = builder.Build();", """builder.Services.AddCredProx(builder.Configuration);
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 var app = builder.Build();""")
 s = s.replace("app.UseHttpsRedirection();", "app.UseHttpsRedirection();\napp.MapReverseProxy();")
 p.write_text(s)
@@ -338,7 +332,7 @@ cell_drift() {
   <PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="CredProx" Version="VERSION" />
-    <PackageVersion Include="CredProx.AzureKeyVault" Version="VERSION" />
+    <PackageVersion Include="CredProx.Azure" Version="VERSION" />
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <PackageVersion Include="Azure.Identity" Version="1.17.0" />
   </ItemGroup>
@@ -365,7 +359,7 @@ s = s.replace("<Nullable>enable</Nullable>",
   "<Nullable>enable</Nullable>\n    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>")
 s = s.replace("</Project>", """  <ItemGroup>
     <PackageReference Include="CredProx" />
-    <PackageReference Include="CredProx.AzureKeyVault" />
+    <PackageReference Include="CredProx.Azure" />
     <PackageReference Include="Yarp.ReverseProxy" />
     <PackageReference Include="Azure.Identity" />
   </ItemGroup>
@@ -453,8 +447,9 @@ curl_check_mw() {
 
 # --- multi-package add-on cells (ADR-0005) ----------------------------------------
 # The add-ons ship only in the locally built artifacts/packages feed until the next
-# release, so these two cells restore from that directory: no remote source is asked
-# for a package id it has never carried.
+# release, so these cells restore from that directory through their own NuGet.config
+# (write_local_feed_config): no remote source is asked for a package id it has never
+# carried.
 
 add_local_feed() { # dir — the repo's built feed, and nothing else (see write_local_feed_config)
   local dir=$1
@@ -491,23 +486,19 @@ cell_keys() {
   local d=$SCRATCH/keys
   scaffold_web "$d"
   add_local_feed "$d"
-  add_credprox_pkg "$d" CredProx CredProx.CallerKeys || { record keys FAIL "package add"; return; }
+  add_credprox_pkg "$d" CredProx || { record keys FAIL "package add"; return; }
   python3 - "$d/Program.cs" << 'PYEOF'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
-assert tail3 in s, "scaffold tail not found"
-s = s.replace(tail3, """builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+entry = "builder.Services.AddCredProx(builder.Configuration);"
+assert entry in s, "scaffold entry call not found"
+s = s.replace(entry, """builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 {
     ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
     ["CredProx:Callers:app-a:Keys:0:KeyHash"] =
         "sha256:ede2d53fa6c1f60d7bd8df67f87a9093931ac51ab01df64315f5f1fc88374003",
 });
-builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
-var app = builder.Build();
-app.MapReverseProxy();
-app.Run();
-""")
+builder.Services.AddCredProx(builder.Configuration);""")
 p.write_text(s)
 PYEOF
   [ $? -ne 0 ] && { record keys FAIL "program rewrite"; return; }
@@ -515,23 +506,24 @@ PYEOF
   start_wiremock || { record keys FAIL "wiremock start"; return; }
   keys_smoke keys "$d" || { stop_wiremock; return; }
   stop_wiremock
-  record keys PASS "core+CallerKeys: valid key 200, missing/wrong key 401, key value never upstream"
+  record keys PASS "core (caller keys armed from config by the entry): valid key 200, missing/wrong key 401, key value never upstream"
 }
 
 cell_keytokens() {
   local d=$SCRATCH/keytokens
   scaffold_web "$d"
   add_local_feed "$d"
-  add_credprox_pkg "$d" CredProx CredProx.CallerKeys CredProx.CallerTokens \
+  add_credprox_pkg "$d" CredProx CredProx.Identity \
     || { record keytokens FAIL "package add"; return; }
-  # One host registering BOTH add-ons: the shared caller policy must arrive once and
-  # the key path must still work with the token scheme registered alongside.
+  # One host with BOTH caller schemes: keys armed by the entry, the token scheme by the
+  # chained Identity call. The shared caller policy must arrive once and the key path
+  # must still work with the token scheme registered alongside.
   python3 - "$d/Program.cs" << 'PYEOF'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
-assert tail3 in s, "scaffold tail not found"
-s = s.replace(tail3, """builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+entry = "builder.Services.AddCredProx(builder.Configuration);"
+assert entry in s, "scaffold entry call not found"
+s = s.replace(entry, """builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
 {
     ["CredProx:Callers:app-a:Keys:0:KeyId"] = "k1",
     ["CredProx:Callers:app-a:Keys:0:KeyHash"] =
@@ -539,12 +531,8 @@ s = s.replace(tail3, """builder.Configuration.AddInMemoryCollection(new Dictiona
     ["CredProx:CallerToken:Authority"] = "https://issuer.invalid/",
     ["CredProx:CallerToken:Audience"] = "consumer-compat",
 });
-builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
-builder.Services.AddCredProxCallerTokenAuthentication(builder.Configuration);
-var app = builder.Build();
-app.MapReverseProxy();
-app.Run();
-""")
+builder.Services.AddCredProx(builder.Configuration)
+    .AddIdentity();""")
 p.write_text(s)
 PYEOF
   [ $? -ne 0 ] && { record keytokens FAIL "program rewrite"; return; }
@@ -552,14 +540,14 @@ PYEOF
   start_wiremock || { record keytokens FAIL "wiremock start"; return; }
   keys_smoke keytokens "$d" || { stop_wiremock; return; }
   stop_wiremock
-  record keytokens PASS "core+CallerKeys+CallerTokens coexist; key path green (token path not exercised)"
+  record keytokens PASS "core+Identity: caller keys and the caller-token scheme coexist; key path green (token path not exercised)"
 }
 
 cell_hmac() {
   local d=$SCRATCH/hmac
   scaffold_web "$d"
   add_local_feed "$d"
-  add_credprox_pkg "$d" CredProx CredProx.Hmac || { record hmac FAIL "package add"; return; }
+  add_credprox_pkg "$d" CredProx || { record hmac FAIL "package add"; return; }
   cat > "$d/appsettings.json" << 'EOF'
 {
   "CredProx": {
@@ -618,8 +606,6 @@ EOF
   python3 - "$d/Program.cs" << 'PYEOF'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-s = s.replace("builder.Services.AddCredProxBuiltInCredentials();",
-              "builder.Services.AddCredProxBuiltInCredentials();\nbuilder.Services.AddCredProxHmac();")
 tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
 assert tail3 in s, "scaffold tail not found"
 s = s.replace(tail3, """var app = builder.Build();
@@ -657,7 +643,7 @@ PYEOF
        && printf '%s' "$overcap" | grep -q 'credprox.body_too_large_to_sign' \
        && printf '%s' "$overcap" | grep -q 'HTTP:413'; then
       kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
-      record hmac PASS "core+CredProx.Hmac: independent verifier accepted the signature, cap answered 413"
+      record hmac PASS "core (Hmac built into the entry): independent verifier accepted the signature, cap answered 413"
       return
     fi
     sleep 1
@@ -669,7 +655,7 @@ cell_loginexchange() {
   local d=$SCRATCH/loginexchange
   scaffold_web "$d"
   add_local_feed "$d"
-  add_credprox_pkg "$d" CredProx CredProx.LoginExchange || { record loginexchange FAIL "package add"; return; }
+  add_credprox_pkg "$d" CredProx || { record loginexchange FAIL "package add"; return; }
   cat > "$d/appsettings.json" << 'EOF'
 {
   "CredProx": {
@@ -682,7 +668,7 @@ cell_loginexchange() {
         "Form": { "User": "cc-svc", "Password": "secret:cc-password" },
         "Response": "JsonPath",
         "ResponseField": "sessionId",
-        "Lifetime": "01:00:00",
+        "DefaultLifetime": "01:00:00",
         "Partition": { "From": "header:X-API-Env", "Allowed": ["uat"] }
       }
     },
@@ -704,8 +690,6 @@ EOF
   python3 - "$d/Program.cs" << 'PYEOF'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-s = s.replace("builder.Services.AddCredProxBuiltInCredentials();",
-              "builder.Services.AddCredProxBuiltInCredentials();\nbuilder.Services.AddCredProxLoginExchange();")
 tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
 assert tail3 in s, "scaffold tail not found"
 s = s.replace(tail3, """var app = builder.Build();
@@ -739,7 +723,7 @@ PYEOF
        && printf '%s' "$prod" | grep -q 'HTTP:400' \
        && printf '%s' "$prod" | grep -q 'credprox.partition_not_allowed'; then
       kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
-      record loginexchange PASS "core+CredProx.LoginExchange: login session attached, blocked partition refused before any vendor call"
+      record loginexchange PASS "core (LoginExchange built into the entry): login session attached, blocked partition refused before any vendor call"
       return
     fi
     sleep 1
@@ -751,7 +735,7 @@ cell_oauth() {
   local d=$SCRATCH/oauth
   scaffold_web "$d"
   add_local_feed "$d"
-  add_credprox_pkg "$d" CredProx CredProx.OAuth || { record oauth FAIL "package add"; return; }
+  add_credprox_pkg "$d" CredProx CredProx.Identity || { record oauth FAIL "package add"; return; }
   cat > "$d/appsettings.json" << 'EOF'
 {
   "CredProx": {
@@ -798,8 +782,8 @@ EOF
   python3 - "$d/Program.cs" << 'PYEOF'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-s = s.replace("builder.Services.AddCredProxBuiltInCredentials();",
-              "builder.Services.AddCredProxBuiltInCredentials();\nbuilder.Services.AddCredProxOAuth();")
+s = s.replace("builder.Services.AddCredProx(builder.Configuration);",
+              "builder.Services.AddCredProx(builder.Configuration)\n    .AddIdentity();")
 tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
 assert tail3 in s, "scaffold tail not found"
 s = s.replace(tail3, """var app = builder.Build();
@@ -838,7 +822,7 @@ PYEOF
        && printf '%s' "$refused" | grep -q 'credprox.credential_unavailable' \
        && printf '%s' "$refused" | grep -q 'HTTP:502'; then
       kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
-      record oauth PASS "core+CredProx.OAuth: bearer token attached from the token endpoint, refused client answered 502 without reaching upstream"
+      record oauth PASS "core+CredProx.Identity: bearer token attached from the token endpoint, refused client answered 502 without reaching upstream"
       return
     fi
     sleep 1
@@ -847,8 +831,8 @@ PYEOF
   record oauth FAIL "$detail"
 }
 # core + CredProx.Operations: the consumer story of the operations split — the host
-# configures Throttling, Resilience and Health and calls the three Add methods from the
-# package; the app boots (the startup refusal stays silent exactly when the features are
+# configures Throttling, Resilience and Health and chains AddOperations() on the entry;
+# the app boots (the startup refusal stays silent exactly when the features are
 # registered), the static credential attaches through the throttle+resilience pipeline,
 # and /health reports the credential probes' first round (which runs at startup).
 cell_operations() {
@@ -884,15 +868,11 @@ EOF
   python3 - "$d/Program.cs" << 'PYEOF'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-s = s.replace("builder.Services.AddCredProxBuiltInCredentials();",
-              "builder.Services.AddCredProxBuiltInCredentials();\n"
-              "builder.Services.AddCredProxThrottling(builder.Configuration);\n"
-              "builder.Services.AddCredProxResilience(builder.Configuration);")
+s = s.replace("builder.Services.AddCredProx(builder.Configuration);",
+              "builder.Services.AddCredProx(builder.Configuration)\n    .AddOperations();")
 tail3 = "var app = builder.Build();\napp.MapReverseProxy();\napp.Run();\n"
 assert tail3 in s, "scaffold tail not found"
-s = s.replace(tail3, """// Health probes registered last: they read the credential and destination registries.
-builder.Services.AddCredProxHealthProbes(builder.Configuration);
-var app = builder.Build();
+s = s.replace(tail3, """var app = builder.Build();
 app.MapHealthChecks("/health");
 // The vendor stub: reports only whether the configured credential header arrived
 // with the right value — the secret reference resolves inside the proxy.
@@ -914,7 +894,7 @@ PYEOF
     if printf '%s' "$ok" | grep -q '^cred-present$' \
        && printf '%s' "$health" | grep -q '^Healthy$'; then
       kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
-      record operations PASS "core+CredProx.Operations: host wires throttle+resilience+health from the package, credential attached through the pipeline, health probes Healthy"
+      record operations PASS "core+CredProx.Operations: host wires throttle+resilience+health with one chained call, credential attached through the pipeline, health probes Healthy"
       return
     fi
     sleep 1
@@ -1052,7 +1032,8 @@ cell_trim() {
   cat > "$a/Program.cs" << 'EOF'
 _ = typeof(CredProx.CredProxAuth);
 _ = typeof(CredProx.CredProxMetadata);
-_ = typeof(Microsoft.Extensions.DependencyInjection.CredProxServiceCollectionExtensions);
+_ = typeof(CredProx.CredProxBuilder);
+_ = typeof(Microsoft.Extensions.DependencyInjection.CredProxBuilderExtensions);
 _ = typeof(Microsoft.Extensions.DependencyInjection.CredProxReverseProxyBuilderExtensions);
 Console.WriteLine("trim-aot probe");
 EOF

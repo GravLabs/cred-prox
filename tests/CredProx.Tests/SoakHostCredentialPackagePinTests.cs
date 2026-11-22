@@ -2,18 +2,20 @@ using System.Text.Json;
 using Xunit;
 namespace CredProx.Tests;
 /// <summary>
-/// The soak host consumes CredProx from the local feed exactly like a real host, and since the
-/// 0.12 package split (ADR-0005) each credential <c>Type</c> ships in its own feature package: a
-/// host config that names a type without the package reference and its Add call fails the host
-/// at startup validation — the <c>CredentialBinder</c> unknown-type hint carries the package name.
-/// The harness carried OAuthClientCredentials and LoginExchange past the split without either, and
-/// CI built the host without starting it, so nothing caught it. This pin keeps the soak config,
-/// the host's package references and its registrations from drifting apart again: for every
-/// credential type the soak config names, the owning package must be referenced and its
-/// registration method must be called. The same rule covers caller admission: a config that
-/// declares <c>CredProx:Callers</c> obligates the <c>CredProx.CallerKeys</c> reference and the
-/// <c>AddCredProxCallerAuthentication</c> call — without them the startup guard refuses to boot
-/// the host (ADR-0005), and a CI that builds but never starts the host would not notice.
+/// The soak host consumes CredProx from the local feed exactly like a real host, and from
+/// 0.15 (ADR-0007) each credential <c>Type</c> ships either in the core — armed by the
+/// entry <c>AddCredProx(configuration)</c> — or in <c>CredProx.Identity</c>, armed by the
+/// chained <c>AddIdentity()</c>: a host config that names a type without the package
+/// reference and its arming call fails the host at startup validation — the
+/// <c>CredentialBinder</c> unknown-type hint carries the package name. The harness carried
+/// OAuthClientCredentials and LoginExchange past the 0.12 split without either, and CI
+/// built the host without starting it, so nothing caught it. This pin keeps the soak
+/// config, the host's package references and its setup calls from drifting apart again:
+/// for every credential type the soak config names, the owning package must be referenced
+/// and its arming call must be present. The same rule covers caller admission: a config
+/// that declares <c>CredProx:Callers</c> obligates the entry call — caller keys ride the
+/// core from 0.15 — without which the startup guard refuses to boot the host (ADR-0005),
+/// and a CI that builds but never starts the host would not notice.
 /// </summary>
 public sealed class SoakHostCredentialPackagePinTests
 {
@@ -21,12 +23,12 @@ public sealed class SoakHostCredentialPackagePinTests
     // src/CredProx/Credentials/CredentialBinder.cs; this map mirrors it for the host side.
     private static readonly Dictionary<string, (string Package, string AddCall)> TypeOwners = new(StringComparer.Ordinal)
     {
-        ["StaticKey"] = ("CredProx", "AddCredProxBuiltInCredentials"),
-        ["Hmac"] = ("CredProx.Hmac", "AddCredProxHmac"),
-        ["LoginExchange"] = ("CredProx.LoginExchange", "AddCredProxLoginExchange"),
-        ["OAuthClientCredentials"] = ("CredProx.OAuth", "AddCredProxOAuth"),
-        ["TokenExchange"] = ("CredProx.OAuth", "AddCredProxOAuth"),
-        ["JwtAssertion"] = ("CredProx.OAuth", "AddCredProxOAuth"),
+        ["StaticKey"] = ("CredProx", "AddCredProx"),
+        ["Hmac"] = ("CredProx", "AddCredProx"),
+        ["LoginExchange"] = ("CredProx", "AddCredProx"),
+        ["OAuthClientCredentials"] = ("CredProx.Identity", "AddIdentity"),
+        ["TokenExchange"] = ("CredProx.Identity", "AddIdentity"),
+        ["JwtAssertion"] = ("CredProx.Identity", "AddIdentity"),
     };
 
     public static TheoryData<string> CredentialTypesNamedByTheSoakConfig()
@@ -71,8 +73,8 @@ public sealed class SoakHostCredentialPackagePinTests
         var root = RepoRoot();
         var csproj = File.ReadAllText(Path.Combine(root, "tools", "m33-soak", "SoakHost", "SoakHost.csproj"));
         var program = File.ReadAllText(Path.Combine(root, "tools", "m33-soak", "SoakHost", "Program.cs"));
-        Assert.Contains("Include=\"CredProx.CallerKeys\"", csproj);
-        Assert.Contains("AddCredProxCallerAuthentication(", program);
+        Assert.Contains("Include=\"CredProx\"", csproj);
+        Assert.Contains("AddCredProx(", program);
     }
 
     private static string RepoRoot()

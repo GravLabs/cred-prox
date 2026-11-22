@@ -6,15 +6,13 @@ var builder = WebApplication.CreateBuilder(args);
 // with no OAuth at all: POST a service account, get a session token back. One
 // {partition} credential serves many environments; everything is plain config.
 
-// AddCredProx registers the core defaults; the LoginExchange credential type joins
-// them as an add-on.
+// AddCredProx registers the core defaults, the LoginExchange credential type among them.
 builder.Services.AddCredProx(builder.Configuration);
-builder.Services.AddCredProxLoginExchange();
 
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 

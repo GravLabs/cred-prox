@@ -65,7 +65,8 @@ public sealed class CallerTokenOptionsTests
         // M45 security finding F-1: discovery and the JWKS fetch ride this backchannel,
         // and a redirect there hands the validation path another host's key set. The
         // post-configure decision (R-4) ships a primary that refuses redirects when the
-        // host supplied none; a host handler is kept and wrapped — see
+        // host supplied none, carrying CredProx's own User-Agent stamp on top (product
+        // bug 2026-11-22); a host handler is kept and wrapped — see
         // CallerTokenBackchannelTests.
         var services = new ServiceCollection();
         services.AddCredProxCallerTokenAuthentication(ValidConfig());
@@ -73,7 +74,8 @@ public sealed class CallerTokenOptionsTests
         var bearer = provider
             .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
             .Get(CallerTokenOptions.Scheme);
-        var primary = Assert.IsType<SocketsHttpHandler>(bearer.BackchannelHttpHandler);
+        var userAgent = Assert.IsType<CredProxUserAgentHandler>(bearer.BackchannelHttpHandler);
+        var primary = Assert.IsType<SocketsHttpHandler>(userAgent.InnerHandler);
         Assert.False(primary.AllowAutoRedirect);
     }
 

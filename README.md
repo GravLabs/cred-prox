@@ -17,11 +17,12 @@ identity federation, and Entra app roles narrow what it may call. See
 ```csharp
 // One call registers the core defaults: token cache, the configuration-backed secret
 // source, the built-in credential types, and the credentials and destinations below.
-builder.Services.AddCredProx(builder.Configuration);
-builder.Services.AddCredProxOAuth(); // add-on calls for what you need (this config uses an OAuth type)
+// Chained calls bring in the add-on packages you need.
+builder.Services.AddCredProx(builder.Configuration)
+    .AddIdentity(); // CredProx.Identity — this config uses an OAuth type
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration); // the proxy pipeline, also from config
+    .AddCredProx(); // the proxy pipeline, also from config
 ```
 
 ```json
@@ -77,17 +78,17 @@ no built-in vendor presets.
 
 ## What's in the box
 
-- **Credential types**: built-in `StaticKey` (`TokenCredential` registers through the
-  `CredProx.AzureKeyVault` extension), plus `Hmac`, `LoginExchange` and the three OAuth
-  types (`OAuthClientCredentials`, `TokenExchange`, `JwtAssertion`) in their own
-  packages (`CredProx.Hmac`, `CredProx.LoginExchange`,
-  `CredProx.OAuth`) — every vendor is plain config, and a
+- **Credential types**: built-in `StaticKey`, `Hmac` and `LoginExchange` ship in the
+  core; `TokenCredential` registers through the `CredProx.Azure` extension, and the
+  three OAuth types (`OAuthClientCredentials`, `TokenExchange`, `JwtAssertion`) ship in
+  `CredProx.Identity` — every vendor is plain config, and a
   community **preset** (`CredProx:Presets` or a custom `IPresetSource`) can package the
   fixed facts of a vendor so a credential is a few lines.
 - **Token cache** with per-credential/per-partition scoping, single-flight refresh, early
   refresh, negative caching.
 - **Secret sources** with per-credential scoping; `secret:` references validated at
-  startup; Azure Key Vault add-on.
+  startup; Key Vault and other external stores plug in as a host-side `IConfiguration`
+  provider (the Azure SDK's own is `src/CredProx.Azure/README.md`'s worked example).
 - **Destinations & connections**: static or templated with fail-closed allow-lists;
   client certificates and mTLS per cluster, with reload.
 - **Caller authentication**: short-lived Entra / OpenID Connect access tokens whose roles
@@ -119,16 +120,17 @@ ships no vendor presets.
 
 | Package | What it does | You need it when… |
 |---|---|---|
-| `CredProx` | The core: proxy pipeline, token cache, `secret:` references, the built-in `StaticKey` type, caller policy plumbing, audit | Every host — it is the host |
+| `CredProx` | The core: proxy pipeline, token cache, `secret:` references, the built-in `StaticKey` type, caller policy plumbing, audit — plus caller API keys, `Hmac` signing and `LoginExchange` as features that work from configuration alone | Every host — it is the host |
 | `CredProx.Abstractions` | The public contracts (credential types, authenticators, secret sources, pipeline seams) | You write your own extension, or compile against the contract |
-| `CredProx.CallerKeys` | Inbound caller authentication against API keys kept in config as SHA-256 hashes | Callers authenticate with static keys |
-| `CredProx.CallerTokens` | Inbound caller authentication via short-lived Entra / OIDC access tokens, roles narrowing the caller's rules | Agents or other short-lived workers call you |
-| `CredProx.OAuth` | The `OAuthClientCredentials`, `TokenExchange` and `JwtAssertion` credential types | The vendor speaks OAuth |
-| `CredProx.Hmac` | The `Hmac` request-signing credential type | The vendor expects signed requests |
-| `CredProx.LoginExchange` | The `LoginExchange` credential type: a form login whose session is replayed and refreshed | The vendor authenticates through a login endpoint |
+| `CredProx.Identity` | The `OAuthClientCredentials`, `TokenExchange` and `JwtAssertion` credential types, plus inbound caller authentication via short-lived Entra / OIDC access tokens, roles narrowing the caller's rules | The vendor speaks OAuth, or agents and other short-lived workers call you |
 | `CredProx.Operations` | Throttling with `Retry-After`, per-cluster retries and circuit breakers, credential health probes | You run real traffic through it |
-| `CredProx.AzureKeyVault` | The `TokenCredential` credential type: trades an Azure token credential (managed identity, service principal) for Entra tokens | The vendor expects Entra tokens obtained through Azure identity |
+| `CredProx.Azure` | The `TokenCredential` credential type: trades an Azure token credential (managed identity, service principal) for Entra tokens | The vendor expects Entra tokens obtained through Azure identity |
 | `CredProx.Testing` | Fakes and the conformance suites the built-ins themselves are tested with | You test a credential type or authenticator you wrote |
+
+CredProx.CallerKeys, CredProx.Hmac and CredProx.LoginExchange (now in CredProx),
+CredProx.OAuth and CredProx.CallerTokens (now CredProx.Identity) and
+CredProx.AzureKeyVault (now CredProx.Azure) have been removed from the package
+registry; reference the replacement package instead.
 
 Install with `dotnet add package CredProx` plus the add-on packages you need; every
 package targets `net10.0`. Until the first public nuget.org release lands (M44

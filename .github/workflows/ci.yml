@@ -29,12 +29,8 @@ jobs:
         run: |
           dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
           dotnet pack src/CredProx -c Release -o artifacts/packages
-          dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
-          dotnet pack src/CredProx.CallerTokens -c Release -o artifacts/packages
-          dotnet pack src/CredProx.CallerKeys -c Release -o artifacts/packages
-          dotnet pack src/CredProx.Hmac -c Release -o artifacts/packages
-          dotnet pack src/CredProx.LoginExchange -c Release -o artifacts/packages
-          dotnet pack src/CredProx.OAuth -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Identity     -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Azure        -c Release -o artifacts/packages
           dotnet pack src/CredProx.Operations -c Release -o artifacts/packages
           dotnet pack src/CredProx.Testing -c Release -o artifacts/packages
 
@@ -172,12 +168,8 @@ jobs:
         run: |
           dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
           dotnet pack src/CredProx -c Release -o artifacts/packages
-          dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
-          dotnet pack src/CredProx.CallerTokens -c Release -o artifacts/packages
-          dotnet pack src/CredProx.CallerKeys -c Release -o artifacts/packages
-          dotnet pack src/CredProx.Hmac -c Release -o artifacts/packages
-          dotnet pack src/CredProx.LoginExchange -c Release -o artifacts/packages
-          dotnet pack src/CredProx.OAuth -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Identity     -c Release -o artifacts/packages
+          dotnet pack src/CredProx.Azure        -c Release -o artifacts/packages
           dotnet pack src/CredProx.Operations -c Release -o artifacts/packages
           dotnet pack src/CredProx.Testing -c Release -o artifacts/packages
 

@@ -35,7 +35,7 @@ if [ "$TARGET" = canary ]; then
 fi
 cp -r publish instr
 # Every CredProx assembly the harness can reach must be instrumented. Even a parsers
-# seed that returns early runs CredProx.Hmac code before any target parse: the
+# seed that returns early runs the core assembly's Hmac code before any target parse: the
 # HmacOptions ctor and the HmacComponentKind[] array construction in the parsers target
 # (TryParseComponent is reached only later, via BuildCanonicalString). If that assembly is
 # not instrumented, a dry-run seed whose whole path stays in uninstrumented code gives afl

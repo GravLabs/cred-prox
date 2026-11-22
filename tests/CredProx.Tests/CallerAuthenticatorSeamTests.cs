@@ -364,7 +364,145 @@ public sealed class CallerAuthenticatorSeamTests
             .Build();
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync(default));
-        Assert.Contains(nameof(CredProxServiceCollectionExtensions.AddCredProxCallerAuthenticator), ex.Message);
+        Assert.Contains("WithCallerAuthenticator<T>()", ex.Message);
+        // R1 (M49): the refusal names the caller left without a way in, not just the section.
+        Assert.Contains("app-a", ex.Message);
+    }
+
+    [Fact]
+    public void CallerWithoutKeysBesideAKeyedSibling_RefusesStartupNamingOnlyIt()
+    {
+        // R1 per-caller shape: the caller-key machinery is registered (the keyed sibling
+        // brought it), so a caller whose only declared way in is caller tokens — with no
+        // token machinery on the host — is named on its own, and the sibling is not.
+        var entries = CallerEntries();
+        entries["CredProx:Callers:app-b:TokenClientIds:0"] = "client-b";
+        entries["CredProx:Callers:app-b:Operations:0:Name"] = "plain-read";
+        entries["CredProx:Callers:app-b:Operations:0:Route"] = "plain";
+        entries["CredProx:Callers:app-b:Operations:0:Methods:0"] = "GET";
+        entries["CredProx:Callers:app-b:Operations:0:Paths:0"] = "/plain/*";
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            StartHost((_, _, _) => { }, callerAuth: true, entries: entries));
+        Assert.Contains("app-b", ex.Message);
+        Assert.DoesNotContain("'app-a'", ex.Message);
+    }
+
+    [Fact]
+    public void CallerWithoutKeys_ClearsWhenCallerTokenMachineryIsRegistered()
+    {
+        // The Identity arm of R1: a caller without key hashes is fine once the
+        // caller-token machinery is registered — tokens are its way in.
+        var entries = CallerEntries();
+        entries["CredProx:Callers:app-b:TokenClientIds:0"] = "client-b";
+        entries["CredProx:Callers:app-b:Operations:0:Name"] = "plain-read";
+        entries["CredProx:Callers:app-b:Operations:0:Route"] = "plain";
+        entries["CredProx:Callers:app-b:Operations:0:Methods:0"] = "GET";
+        entries["CredProx:Callers:app-b:Operations:0:Paths:0"] = "/plain/*";
+        entries["CredProx:CallerToken:Authority"] = "https://login.microsoftonline.com/tenant-id/v2.0";
+        entries["CredProx:CallerToken:Audience"] = "api://credprox";
+
+        using var host = StartHost(
+            (_, services, config) => services.AddCredProxCallerTokenAuthentication(config),
+            callerAuth: true,
+            entries: entries);
+        Assert.NotNull(host.Host);
+    }
+
+    // ---- M49 configuration-driven caller keys: the core entry brings the machinery
+    // when a key hash is configured, and registers nothing when none is ----
+
+    private sealed class EntryHost : IDisposable
+    {
+        public required IHost Host { get; init; }
+        public required IServiceProvider Services { get; init; }
+
+        public void Dispose() => Host.Dispose();
+    }
+
+    private static EntryHost StartEntryHost(
+        Dictionary<string, string?> entries,
+        Action<IServiceCollection, IConfiguration>? registerExtra = null)
+    {
+        var host = new HostBuilder()
+            .ConfigureAppConfiguration(build => build.AddInMemoryCollection(entries))
+            .ConfigureServices((context, services) =>
+            {
+                services.AddCredProx(context.Configuration);
+                registerExtra?.Invoke(services, context.Configuration);
+                services.AddRouting();
+                services.AddReverseProxy()
+                    .LoadFromMemory([PlainRoute], [AcmeCluster])
+                    .AddCredProx(context.Configuration);
+            })
+            .ConfigureWebHost(web =>
+            {
+                web.UseTestServer();
+                web.Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints => endpoints.MapReverseProxy());
+                });
+            })
+            .Start();
+
+        return new EntryHost { Host = host, Services = host.Services };
+    }
+
+    [Fact]
+    public async Task ConfiguredKeyHash_RegistersTheCallerKeySchemeThroughTheEntry()
+    {
+        // No caller-key call anywhere: the key hash in config brings the scheme, the
+        // policy and the guard's satisfaction — features work from configuration.
+        using var entry = StartEntryHost(CallerEntries());
+
+        var schemes = entry.Services.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
+        var names = (await schemes.GetAllSchemesAsync()).Select(s => s.Name).ToList();
+        Assert.Contains(CredProxAuth.CallerKeyScheme, names);
+
+        var policies = entry.Services.GetRequiredService<Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider>();
+        Assert.NotNull(await policies.GetPolicyAsync(CredProxAuth.CallerPolicy));
+    }
+
+    [Fact]
+    public async Task NoKeyHashConfigured_RegistersNoCallerKeySchemeOrPolicy()
+    {
+        // The QuickStart / GitHubApp shape, now structural: nothing configures a caller
+        // key hash, so the core registers no authentication scheme and no policy.
+        var entries = new Dictionary<string, string?>
+        {
+            ["CredProx:Destinations:acme:Template"] = "http://upstream.example/",
+        };
+        using var entry = StartEntryHost(entries);
+
+        // With nothing registered the authentication stack itself may be absent: the
+        // provider resolves to null, or carries no caller-key scheme and no policy.
+        var schemes = entry.Services.GetService<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
+        List<string> names = [];
+        if (schemes is not null)
+        {
+            names.AddRange((await schemes.GetAllSchemesAsync()).Select(s => s.Name));
+        }
+
+        Assert.DoesNotContain(CredProxAuth.CallerKeyScheme, names);
+
+        var policies = entry.Services.GetService<Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider>();
+        Assert.True(policies is null || await policies.GetPolicyAsync(CredProxAuth.CallerPolicy) is null);
+    }
+
+    [Fact]
+    public async Task EntryAutoRegistration_ThenExplicitCall_RegistersTheSchemeOnce()
+    {
+        // A 0.14-shape host calling AddCredProxCallerAuthentication explicitly must not
+        // crash on the entry's own auto-registration — the machinery dedupes by marker.
+        using var entry = StartEntryHost(
+            CallerEntries(),
+            (services, config) => services.AddCredProxCallerAuthentication(config));
+
+        var schemes = entry.Services.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
+        var names = (await schemes.GetAllSchemesAsync())
+            .Where(s => s.Name == CredProxAuth.CallerKeyScheme).ToList();
+        Assert.Single(names);
     }
 
     [Fact]

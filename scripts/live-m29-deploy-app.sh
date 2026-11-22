@@ -110,7 +110,7 @@ fi
 echo "provisioningState: $(az containerapp show -n "$APP" -g "$RG" --query properties.provisioningState -o tsv)"
 echo "runningState:      $(az containerapp show -n "$APP" -g "$RG" --query properties.runningState -o tsv)"
 echo "identity:          $(az containerapp show -n "$APP" -g "$RG" --query identity.type -o tsv) (expected UserAssigned)"
-echo "pull path (app):   kubelet identity selected: $(az containerapp show -n "$APP" -g "$RG" --query "properties.configuration.registries[0].identity | ends_with(@, 'credprox-m29-kubelet')" -o tsv) (expected True); identities attached: $(az containerapp show -n "$APP" -g "$RG" --query 'length(identity.userAssignedIdentities)' -o tsv) (expected 2)"
+echo "pull path (app):   kubelet identity selected: $(az containerapp show -n "$APP" -g "$RG" --query "properties.configuration.registries[0].identity | ends_with(@, 'credprox-m29-kubelet')" -o tsv) (expected true); identities attached: $(az containerapp show -n "$APP" -g "$RG" --query 'length(identity.userAssignedIdentities)' -o tsv) (expected 2)"
 BOUND_APP=$(az containerapp show -n "$APP" -g "$RG" --query "length(properties.template.containers[?contains(env[*].name, 'MANAGED_IDENTITY_CLIENT_ID')])" -o tsv)
 PIN_APP=$(az containerapp show -n "$APP" -g "$RG" --query "properties.template.containers[0].env[?name=='MANAGED_IDENTITY_CLIENT_ID'] | [0].value" -o tsv)
 echo "runtime bind (app): env-pinned containers: ${BOUND_APP}/2 (expected 2/2); pin equals runtime UAI client id: $([[ "$PIN_APP" == "$UAI_CLIENT_ID" ]] && echo True || echo False)"
@@ -144,7 +144,7 @@ az containerapp job identity assign -n "$JOB" -g "$RG" \
   --user-assigned "$UAI_ID" "$KUBELET_ID" -o none
 echo "job provisioningState: $(az containerapp job show -n "$JOB" -g "$RG" --query properties.provisioningState -o tsv)"
 echo "job identity:          $(az containerapp job show -n "$JOB" -g "$RG" --query identity.type -o tsv) (expected UserAssigned)"
-echo "pull path (job):   kubelet identity selected: $(az containerapp job show -n "$JOB" -g "$RG" --query "properties.configuration.registries[0].identity | ends_with(@, 'credprox-m29-kubelet')" -o tsv) (expected True); identities attached: $(az containerapp job show -n "$JOB" -g "$RG" --query 'length(identity.userAssignedIdentities)' -o tsv) (expected 2)"
+echo "pull path (job):   kubelet identity selected: $(az containerapp job show -n "$JOB" -g "$RG" --query "properties.configuration.registries[0].identity | ends_with(@, 'credprox-m29-kubelet')" -o tsv) (expected true); identities attached: $(az containerapp job show -n "$JOB" -g "$RG" --query 'length(identity.userAssignedIdentities)' -o tsv) (expected 2)"
 BOUND_JOB=$(az containerapp job show -n "$JOB" -g "$RG" --query "length(properties.template.containers[?contains(env[*].name, 'MANAGED_IDENTITY_CLIENT_ID')])" -o tsv)
 PIN_JOB=$(az containerapp job show -n "$JOB" -g "$RG" --query "properties.template.containers[0].env[?name=='MANAGED_IDENTITY_CLIENT_ID'] | [0].value" -o tsv)
 echo "runtime bind (job): env-pinned containers: ${BOUND_JOB}/1 (expected 1/1); pin equals runtime UAI client id: $([[ "$PIN_JOB" == "$UAI_CLIENT_ID" ]] && echo True || echo False)"

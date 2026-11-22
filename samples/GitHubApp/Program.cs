@@ -6,13 +6,13 @@ using CredProx;
 var builder = WebApplication.CreateBuilder(args);
 
 // StubApi/ is the offline GitHub stand-in the sample cells drive; live traffic is plain.
-builder.Services.AddCredProx(builder.Configuration);
-builder.Services.AddCredProxOAuth(); // JwtAssertion (with BearerExchange) ships in CredProx.OAuth
+builder.Services.AddCredProx(builder.Configuration)
+    .AddIdentity(); // JwtAssertion (with BearerExchange) ships in CredProx.Identity
 
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 app.MapReverseProxy();

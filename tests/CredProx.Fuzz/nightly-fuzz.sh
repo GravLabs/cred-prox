@@ -87,7 +87,7 @@ docker run --rm \
 RUN_RC=$?
 
 # The container's exit code is the first fact about the run. Dropping it (measured
-# 2026-11-20, qitem-20261120031636-7499bc7183b0f7e9) made an in-container SPIKE-FAIL -
+# 2026-11-20, fuzz-target audit) made an in-container SPIKE-FAIL -
 # e.g. the instrument step refusing an assembly - surface only as done=0 with three
 # causes that were not the real one, because a container that dies before afl starts
 # looks identical to a run afl had to kill.

@@ -30,14 +30,22 @@ public sealed class CoreDefaultsRegistrationTests
         Assert.NotNull(provider.GetRequiredService<SecretAccessorFactory>());
         Assert.NotNull(provider.GetRequiredService<CredentialRegistryProvider>().Current);
 
-        // The StaticKey credential type rides in with its validator: a credentials-only
-        // host gets exactly what AddCredProxBuiltInCredentials + AddCredProxCredentials gave.
+        // The core's credential types ride in with their validators (ADR-0007): a
+        // credentials-only host gets exactly what the granular calls gave.
         Assert.Contains(
             provider.GetServices<IValidateOptions<StaticKeyOptions>>(),
             validator => validator is StaticKeyOptionsValidator);
-        Assert.Single(
-            services,
-            descriptor => descriptor.ServiceType == typeof(CredentialTypeRegistration));
+        Assert.Equal(
+            3,
+            services.Count(descriptor => descriptor.ServiceType == typeof(CredentialTypeRegistration)));
+        // StaticKey, Hmac and LoginExchange — one registration per type name.
+        Assert.Equal(
+            3,
+            services
+                .Where(descriptor => descriptor.ServiceType == typeof(CredentialTypeRegistration))
+                .Select(descriptor => ((CredentialTypeRegistration)descriptor.ImplementationInstance!).TypeName)
+                .Distinct(StringComparer.Ordinal)
+                .Count());
     }
 
     [Fact]
@@ -51,9 +59,9 @@ public sealed class CoreDefaultsRegistrationTests
         services.AddCredProx(EmptyConfig());
         using var provider = services.BuildServiceProvider();
 
-        Assert.Single(
-            services,
-            descriptor => descriptor.ServiceType == typeof(CredentialTypeRegistration));
+        Assert.Equal(
+            3,
+            services.Count(descriptor => descriptor.ServiceType == typeof(CredentialTypeRegistration)));
         Assert.Single(provider.GetServices<ITokenCache>());
         Assert.NotNull(provider.GetRequiredService<CredentialRegistryProvider>().Current);
     }

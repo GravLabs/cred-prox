@@ -57,27 +57,22 @@ if (!string.IsNullOrEmpty(kvStubBase))
     });
 }
 
-builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-// The soak config admits callers by key (CredProx:Callers); without a caller authenticator
-// the startup guard (ADR-0005) refuses to boot, so the key traffic k6 sends must be
-// admitted by CredProx.CallerKeys exactly as an enforcing host registers it.
-builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
-builder.Services.AddCredProxBuiltInCredentials();
-// ADR-0005 moved the OAuth and LoginExchange credential types out of the core; the soak
-// config names both, so their packages register before the credential config binds.
-builder.Services.AddCredProxOAuth();
-builder.Services.AddCredProxLoginExchange();
-builder.Services.AddCredProxCredentials(builder.Configuration);
+// The soak config admits callers by key (CredProx:Callers); the core entry arms the
+// caller-key machinery and the startup guard (ADR-0005) refuses to boot without it, so
+// the key traffic k6 sends is admitted exactly as an enforcing host admits it. The soak
+// config also names OAuth and LoginExchange (from 0.15: OAuth rides CredProx.Identity,
+// LoginExchange the core), so the AddIdentity() chain registers them before the
+// credential config binds.
+// B3 (design decision 2026-11-09): faults 2/3 need the throttle pause and the circuit
+// breaker live, so the config carries CredProx:Throttling and CredProx:Resilience and
+// AddOperations() arms those legs (config keys name a live ClusterId (vendor)).
+builder.Services.AddCredProx(builder.Configuration)
+    .AddIdentity()
+    .AddOperations();
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
-// B3 (design decision 2026-11-09): throttle + resilience are opt-in registrations (documented inert
-// otherwise) and their config binds only inside these calls - wire them so faults 2/3 reach
-// the pause/breaker behaviour under test. Config keys must name a live ClusterId (vendor).
-builder.Services.AddCredProxThrottling(builder.Configuration);
-builder.Services.AddCredProxResilience(builder.Configuration);
+    .AddCredProx();
 builder.Services.AddSingleton<StatsCollector>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<StatsCollector>());
 

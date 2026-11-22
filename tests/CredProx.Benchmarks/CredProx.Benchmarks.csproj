@@ -20,7 +20,7 @@
          OverheadBenchmarks.cs); the micro suites need no web stack. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
-    <ProjectReference Include="..\..\src\CredProx.OAuth\CredProx.OAuth.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.Identity\CredProx.Identity.csproj" />
   </ItemGroup>
 
 </Project>

@@ -185,35 +185,32 @@ public sealed class CredProxStartupValidator : IHostedService
 
         RejectIfSectionConfigured(
             errors, "CredProx:Throttling",
-            featureNames.Contains("CredProx.CredProxThrottleFeature"),
-            "the outbound throttle", plural: false, "AddCredProxThrottling");
+            featureNames.Contains("CredProx.CredProxThrottleFeature"));
         RejectIfSectionConfigured(
             errors, "CredProx:Resilience",
-            featureNames.Contains("CredProx.CredProxResilienceFeature"),
-            "the resilience adapter", plural: false, "AddCredProxResilience");
+            featureNames.Contains("CredProx.CredProxResilienceFeature"));
         var healthRegistered =
             probeNames.Contains("CredProx.TokenObtainableProbe")
             && probeNames.Contains("CredProx.CertificateExpiryProbe");
         RejectIfSectionConfigured(
             errors, "CredProx:Health",
-            healthRegistered,
-            "the credential health probes", plural: true, "AddCredProxHealthProbes");
+            healthRegistered);
     }
 
-    private void RejectIfSectionConfigured(
-        List<string> errors, string path, bool registered, string feature, bool plural, string addMethod)
+    /// <summary>
+    /// R2 (ADR-0007): a configured section whose feature never arrived refuses startup in
+    /// the same shape as a credential Type without its package — the section names the
+    /// package and the one call that brings the feature.
+    /// </summary>
+    private void RejectIfSectionConfigured(List<string> errors, string path, bool registered)
     {
         if (registered || !_configuration.GetSection(path).GetChildren().Any())
         {
             return;
         }
 
-        var (link, ship) = plural
-            ? ("are not registered", "they ship")
-            : ("is not registered", "it ships");
         errors.Add(
-            $"The '{path}' section is configured but {feature} {link}: {ship} "
-            + $"in the CredProx.Operations package: add the package reference and call {addMethod}().");
+            $"The '{path}' section needs the CredProx.Operations package: install it and call .AddOperations().");
     }
 
     /// <inheritdoc />

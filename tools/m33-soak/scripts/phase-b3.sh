@@ -67,7 +67,7 @@ TOTAL=$(( 12 * WINDOW_MINUTES + 60 ))
   end=$(( $(date +%s) + TOTAL * 60 ))
   tick=0
   # the loop's TERM trap reaps the sleep IT started: killing only the loop orphaned the
-  # sleep, which held the caller's stdout pipe after TEARDOWN-DONE (qitem-20261120004151)
+  # sleep, which held the caller's stdout pipe after TEARDOWN-DONE (found 2026-11-20)
   s=""
   trap '[ -n "$s" ] && kill "$s" 2>/dev/null; exit 0' TERM INT HUP
   while [ "$(date +%s)" -lt "$end" ]; do
@@ -82,7 +82,7 @@ TOTAL=$(( 12 * WINDOW_MINUTES + 60 ))
         echo "WATCHDOG-CONTAINER-DEAD $c=$st at $(date -u +%H:%M:%SZ)"
         touch "$RUN/ABORT"
         # stop exactly this run's one-off k6 containers: `compose stop k6` never touches a
-        # `compose run --rm` one-off and host pkill cannot see into its namespace (qitem-20261120021049)
+        # `compose run --rm` one-off and host pkill cannot see into its namespace (found 2026-11-20)
         ids="$(docker ps -q --filter "label=m33-soak-run=$RUN" 2>/dev/null || true)"
         if [ -n "$ids" ]; then docker stop $ids 2>/dev/null || true; fi
         exit 0

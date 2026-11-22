@@ -19,9 +19,9 @@ public static class CredProxReverseProxyBuilderExtensions
     // The fixed CredProx configuration topology (plan §3): each subsection has its own
     // binder, which validates the keys inside it (M14a/M16/M17); the root check trusts
     // these names and rejects everything else. "CallerToken" and "CallerAuth" stay
-    // listed even though the CredProx.CallerTokens and CredProx.CallerKeys add-ons read
-    // (and validate) those sections — the names must bind for a config written against
-    // 0.11.0 to start unchanged.
+    // listed even though the core (caller keys) and CredProx.Identity (caller tokens)
+    // read (and validate) those sections — the names must bind for a config written
+    // against 0.11.0 to start unchanged.
     private static readonly IReadOnlySet<string> CoreSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "Audit", "CallerAuth", "CallerToken", "Callers", "Connections", "Credentials",
@@ -29,23 +29,66 @@ public static class CredProxReverseProxyBuilderExtensions
     };
 
     /// <summary>
-    /// Adds the CredProx core: the stage-ordered pipeline and, in later milestones, the
-    /// YARP adapters that run it. Credential types, secret sources and other plugins are
-    /// registered explicitly on top of this; nothing is discovered by scanning.
+    /// Adds the full CredProx reverse-proxy leg with no configuration argument (ADR-0007
+    /// item 5): the one configuration pass is the services entry, and this leg reads it
+    /// back from DI. It refuses when <c>services.AddCredProx(configuration)</c> has not
+    /// run first — a host that skipped the entry has passed no configuration at all.
     /// </summary>
     /// <param name="builder">The YARP reverse proxy builder.</param>
     /// <returns>The same <paramref name="builder"/>, for chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The services entry has not run, or its configuration is no longer resolvable.
+    /// </exception>
     public static IReverseProxyBuilder AddCredProx(this IReverseProxyBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.Services.TryAddSingleton<CredProxPipeline>();
+        // The entry's marker is the proof the host passed its configuration, and the
+        // marker instance carries that exact pass (AddCredProx stores it). Reading the
+        // collection's IConfiguration instead would miss every web host: the host
+        // builder registers IConfiguration by factory, so the entry's TryAdd keeps
+        // that registration and no instance descriptor exists.
+        var entryRan = false;
+        IConfiguration? configuration = null;
+        foreach (var descriptor in builder.Services)
+        {
+            if (descriptor.ServiceType == typeof(CoreDefaultsRegistered)
+                && descriptor.ImplementationInstance is CoreDefaultsRegistered marker)
+            {
+                entryRan = true;
+                configuration = marker.Configuration;
+            }
+            else if (descriptor.ServiceType == typeof(CoreDefaultsRegistered))
+            {
+                entryRan = true;
+            }
+        }
 
-        return builder;
+        if (!entryRan)
+        {
+            throw new InvalidOperationException(
+                "The reverse-proxy CredProx leg requires the services entry first (ADR-0007): " +
+                "call services.AddCredProx(builder.Configuration) before AddCredProx() " +
+                "on the reverse-proxy builder.");
+        }
+
+        if (configuration is null)
+        {
+            throw new InvalidOperationException(
+                "The reverse-proxy CredProx leg reads the configuration that " +
+                "services.AddCredProx(configuration) stored, but the service collection " +
+                "no longer resolves it.");
+        }
+
+        return builder.AddCredProx(configuration);
     }
 
     /// <summary>
-    /// Adds the full CredProx request path on a YARP reverse proxy builder:
+    /// Adds the full CredProx request path on a YARP reverse proxy builder, taking the
+    /// configuration explicitly. From 0.15 hosts use the no-argument leg, which reads the
+    /// one configuration pass stored by the services entry (ADR-0007 item 5); this
+    /// overload stays for wiring that cannot go through the entry. The registrations are
+    /// identical:
     /// <list type="bullet">
     /// <item>binds <c>CredProx:Destinations</c> and <c>CredProx:Connections</c> into their
     /// registries (startup-validated by <see cref="CredProxStartupValidator"/>);</item>
@@ -70,14 +113,17 @@ public static class CredProxReverseProxyBuilderExtensions
     /// <param name="builder">The YARP reverse proxy builder.</param>
     /// <param name="configuration">The application configuration root.</param>
     /// <returns>The same <paramref name="builder"/>, for chaining.</returns>
-    public static IReverseProxyBuilder AddCredProx(
+    internal static IReverseProxyBuilder AddCredProx(
         this IReverseProxyBuilder builder,
         IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        builder.AddCredProx();
+        // The stage-ordered pipeline, independent of any configuration. (This leg must
+        // not call the no-configuration overload: that one reads the entry's marker and
+        // hands the configuration back here.)
+        builder.Services.TryAddSingleton<CredProxPipeline>();
 
         var services = builder.Services;
 

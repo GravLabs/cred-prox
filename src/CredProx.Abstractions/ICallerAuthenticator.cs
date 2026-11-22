@@ -11,7 +11,7 @@ namespace CredProx.Abstractions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Register through <c>AddCredProxCallerAuthenticator&lt;T&gt;</c> — the one public
+/// Register through <c>WithCallerAuthenticator&lt;T&gt;()</c> — the one public
 /// registration path, used by the built-in authenticators and third-party ones alike. The
 /// core's caller stage asks every registered authenticator in registration order; the first
 /// <see cref="CallerAuthenticationOutcome.Authenticated"/> or

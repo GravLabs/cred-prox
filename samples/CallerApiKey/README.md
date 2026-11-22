@@ -64,7 +64,7 @@ curl -s http://localhost:8100/__admin/requests | grep -c X-API-Key    # 0
       ]
     }
   },
-  "Secrets": { "demoAppKeyHash": "sha256:52f4...e654" }            // env-inject the real one
+  "Secrets": { "demoAppKeyHash": "sha256:52f42591c2dee3d4099ed6b329b09a416c31c0c1e0f68a1d7db0f0e9b6f8e654" }   // env-inject the real one
 }
 ```
 

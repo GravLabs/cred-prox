@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Azure add-on for CredProx: the AzureCredential credential type backed by an Azure SDK TokenCredential plus scope (e.g. a managed identity). Renamed from CredProx.AzureKeyVault at 0.15.0 - the package never held Key Vault code; a host reads Key Vault through the Azure SDK's own configuration provider (ADR-0007).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CredProx\CredProx.csproj" />
+    <PackageReference Include="Azure.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CredProx.Tests" />
+  </ItemGroup>
+  <PropertyGroup>
+    <!-- The add-on dogfoods the experimental plugin contract (plan §3.5 rule 2). -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+  </PropertyGroup>
+</Project>

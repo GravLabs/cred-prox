@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
 using CredProx.Abstractions;
-using CredProx.CallerKeys;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;

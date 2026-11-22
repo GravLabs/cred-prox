@@ -15,7 +15,7 @@ namespace CredProx;
 /// stamps its effective request URI as another address (M45 security finding R-1).
 /// Three terms are enforced: the in-place rewrite is refused; any 3xx on a credential
 /// client is refused; a response with no stamp is accepted on that term alone — the
-/// decision recorded 14:21Z on row qitem-20261119134802-1c0ffce3: every shipped
+/// decision recorded 2026-11-19 14:21Z: every shipped
 /// transport stamps, and refusing an absent stamp would break host test suites on a
 /// patch release. Two evasion shapes are documented limits, not blocked behavior: a
 /// transport that stamps the ORIGINAL configured request on another host's response,

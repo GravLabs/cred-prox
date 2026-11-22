@@ -77,31 +77,33 @@
   </PropertyGroup>
 
   <!-- Package quality (plan §7): SourceLink for GitHub, package README, and API
-       compatibility validation. The PackageValidation baseline is the published 0.13.0
-       bytes (rotated at the 0.13.1 prep, 2026-11-19 - ADR-0001; the 0.12.0 generation is
-       in git history, and the internal-URL nuspec residue the 0.7.0
+       compatibility validation. The PackageValidation baseline is the published 0.14.0
+       bytes (rotated in the M49 package regroup, 2026-11-21 - ADR-0001; earlier
+       generations are in git history, and the internal-URL nuspec residue the 0.7.0
        baselines carried has been out of every generation since). Every pack compares
-       the public surface against the published 0.13.0. The baseline
+       the public surface against the published 0.14.0. The baseline
        packages are the published bytes, committed under
        build/baselines (docs/adr/0001), so validation needs no network or LAN feed —
-       this machine and a GitHub-hosted runner compare against identical bytes.
+       this machine and a GitHub-hosted runner compare against identical bytes. Only
+       the four ids that survive the regroup carry baseline files; CredProx.Identity
+       and CredProx.Azure are new ids at 0.15 and override the baseline path to empty
+       (nothing published to compare against).
        SDK 10.0's APICompat has no [Experimental] awareness: every baseline removal is
        CP0001, experimental or not (the experimental-stability downgrade landed in
        ApiCompat only after .NET 10 — dotnet/sdk main ApiStabilityClassifier, absent
        from release/10.0 and from the 10.0.112 task assembly). ApiCompatExcludeAttributes-
        File is NOT the lever: it feeds attribute-data comparison only, and on newer SDKs
        listing ExperimentalAttribute there would disable the native skip. Removals through
-       0.13.0 are absorbed by the baseline. The suppressions files the 0.11.0 and 0.12.0
-       Breaking entries carried — src/CredProx/ 45 entries, src/CredProx.Abstractions/ 2,
-       one per type or member removal of the caller-contract collapse and the package-split
-       moves — were deleted at the 0.13.0 baseline rotation; the removals they describe are
-       inside the published 0.13.0 bytes. The 1.0 surface pass (0.14.0) added the current
-       set: src/CredProx/ 22 entries (the thirteen internalized types, the eight internal
-       constructors, the internalized Destination getter), src/CredProx.CallerKeys/ 5 (the
-       two moved namespace names, the two members that only name them, and ConfigCallerStore
-       under its old base list), and 2 each in src/CredProx.OAuth/ and
-       src/CredProx.LoginExchange/ (the renamed options members' accessors) — all named
-       removals from the CHANGELOG Breaking (experimental API) table.
+       0.14.0 are absorbed by the baseline. The 31 suppression entries the 0.14.0 prep
+       carried — src/CredProx/ 22, src/CredProx.CallerKeys/ 5, and 2 each in
+       src/CredProx.OAuth/ and src/CredProx.LoginExchange/ — were deleted at this
+       rotation: the removals they describe are inside the published 0.14.0 bytes, and
+       the CallerKeys, OAuth and LoginExchange projects no longer exist. The setup
+       collapse adds the current set: src/CredProx/ 12 CP0002 (the ten collapsed core
+       registration extensions, the entry's builder-typed return value, and the
+       reverse-proxy leg's two-argument overload) and src/CredProx.Operations/ 3 (the
+       throttle, resilience and health-probe registrations now ride the chained call) —
+       all named removals from the CHANGELOG Breaking (experimental API) table.
        A fresh-obj pack must show zero diagnostics and
        zero unnecessary-suppression warnings; future intentional
        removals regenerate them
@@ -118,10 +120,11 @@
     <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
     <EnableSourceLink>true</EnableSourceLink>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.13.1</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.15.0</PackageValidationBaselineVersion>
     <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
          entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
-         $(MSBuildProjectName) equals $(PackageId) for all ten packable projects. -->
+         $(MSBuildProjectName) equals $(PackageId) for all six packable projects;
+         build/baselines holds the published 0.15.0 bytes for each (ADR-0001). -->
     <PackageValidationBaselinePath>$(MSBuildThisFileDirectory)build/baselines/$(MSBuildProjectName).$(PackageValidationBaselineVersion).nupkg</PackageValidationBaselinePath>
     <PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)/README.md')">README.md</PackageReadmeFile>
   </PropertyGroup>

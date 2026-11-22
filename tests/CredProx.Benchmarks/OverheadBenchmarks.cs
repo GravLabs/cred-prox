@@ -249,18 +249,14 @@ public class OverheadBenchmarks
             {
                 if (!plainYarp)
                 {
-                    services.AddCredProxTokenCache();
-                    services.AddCredProxConfigurationSecrets(context.Configuration);
-                    services.AddCredProxBuiltInCredentials();
-                    services.AddCredProxOAuth();
-                    services.AddCredProxCredentials(context.Configuration);
+                    services.AddCredProx(context.Configuration).AddIdentity();
                 }
 
                 services.AddRouting();
                 var reverseProxy = services.AddReverseProxy().LoadFromMemory([route], [cluster]);
                 if (!plainYarp)
                 {
-                    reverseProxy.AddCredProx(context.Configuration);
+                    reverseProxy.AddCredProx();
                 }
             })
             .ConfigureLogging(logging => logging.ClearProviders())

@@ -43,7 +43,9 @@ public sealed class OpsDocsSurfaceGuardTests
     }.Select(t => t.Assembly).Distinct();
 
     /// <summary>Every <c>AddCredProx…(…)</c> call printed in upgrading.md must ship as a public
-    /// static extension with an overload accepting the documented number of arguments.</summary>
+    /// static extension with an overload accepting the documented number of arguments, on the
+    /// receiver the doc prints it against: the service collection, or the
+    /// <c>IReverseProxyBuilder</c> a call printed right after <c>AddReverseProxy().</c> rides on.</summary>
     [Fact]
     public void UpgradingDoc_EveryAddCallMatchesAShippedSignature()
     {
@@ -84,19 +86,30 @@ public sealed class OpsDocsSurfaceGuardTests
                 else if (ch is '>' or ')') depth--;
                 else if (ch == ',' && depth == 0) arity++;
             }
+            // Receiver group keyed off the printed context: a call right after
+            // "AddReverseProxy()." is the reverse-proxy hookup and resolves against the
+            // IReverseProxyBuilder receiver; every other call resolves against the
+            // service collection, exactly as before. A wrong-arity call in either group
+            // still fails the arity assert below.
+            var before = doc[Math.Max(0, match.Index - 40)..match.Index];
+            var rp = before.LastIndexOf("AddReverseProxy().", StringComparison.Ordinal);
+            var reverseProxyCall = rp >= 0
+                && before[(rp + "AddReverseProxy().".Length)..].Trim(' ', '…').Length == 0;
+            var receiver = reverseProxyCall
+                ? typeof(Microsoft.Extensions.DependencyInjection.IReverseProxyBuilder)
+                : typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection);
             var overloads = AnchorAssemblies()
                 .SelectMany(a => a.GetExportedTypes().Where(t => t.IsSealed && t.IsAbstract))
                 .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Static))
                 .Where(m => m.Name == name
                     && m.GetParameters().Length > 0
-                    && typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection)
-                        .IsAssignableFrom(m.GetParameters()[0].ParameterType))
+                    && receiver.IsAssignableFrom(m.GetParameters()[0].ParameterType))
                 .ToList();
             Assert.True(overloads.Count > 0,
-                $"'{name}()' is printed in docs/upgrading.md but no public static AddCredProx extension ships.");
+                $"'{name}()' is printed in docs/upgrading.md {(reverseProxyCall ? "after AddReverseProxy()." : "on the service collection")} but no public static AddCredProx extension with that receiver ships.");
             var arities = overloads.Select(m => m.GetParameters().Length - 1).Distinct().ToList();
             Assert.True(arities.Contains(arity),
-                $"'{name}' is printed in docs/upgrading.md with {arity} argument(s) but the shipped overloads take {string.Join("/", arities)} (beyond the IServiceCollection receiver).");
+                $"'{name}' is printed in docs/upgrading.md with {arity} argument(s) but the shipped overloads take {string.Join("/", arities)} (beyond the receiver argument).");
         }
         // Nothing in the table row column may be a name-only citation that does not exist:
         foreach (var name in calls)

@@ -20,8 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
-    <ProjectReference Include="..\..\src\CredProx.Hmac\CredProx.Hmac.csproj" />
-    <ProjectReference Include="..\..\src\CredProx.LoginExchange\CredProx.LoginExchange.csproj" />
   </ItemGroup>
 
 </Project>

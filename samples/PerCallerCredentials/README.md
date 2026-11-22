@@ -81,10 +81,10 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5100/
 ```jsonc
 "CredProx": {
   "Callers": {
-    "app-a":      { "Keys": [ { "KeyId": "app-a-key-1", "KeyHash": "sha256:dcb3aef7…" } ] },
-    "app-b":      { "Keys": [ { "KeyId": "app-b-key-1", "KeyHash": "sha256:79581a6f…" } ] },
+    "app-a":      { "Keys": [ { "KeyId": "app-a-key-1", "KeyHash": "sha256:dcb3aef7725465b634cf2e9f90b64dcbc99acfa09ee548071ce239b19c8f5ede" } ] },
+    "app-b":      { "Keys": [ { "KeyId": "app-b-key-1", "KeyHash": "sha256:79581a6faf7c817949d5b28e6d65b86612099721b550c8cabbc39d84b35fcbf6" } ] },
     "app-readonly": {
-      "Keys": [ { "KeyId": "readonly-key-1", "KeyHash": "sha256:be4539ba…" } ],
+      "Keys": [ { "KeyId": "readonly-key-1", "KeyHash": "sha256:be4539ba5f8f934219ac7e475deb280684808eef963a20dcfa918d7104b30aac" } ],
       "Operations": [ { "Route": "api", "Methods": [ "GET" ] } ]
     }
   },

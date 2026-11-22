@@ -62,17 +62,19 @@ steps see [docs/upgrading.md](upgrading.md).
   same validators ride live configuration reloads, and a rebind that fails keeps the last
   good registry serving (so a bad live edit degrades to stale-but-safe, never to open).
 - A host that configures `CredProx:Throttling`, `CredProx:Resilience` or `CredProx:Health`
-  without the `CredProx.Operations` package (or `CredProx:CallerAuth` without
-  `CredProx.CallerKeys`, `CredProx:CallerToken` without `CredProx.CallerTokens`) fails
-  startup naming the package — those features moved out of the core in 0.12 (ADR-0005).
+  without the `CredProx.Operations` package fails startup naming the package — those
+  features moved out of the core in 0.12 (ADR-0005). Caller keys ride the core from 0.15
+  (ADR-0007): `CredProx:Callers` configured with no authenticator registered still fails
+  startup, naming the registration call. Caller-token validation rides `CredProx.Identity`.
 - `CredProx:Scrubbing:FailClosed=true` with `CredProx:Scrubbing:Enabled=false` fails
   startup naming both keys: with scrubbing off nothing is inspected, so the fail-closed
   knob could refuse nothing — the combination was inert and silent.
 
 ## 4. Health, metrics and audit
 
-- Wire the checks: `AddCredProxHealthProbes(builder.Configuration)` registers the built-in
-  probes (`TokenObtainableProbe`, `CertificateExpiryProbe`) and a check named **`credprox`**.
+- Wire the checks: `.AddOperations()` (the `CredProx.Operations` package) registers the
+  built-in probes (`TokenObtainableProbe`, `CertificateExpiryProbe`) and a check named
+  **`credprox`** when a `CredProx:Health` section is present.
   With `CredProx:Health:Enabled=false` neither the probe loop nor the check is registered —
   off means off (ADR-0006). `CredProx:Health:ProbeInterval` (default 5 min) and
   `CredProx:Health:CertWarningDays` (default 30) bound the loop and the expiry warning.
@@ -83,7 +85,9 @@ steps see [docs/upgrading.md](upgrading.md).
   `credprox.throttle.paused`, `credprox.resilience.retried`,
   `credprox.resilience.circuit_opened`, `credprox.certificate.days_to_expiry` (days),
   `credprox.health.status`. The activity source `CredProx` emits `token.fetch` spans.
-- Audit: `AddCredProxAudit(builder.Configuration)` writes one record per admitted request
+- Audit: a `CredProx:Audit` section turns the audit log on — the core entry
+  (`services.AddCredProx(builder.Configuration)`) arms it with no setup call — writing
+  one record per admitted request
   to the logger category **`CredProx.Audit`** at `Information`. `CredProx:Audit:SinkTimeout`
   (default 5s) bounds a slow sink; `RedactHeaders` and `RedactJsonFields` add to the
   built-in sensitive sets, `IncludeHeaders` opts safe headers in (`CredProx:Audit:*`).
@@ -165,7 +169,7 @@ steps see [docs/upgrading.md](upgrading.md).
 ## 9. Running several instances
 
 - **Each instance is self-contained.** The token cache is a process singleton
-  (`AddCredProxTokenCache` → `InMemoryTokenCache`, instance state only — there is no
+  (the core entry's `InMemoryTokenCache`, instance state only — there is no
   shared or distributed cache backend and nothing coordinating refresh across
   processes). N instances mean N vendor token streams: every instance fetches and
   refreshes its own copy of each `(credential, partition)` token. Size the vendor's
@@ -175,8 +179,8 @@ steps see [docs/upgrading.md](upgrading.md).
 - **Refresh timing is identical in every instance and unjittered.** Defaults:
   refresh at 80 % of lifetime (`RefreshFraction`) with a 30 s `Skew`, and a failed
   fetch remembered for a 5 s `NegativeCacheTtl` (`TokenCacheOptions`). These are
-  code-only knobs — `AddCredProxTokenCache(Action<TokenCacheOptions>)`; the type has
-  no `CredProx:` section. With steady traffic, instances that started together
+  code-only knobs — configure them through `services.Configure<TokenCacheOptions>`;
+  the type has no `CredProx:` section. With steady traffic, instances that started together
   reach their refresh points near-simultaneously — each entry's refresh time is
   computed from its own acquisition start, so a fleet that started minutes apart
   keeps refreshing minutes apart; that burst is the vendor's problem only if it is

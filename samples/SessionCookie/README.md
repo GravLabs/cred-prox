@@ -53,7 +53,7 @@ partitions, per-partition secrets and a strict allow-list.
 ```bash
 cd samples/SessionCookie
 (cd StubApi && dotnet run &)   # the vendor stand-in
-dotnet run
+ASPNETCORE_ENVIRONMENT=Development dotnet run   # offline: appsettings.Development.json repoints both endpoints at the stub
 ```
 
 Then call through the gateway for the sandbox environment:

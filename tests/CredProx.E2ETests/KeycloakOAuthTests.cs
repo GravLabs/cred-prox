@@ -140,15 +140,11 @@ public sealed class KeycloakOAuthTests : IClassFixture<KeycloakFixture>
             .ConfigureAppConfiguration(build => build.AddInMemoryCollection(entries))
             .ConfigureServices((context, services) =>
             {
-                services.AddCredProxTokenCache();
-                services.AddCredProxConfigurationSecrets(context.Configuration);
-                services.AddCredProxBuiltInCredentials();
-                services.AddCredProxOAuth();
-                services.AddCredProxCredentials(context.Configuration);
+                services.AddCredProx(context.Configuration).AddIdentity();
                 services.AddRouting();
                 services.AddReverseProxy()
                     .LoadFromConfig(context.Configuration.GetSection("ReverseProxy"))
-                    .AddCredProx(context.Configuration);
+                    .AddCredProx();
 
                 // The credential fetch goes to real Keycloak over real HTTP; only the
                 // forwarded request uses the in-process upstream.

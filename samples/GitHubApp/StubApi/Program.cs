@@ -22,6 +22,20 @@ var app = builder.Build();
 app.MapPost("/app/installations/{installationId}/access_tokens", async (HttpContext context) =>
 {
     Interlocked.Increment(ref tokenEndpointCalls);
+
+    // GitHub enforces the User-Agent at its administrative edge, before any credential
+    // is read: a UA-less request is 403, whatever Authorization it carries (product bug
+    // 2026-11-22 — CredProx's token exchange was UA-less and GitHub refused it while
+    // every offline cell passed, because this stand-in did not check). The exact GitHub
+    // shape, so the offline cells catch the class.
+    if (string.IsNullOrWhiteSpace(context.Request.Headers.UserAgent.ToString()))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsync(
+            """{"message":"Request forbidden by administrative rules. Please make sure your request has a User-Agent header."}""");
+        return;
+    }
+
     var header = context.Request.Headers.Authorization.ToString();
     var jwt = header.StartsWith("Bearer ", StringComparison.Ordinal) ? header["Bearer ".Length..] : "";
     var parts = jwt.Split('.');

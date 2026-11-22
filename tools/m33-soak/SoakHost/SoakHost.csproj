@@ -21,14 +21,11 @@
          ADR-0005 those credential types ship in their own packages, so the host takes them
          from the same feed at the same version. SoakHostCredentialPackagePinTests pins that
          every Type the config names has its reference and its registration here. -->
-    <PackageReference Include="CredProx.OAuth" Version="$(Version)" />
-    <PackageReference Include="CredProx.LoginExchange" Version="$(Version)" />
+    <PackageReference Include="CredProx.Identity" Version="$(Version)" />
     <!-- The soak config admits callers by key (CredProx:Callers + the X-CredProx-Key
-         header CallerKeyOptions defaults to, sent by k6/soak.js), so the host registers
-         caller authentication from CredProx.CallerKeys exactly like a real enforcing host
-         does. The pin test keeps config, reference and
-         registration from drifting apart again after the 0.12 split. -->
-    <PackageReference Include="CredProx.CallerKeys" Version="$(Version)" />
+         header CallerKeyOptions defaults to, sent by k6/soak.js): caller keys ride the
+         core entry from 0.15, exactly like a real enforcing host. The pin test keeps
+         config, references and setup calls from drifting apart again. -->
     <!-- Fault 6 (design decision 2026-11-08): the REAL Key Vault config provider,
          same package + 1.3.x line the shipped ACA hosts use. Only the transport is swapped
          to the loopback stub (M29 reloadproof pattern); provider, SecretClient and the

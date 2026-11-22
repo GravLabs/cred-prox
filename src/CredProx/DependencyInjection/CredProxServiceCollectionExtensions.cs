@@ -17,27 +17,37 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class CredProxServiceCollectionExtensions
 {
     /// <summary>
-    /// The one core registration (ADR-0005 item 5): the core defaults a host needs before
-    /// any add-on — the in-memory <see cref="ITokenCache"/>, the configuration-backed
-    /// secret stack, the built-in credential type that remains in the core (<c>StaticKey</c>),
-    /// and the <c>CredProx:Credentials</c> binder — from one configuration call. A host
-    /// then adds only its package calls: <c>AddCredProxCallerTokenAuthentication</c>,
-    /// <c>AddCredProxOAuth</c>, and so on, each of which carries its own core pieces.
-    /// Idempotent: a second call is a no-op, and hosts that prefer the granular calls
-    /// (<see cref="AddCredProxTokenCache"/>, <see cref="AddCredProxConfigurationSecrets"/>,
-    /// <see cref="AddCredProxBuiltInCredentials"/>, <see cref="AddCredProxCredentials"/>)
-    /// keep them — they all tolerate an already-registered stack. The audit log is not a
-    /// default: it stays the explicit <see cref="AddCredProxAudit"/> it has always been.
+    /// The one core registration (ADR-0005 item 5, ADR-0007): the core defaults a host
+    /// needs before any add-on — the in-memory <see cref="ITokenCache"/>, the
+    /// configuration-backed secret stack, the core's credential types (<c>StaticKey</c>,
+    /// <c>Hmac</c>, <c>LoginExchange</c>) and the <c>CredProx:Credentials</c> binder — from
+    /// one configuration call. Core features work from configuration: a
+    /// <c>CredProx:Audit</c> section turns the audit log on, and a caller key hash under
+    /// <c>CredProx:Callers</c> registers the caller-key machinery. A host then adds only
+    /// its add-on-package calls — <c>.AddIdentity()</c>, <c>.AddAzure(credential)</c>,
+    /// <c>.AddOperations()</c> — each one chained on the returned builder and carrying its
+    /// own pieces.
+    /// Idempotent: a second call is a no-op, and every registration it performs tolerates
+    /// an already-registered stack.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The application configuration root.</param>
-    /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProx(
+    /// <returns>
+    /// A <see cref="CredProxBuilder"/> carrying the services and this configuration — the
+    /// handle each add-on package's chained call extends (ADR-0007 item 5).
+    /// </returns>
+    public static CredProxBuilder AddCredProx(
         this IServiceCollection services,
         IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
+
+        // A host that registered no IConfiguration of its own should resolve the entry's
+        // pass. TryAdd keeps a host's own registration — including the web host builder's
+        // factory registration; the reverse-proxy leg reads the exact pass from the
+        // marker below, not from this registration (ADR-0007 item 5).
+        services.TryAddSingleton(configuration);
 
         // The idempotence guard is this marker, not a per-subsystem probe: exactly one
         // execution of the default stack is what "call it once, call it twice" must mean.
@@ -45,16 +55,35 @@ public static class CredProxServiceCollectionExtensions
         {
             if (descriptor.ServiceType == typeof(CoreDefaultsRegistered))
             {
-                return services;
+                return new CredProxBuilder(services, configuration);
             }
         }
 
-        services.AddSingleton<CoreDefaultsRegistered>();
+        services.AddSingleton(new CoreDefaultsRegistered(configuration));
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
         services.AddCredProxBuiltInCredentials();
         services.AddCredProxCredentials(configuration);
-        return services;
+
+        // Features in the core work from configuration (ADR-0007): writing the config is
+        // the setup. A configured audit section turns the audit log on — the sink, its
+        // key validation and option binding arrive here, and a typo under a configured
+        // section refuses startup exactly as the old explicit call did. A caller key hash
+        // anywhere under CredProx:Callers registers the whole caller-key machinery; the
+        // machinery's marker (CallerKeyMachineryRegistered) keeps an explicit
+        // AddCredProxCallerAuthentication call from stacking a second scheme on top.
+        if (configuration.GetSection("CredProx:Audit").GetChildren().Any())
+        {
+            services.AddCredProxAudit(configuration);
+        }
+
+        if (configuration.GetSection("CredProx:Callers").GetChildren()
+                .Any(caller => caller.GetSection("Keys").GetChildren().Any()))
+        {
+            services.AddCredProxCallerAuthentication(configuration);
+        }
+
+        return new CredProxBuilder(services, configuration);
     }
 
     /// <summary>
@@ -64,7 +93,7 @@ public static class CredProxServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional configuration of <see cref="TokenCacheOptions"/>.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxTokenCache(
+    internal static IServiceCollection AddCredProxTokenCache(
         this IServiceCollection services,
         Action<TokenCacheOptions>? configure = null)
     {
@@ -92,7 +121,7 @@ public static class CredProxServiceCollectionExtensions
     /// <c>CredProx:Secrets</c> section.
     /// </param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxConfigurationSecrets(
+    internal static IServiceCollection AddCredProxConfigurationSecrets(
         this IServiceCollection services,
         IConfiguration configuration)
     {
@@ -115,7 +144,7 @@ public static class CredProxServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="typeName">The configuration <c>Type</c> name, for example <c>StaticKey</c>.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxCredentialType<TProvider, TOptions>(
+    internal static IServiceCollection AddCredProxCredentialType<TProvider, TOptions>(
         this IServiceCollection services,
         string typeName)
         where TProvider : class, ICredentialProvider<TOptions>
@@ -123,6 +152,20 @@ public static class CredProxServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrEmpty(typeName);
+
+        // One registration per type name, whoever registers it (M49): the built-in batch
+        // now brings the core-resident types, and a host still carrying the old explicit
+        // call must not end up with the same type twice — first registration wins.
+        foreach (var descriptor in services)
+        {
+            if (descriptor.ServiceType == typeof(CredentialTypeRegistration)
+                && descriptor.ImplementationInstance is CredentialTypeRegistration existing
+                && string.Equals(existing.TypeName, typeName, StringComparison.Ordinal))
+            {
+                services.TryAddSingleton<TProvider>();
+                return services;
+            }
+        }
 
         services.AddSingleton(new CredentialTypeRegistration(typeName, typeof(TOptions), typeof(TProvider)));
         services.TryAddSingleton<TProvider>();
@@ -138,7 +181,7 @@ public static class CredProxServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The application configuration root.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxCredentials(
+    internal static IServiceCollection AddCredProxCredentials(
         this IServiceCollection services,
         IConfiguration configuration)
     {
@@ -179,22 +222,24 @@ public static class CredProxServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the built-in credential type that remains in the core — <c>StaticKey</c> —
-    /// with its startup validator. The <c>OAuthClientCredentials</c>, <c>TokenExchange</c>
-    /// and <c>JwtAssertion</c> types live in the CredProx.OAuth add-on, the <c>Hmac</c>
-    /// type in the CredProx.Hmac add-on and the <c>LoginExchange</c> type in the
-    /// CredProx.LoginExchange add-on: a host that needs one registers it with
-    /// <c>AddCredProxOAuth()</c> / <c>AddCredProxHmac()</c> /
-    /// <c>AddCredProxLoginExchange()</c>, and a credential naming that type without the
-    /// add-on fails startup naming the package.
+    /// Registers the credential types that ship in the core — <c>StaticKey</c>, <c>Hmac</c>
+    /// and <c>LoginExchange</c> (ADR-0007: no outside library, so no cost to a host that
+    /// does not use them) — with their startup validators and the shared token client the
+    /// <c>LoginExchange</c> provider rides. The <c>OAuthClientCredentials</c>,
+    /// <c>TokenExchange</c> and <c>JwtAssertion</c> types ride <c>CredProx.Identity</c> and
+    /// the <c>TokenCredential</c> type rides <c>CredProx.Azure</c>: a credential naming one
+    /// of those without its package setup fails startup naming the package and the call.
+    /// Idempotent against the per-type calls hosts still carry from 0.14.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxBuiltInCredentials(this IServiceCollection services)
+    internal static IServiceCollection AddCredProxBuiltInCredentials(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddCredProxCredentialType<StaticKeyProvider, StaticKeyOptions>("StaticKey");
+        services.AddCredProxHmac();
+        services.AddCredProxLoginExchange();
 
         services.TryAddSingleton<Microsoft.Extensions.Options.IValidateOptions<StaticKeyOptions>, StaticKeyOptionsValidator>();
         return services;
@@ -216,7 +261,7 @@ public static class CredProxServiceCollectionExtensions
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxCallerPolicy(this IServiceCollection services)
+    internal static IServiceCollection AddCredProxCallerPolicy(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -242,7 +287,9 @@ public static class CredProxServiceCollectionExtensions
     /// <summary>
     /// Turns on the audit log: binds
     /// <c>CredProx:Audit</c> (enabled flag, sink timeout, header capture and redaction
-    /// lists) and registers the built-in <see cref="LoggerAuditSink"/>. One record per
+    /// lists) and registers the built-in <see cref="LoggerAuditSink"/>. From 0.15 a
+    /// configured <c>CredProx:Audit</c> section makes <c>AddCredProx(configuration)</c>
+    /// call this itself — hosts that still call it explicitly are idempotent. One record per
     /// CredProx-processed request — forwarded or short-circuited — with caller, key id,
     /// route, vendor, method, path template, status, latency, response bytes, credential
     /// name and trace id; never a secret value. Additional sinks (OTel exporters, files,
@@ -253,7 +300,7 @@ public static class CredProxServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The application configuration root.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxAudit(
+    internal static IServiceCollection AddCredProxAudit(
         this IServiceCollection services,
         IConfiguration configuration)
     {
@@ -295,7 +342,7 @@ public static class CredProxServiceCollectionExtensions
     /// <param name="configuration">The application configuration; it declares the callers
     /// the registered authenticators can admit.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxCallerAuthenticator<TAuthenticator>(
+    internal static IServiceCollection AddCredProxCallerAuthenticator<TAuthenticator>(
         this IServiceCollection services, IConfiguration configuration)
         where TAuthenticator : class, ICallerAuthenticator
     {
@@ -354,7 +401,7 @@ public static class CredProxServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <returns>The same service collection.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is null.</exception>
-    public static IServiceCollection AddCredProxCallerRegistryValidator<TValidator>(this IServiceCollection services)
+    internal static IServiceCollection AddCredProxCallerRegistryValidator<TValidator>(this IServiceCollection services)
         where TValidator : class, ICallerRegistryValidator
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -377,7 +424,7 @@ public static class CredProxServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <returns>The same service collection.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is null.</exception>
-    public static IServiceCollection AddCredProxCallerRegistryContributor<TContributor>(this IServiceCollection services)
+    internal static IServiceCollection AddCredProxCallerRegistryContributor<TContributor>(this IServiceCollection services)
         where TContributor : class, ICallerRegistryContributor
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -389,6 +436,18 @@ public static class CredProxServiceCollectionExtensions
 /// <summary>
 /// Registration marker for <see cref="CredProxServiceCollectionExtensions.AddCredProx"/>:
 /// its presence means the core defaults are registered, so a repeated call is a no-op.
+/// It carries the configuration pass the host handed the entry — the reverse-proxy leg
+/// reads it back from here, because a web host's own IConfiguration registration (by
+/// factory) gives the leg nothing to read at registration time.
 /// Internal: no public surface, and hosts never resolve it.
 /// </summary>
-internal sealed class CoreDefaultsRegistered;
+internal sealed record CoreDefaultsRegistered(IConfiguration Configuration);
+
+/// <summary>Marker: the caller-key machinery registered itself — either through this
+/// assembly's entry scan (ADR-0007) or an explicit <c>AddCredProxCallerAuthentication</c>
+/// call; whichever runs first wins, the second is a no-op.</summary>
+internal sealed class CallerKeyMachineryRegistered;
+
+/// <summary>Marker: the shared <c>credprox-token</c> named client is configured; a second
+/// pass must not stack a second primary-handler chain onto the same client.</summary>
+internal sealed class TokenClientConfigured;

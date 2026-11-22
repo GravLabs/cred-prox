@@ -1,0 +1,87 @@
+# M46 unit-3 Container App definition (az containerapp create --yaml, rendered
+# from this template by scripts/live-m46-aca.sh via envsubst). Sibling of
+# aca-app-r2.yaml.tmpl - read that file for the identity findings carried over
+# verbatim in spirit: NO identity section in this yaml (the --yaml path does not
+# carry userAssignedIdentities reliably - live finding 2026-11-06; the deploy
+# ATTACHES both identities via `az containerapp identity assign` BEFORE the
+# final spec pass); registries[].identity selects the kubelet UAI for image
+# pull; MANAGED_IDENTITY_CLIENT_ID + RuntimeIdentity.Credential() is the only
+# form that reaches the ACA identity-proxy wire.
+# TWO SHIPPED SAMPLES, no harness roles here: the proxy container runs the
+# shipped samples/AzureContainerApps host, the stub container runs its shipped
+# StubApi. The sample's vendor destination is http://localhost:8098 and
+# containers of one Container App share the network namespace, so the sample
+# config is deployed EXACTLY as shipped - the stand-in vendor is the sample's
+# own. (Assumption disclosed: shared-container localhost reachability, the
+# documented multi-container behaviour; if the live run disproves it the verify
+# job's C2 fails and destroy still cleans up.)
+# URL BINDING (offline finding 2026-11-22): the sample pins "Urls":
+# "http://localhost:5097" in appsettings.json and appsettings BEATS the image's
+# baked ASPNETCORE_URLS env (verified: Kestrel binds localhost:5097 with
+# ASPNETCORE_URLS=http://127.0.0.1:18080 in the env). The local pin is right
+# for the offline demo; in-cluster the command line must override it, hence
+# --urls http://+:8080 (command-line config source beats appsettings) with
+# ingress targetPort 8080.
+# Substitutions: $REGISTRY $ENV_ID $UAI_CLIENT_ID $KUBELET_ID $VAULT_URI $DEPLOY_IMAGE_DIGEST
+name: credprox-m46-app
+properties:
+  managedEnvironmentId: $ENV_ID
+  configuration:
+    registries:
+      - server: $REGISTRY
+        identity: $KUBELET_ID
+    ingress:
+      external: false
+      targetPort: 8080
+      allowInsecure: false
+    secrets: []
+  template:
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+    containers:
+      - name: proxy
+        image: $REGISTRY/credprox-m46-aca:latest
+        args: ["--urls", "http://+:8080"]
+        env:
+          # The shipped sample builds `new DefaultAzureCredential()`, which takes
+          # its user-assigned identity from AZURE_CLIENT_ID. This app carries TWO
+          # user-assigned identities (vault + kubelet pull), so without it the
+          # credential cannot pick one and the vault provider fails at startup
+          # (live finding 2026-11-22: the proxy never answered; README step 4).
+          - name: AZURE_CLIENT_ID
+            value: "$UAI_CLIENT_ID"
+          # BUILD STAMP (round-2 finding): a byte-identical re-push creates no
+          # new revision, so the stamp of the CURRENT tag digest forces a fresh
+          # template and every process echoes it back (build: line).
+          - name: DEPLOY_IMAGE_DIGEST
+            value: "$DEPLOY_IMAGE_DIGEST"
+          # The vault is the only secret channel: CredProx--Secrets--acme-vendor-key
+          # and CredProx--Secrets--demoCallerKeyHash answer the shipped secret: refs
+          # through the app's managed identity. Nothing else here.
+          - name: KeyVault__Uri
+            value: "$VAULT_URI"
+        # probes is a LIST of typed probes in the Container Apps schema; a map
+        # keyed liveness/readiness parses as YAML but the CLI refuses it with
+        # "Invalid YAML provided" (live finding 2026-11-22).
+        probes:
+          - type: Liveness
+            httpGet:
+              path: /health
+              port: 8080
+          - type: Readiness
+            httpGet:
+              path: /health
+              port: 8080
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi
+      - name: stub
+        # The sample's OWN vendor stand-in, as shipped
+        # (samples/AzureContainerApps/StubApi). Binds its shipped
+        # http://localhost:8098; the proxy container reaches it over the shared
+        # pod loopback. No identity, no vault, no env - nothing secret.
+        image: $REGISTRY/credprox-m46-stub:latest
+        resources:
+          cpu: 0.25
+          memory: 0.5Gi

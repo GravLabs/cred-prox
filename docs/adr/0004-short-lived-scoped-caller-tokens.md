@@ -102,7 +102,7 @@ wrappers over the framework.
 
 | Layer | Default | Swap point |
 |---|---|---|
-| **Token validation** | ASP.NET Core JWT bearer handler, Entra `Authority` | An authentication scheme. To replace validation, pass the optional `registerScheme` callback to `AddCredProxCallerTokenAuthentication`: your handler registers under the caller-token scheme (`Microsoft.Identity.Web` for multi-tenant Entra, another OIDC issuer, an introspection handler) instead of the stock one, `Authority`/`Audience` become the host's own calls, and `MaxTokenAge` still applies. The replacement must deliver the raw claim names CredProx reads (`roles`/`scp`, `azp`/`appid`, `iat`) — set `MapInboundClaims = false` on a JWT bearer handler, or point `ScopeClaimNames`/`ClientClaimNames` at the names it emits; a renamed `roles` claim fails closed with a 403 for every token. To tune the stock handler, use the standard `PostConfigure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, …)`. Either way the policy accepts any scheme that yields a caller. |
+| **Token validation** | ASP.NET Core JWT bearer handler, Entra `Authority` | An authentication scheme. To replace validation, pass the optional `registerScheme` callback to `.AddIdentity()` (it was `AddCredProxCallerTokenAuthentication` before 0.15.0, ADR-0007): your handler registers under the caller-token scheme (`Microsoft.Identity.Web` for multi-tenant Entra, another OIDC issuer, an introspection handler) instead of the stock one, `Authority`/`Audience` become the host's own calls, and `MaxTokenAge` still applies. The replacement must deliver the raw claim names CredProx reads (`roles`/`scp`, `azp`/`appid`, `iat`) — set `MapInboundClaims = false` on a JWT bearer handler, or point `ScopeClaimNames`/`ClientClaimNames` at the names it emits; a renamed `roles` claim fails closed with a 403 for every token. To tune the stock handler, use the standard `PostConfigure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, …)`. Either way the policy accepts any scheme that yields a caller. |
 | **Signing keys** | OIDC discovery (Entra JWKS) | Standard `TokenValidationParameters` / `IssuerSigningKeyResolver`. |
 | **Claims to caller** | `azp`/`appid` matched against `TokenClientIds` | `ICallerTokenMapper`: turns the validated `ClaimsPrincipal` into a `CallerIdentity` plus an optional scope set. Replace it for a different claim layout or a caller directory. |
 | **Caller directory** | The existing configured callers | The existing `ICallerStore` / caller registry. Tokens reuse it, with no second caller model. |
@@ -112,7 +112,8 @@ wrappers over the framework.
 Token validation has exactly two host paths. Tune the stock handler with the standard
 `services.PostConfigure<JwtBearerOptions>(CredProxAuth.CallerTokenScheme, o => …)` — no
 CredProx API involved. Replace it with
-`AddCredProxCallerTokenAuthentication(configuration, registerScheme: builder => builder.AddScheme<…>(CredProxAuth.CallerTokenScheme, …))`:
+`services.AddCredProx(configuration).AddIdentity(registerScheme: auth => auth.AddScheme<…>(CredProxAuth.CallerTokenScheme, …))`
+(before 0.15.0, the same callback went to `AddCredProxCallerTokenAuthentication`; ADR-0007):
 the callback runs instead of the stock `AddJwtBearer`, and CredProx still registers the
 options, the mapper and the startup guard, so `MaxTokenAge` keeps applying either way.
 

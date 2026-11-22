@@ -1,12 +1,8 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/CredProx.Abstractions/CredProx.Abstractions.csproj" />
-    <Project Path="src/CredProx.AzureKeyVault/CredProx.AzureKeyVault.csproj" />
-    <Project Path="src/CredProx.CallerKeys/CredProx.CallerKeys.csproj" />
-    <Project Path="src/CredProx.CallerTokens/CredProx.CallerTokens.csproj" />
-    <Project Path="src/CredProx.Hmac/CredProx.Hmac.csproj" />
-    <Project Path="src/CredProx.LoginExchange/CredProx.LoginExchange.csproj" />
-    <Project Path="src/CredProx.OAuth/CredProx.OAuth.csproj" />
+    <Project Path="src/CredProx.Azure/CredProx.Azure.csproj" />
+    <Project Path="src/CredProx.Identity/CredProx.Identity.csproj" />
     <Project Path="src/CredProx.Operations/CredProx.Operations.csproj" />
     <Project Path="src/CredProx/CredProx.csproj" />
     <Project Path="src/CredProx.Testing/CredProx.Testing.csproj" />

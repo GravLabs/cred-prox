@@ -1,15 +1,16 @@
 var builder = WebApplication.CreateBuilder(args);
 
-// The deployable host: AddCredProx registers the core defaults, the CallerTokens call
-// validates agent OIDC tokens against the Authority in appsettings.json, and YARP serves
-// the proxy from config. Who gets admitted to what is explained in the README.
-builder.Services.AddCredProx(builder.Configuration);
-builder.Services.AddCredProxCallerTokenAuthentication(builder.Configuration);
+// The deployable host: AddCredProx registers the core defaults, the chained AddIdentity()
+// arms the caller-token leg that validates agent OIDC tokens against the Authority in
+// appsettings.json, and YARP serves the proxy from config. Who gets admitted to what is
+// explained in the README.
+builder.Services.AddCredProx(builder.Configuration)
+    .AddIdentity();
 
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 

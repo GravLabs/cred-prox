@@ -22,13 +22,12 @@ if (!string.IsNullOrEmpty(keyVaultUri))
 // Callers authenticate to the proxy with an API key (SHA-256 hashes, constant-time
 // compare); everything else is the config-driven core.
 builder.Services.AddCredProx(builder.Configuration);
-builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
 
 builder.Services.AddHealthChecks();
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 

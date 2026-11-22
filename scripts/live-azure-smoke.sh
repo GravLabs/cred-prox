@@ -311,7 +311,7 @@ r2_run_job() { # start ONE execution with the job's current args, wait for a
     [[ -n "$exec_name" ]] || { say "job start accepted but execution name unresolvable" >&2; return 1; }
   fi
   status=Unknown
-  for i in $(seq 1 60); do   # <=480s: cold job start + pull on Consumption can outlast 320s
+  for i in $(seq 1 120); do   # <=960s: the r2 replicaTimeout is 900; a slow success must not read as a give-up (the ACA verify poll's rule)
     sleep 8
     status=$(az containerapp job execution show -g "$RG" -n "$R2_JOB" --job-execution-name "$exec_name" --query properties.status -o tsv 2>/dev/null) || status=Unknown
     case "$status" in Succeeded|Failed|Stopped|Timeout|Cancelled|Deleting) break ;; esac

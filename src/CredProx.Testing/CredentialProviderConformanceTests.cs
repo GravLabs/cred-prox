@@ -163,10 +163,8 @@ public abstract class CredentialProviderConformanceTests<TProvider, TOptions>
             builder.SetMinimumLevel(LogLevel.Trace);
             builder.AddProvider(logs);
         });
-        services.AddCredProxTokenCache();
-        services.AddCredProxConfigurationSecrets(configuration);
-        services.AddCredProxCredentialType<TProvider, TOptions>(CredentialTypeName);
-        services.AddCredProxCredentials(configuration);
+        services.AddCredProx(configuration)
+            .WithCredentialType<TProvider, TOptions>(CredentialTypeName);
         services.AddSingleton<IHttpClientFactory>(new StubHttpClientFactory(tokenServer));
         ConfigureServices(services);
 

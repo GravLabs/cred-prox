@@ -5,7 +5,92 @@ All notable changes to CredProx are documented here. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, the public API may
 change between minor versions; `[Experimental]` APIs may change at any time.
 
-## [Unreleased]
+## [0.15.1] - 2026-11-22
+
+### Fixed
+- GitHub App and other token exchanges now send `User-Agent: CredProx/<version>`; GitHub
+  refused the installation-token exchange with 403 before (affected 0.15.0 and earlier).
+  The caller-token metadata/JWKS client sends the same header.
+
+### Documentation
+- The AzureContainerApps sample README requires AZURE_CLIENT_ID for a user-assigned
+  identity; the AgentTokens sample asks Entra for v2 tokens, with the API client id as
+  audience.
+
+## [0.15.0] - 2026-11-21
+
+### Added
+- **One entry point hands back a builder** (ADR-0007):
+  `builder.Services.AddCredProx(builder.Configuration)` now registers the core defaults
+  and returns a `CredProxBuilder` you chain add-on calls onto: `.AddIdentity()`
+  (`CredProx.Identity`), `.AddOperations()` (`CredProx.Operations`) and
+  `.AddAzure(credential)` (`CredProx.Azure`). Extension seams also ride the builder:
+  `WithCredentialType<TProvider, TOptions>(typeName)`, `WithCallerAuthenticator<T>()`,
+  `WithCallerRegistryValidator<T>()` and `WithCallerRegistryContributor<T>()`.
+### Breaking (setup surface)
+0.15 groups the packages by dependency and collapses the registration surface to the
+entry plus one chained call per add-on package (ADR-0007). Code written for 0.14 must
+change wherever it names one of the calls below; config keys and credential `Type`
+values are unchanged.
+- **Packages:** `CredProx.OAuth` and `CredProx.CallerTokens` merge into
+  `CredProx.Identity`; `CredProx.AzureKeyVault` renames to `CredProx.Azure` (it always
+  held only the `TokenCredential` type — Key Vault stays the Azure SDK's own
+  configuration provider); `CredProx.CallerKeys`, `CredProx.Hmac` and
+  `CredProx.LoginExchange` merge into the core. Six ids ship: `CredProx`,
+  `CredProx.Abstractions`, `CredProx.Azure`, `CredProx.Identity`, `CredProx.Operations`,
+  `CredProx.Testing`. CredProx.CallerKeys, CredProx.Hmac and CredProx.LoginExchange
+  (now in CredProx), CredProx.OAuth and CredProx.CallerTokens (now CredProx.Identity)
+  and CredProx.AzureKeyVault (now CredProx.Azure) have been removed from the package
+  registry; reference the replacement package instead.
+- **The reverse-proxy hookup takes no arguments:**
+  `AddReverseProxy().…AddCredProx(builder.Configuration)` becomes `.AddCredProx()`. The
+  core entry owns the pipeline wiring; a no-arg call without a prior
+  `services.AddCredProx(configuration)` fails at startup naming it.
+- **Nineteen registration extensions are internal now** — the public surface is the
+  entry, the chained add-on calls, the `With*` seams and the no-arg reverse-proxy call.
+  Per name: `AddCredProxTokenCache`, `AddCredProxConfigurationSecrets`,
+  `AddCredProxBuiltInCredentials`, `AddCredProxCredentials`, `AddCredProxCallerPolicy`
+  and `AddCredProxAudit` → the entry arms all of them (`AddCredProxAudit` only when a
+  `CredProx:Audit` section is present). `AddCredProxHmac` and `AddCredProxLoginExchange`
+  → the entry's built-in credential set. `AddCredProxCallerAuthentication` → the entry
+  arms the caller-key machinery when any caller declares key hashes.
+  `AddCredProxCredentialType<TProvider, TOptions>` → `WithCredentialType<TProvider, TOptions>(typeName)`.
+  `AddCredProxCallerAuthenticator<T>` → `WithCallerAuthenticator<T>()`;
+  `AddCredProxCallerRegistryValidator<T>` → `WithCallerRegistryValidator<T>()`;
+  `AddCredProxCallerRegistryContributor<T>` → `WithCallerRegistryContributor<T>()`.
+  `AddCredProxOAuth` and `AddCredProxCallerTokenAuthentication` → `.AddIdentity()`
+  (the caller-token leg arms only when a `CredProx:CallerToken` section is present).
+  `AddCredProxThrottling`, `AddCredProxResilience`, `AddCredProxHealthProbes` →
+  `.AddOperations()` (each leg arms only when its own section is present).
+  `AddCredProxAzureTokenCredential` → `.AddAzure(credential)`.
+- **`ICallerStore` and `CallerKeyMatch` changed namespace back:** `CredProx.CallerKeys.*`
+  to `CredProx.Abstractions.*` — the caller store is a public contract and contracts
+  ship in Abstractions. Same types, same members; add `using CredProx.Abstractions;`
+  wherever you implement or name them.
+### Changed behaviour
+- **`CredProx:Throttling` absent now means no throttle leg.** Calling
+  `AddCredProxThrottling` with no section still paused the cluster on a vendor 429 and
+  queued or refused later requests (the pause default is on even with zero permits).
+  From 0.15 `.AddOperations()` arms the limiter only when the section exists — write
+  `CredProx:Throttling` (any keys, or just an empty section) to keep the pause.
+- **`CredProx:Resilience` absent now means no retry and no circuit breaker.** Calling
+  `AddCredProxResilience` with no section ran retries (3), a 30 s attempt timeout and a
+  per-cluster breaker with the shipped defaults on every cluster; from 0.15 the
+  resilience leg rides its own section.
+- **`CredProx:Health` absent now means no probe loop and no `credprox` check.** Calling
+  `AddCredProxHealthProbes` with no section still probed token obtainability and
+  certificate expiry on a 5-minute loop; from 0.15 the health leg rides its own
+  section.
+- **A configured `CredProx:Audit` section now arms the audit log by itself.** A host
+  that carried the section but never called `AddCredProxAudit` had an inert
+  configuration; from 0.15 the entry turns the audit log on for it — records start
+  arriving at the `CredProx.Audit` logger category. Turn it off with
+  `CredProx:Audit:Enabled=false`.
+- **Caller keys arm themselves when any caller declares key hashes.** A host with a
+  plugin `ICallerAuthenticator` and stray `CredProx:Callers:<id>:Keys` entries
+  previously authenticated through the plugin alone; the key entries now also arm the
+  caller-key scheme beside it. Remove the `Keys` entries (or keep them — the two
+  schemes coexist by design).
 
 ## [0.14.0] - 2026-11-20
 

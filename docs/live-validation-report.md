@@ -351,6 +351,52 @@ Tenant after the run: resource group `exists=false`, both vaults soft-deleted
 and **purged** (`az keyvault list-deleted` → 0), 0 role assignments — verified
 by read-backs the destroy script failed its own exit over.
 
+## M46 — live sample validation, Azure vendors (2026-11-22)
+
+Run locally on demand with `scripts/live-run.sh <vendor>` against the owner's Entra
+tenant and subscription (see `docs/live-testing.md`). Each run creates its own
+resources and destroys them on every exit path; the destroy read-back decides
+whether the run may PASS, and the lead re-checked every destroy by hand.
+
+| Vendor | Result | PASS line |
+|---|---|---|
+| agenttokens | **PASS** (run 5 of 5) | `PASS agenttokens: agenttokens_mapped=200 agenttokens_unmapped=401` |
+| aca | **PASS** (run 6 of 6) | `PASS aca: 3/3 acacheck checks passed, job Succeeded` |
+| graph | **PASS** (run 2 of 2, no admin consent) | `PASS graph: graph_oauth=403(Authorization_RequestDenied) graph_cli=200` |
+| graph (admin consent, owner-approved one-off) | **PASS** | `PASS graph: graph_styles=2 users_status=200 me_status=200`: an app-only token read users once `User.Read.All` was consented |
+| aigateway (Anthropic) | **PASS** (run 1 of 1) | `PASS aigateway: forwarded_calls=1 models_status=200 refused_statuses=401,403 billable_calls=0` |
+| githubapp | **PASS** (run 2 of 2, after the User-Agent fix) | `PASS githubapp: exchanges=1 fetch_success=1 cache_hits=1 forwarded_calls=2 statuses=200,200`. Run 1 found the bug below; the fix sends `User-Agent: CredProx/<version>` on CredProx's own requests |
+
+### What the live runs found that the offline stand-ins could not
+
+Each earlier run failed on exactly one live-only fact. Each was fixed with an
+offline cell that now fails on the old shape, and each fix was reviewed.
+
+- **agenttokens.**
+  - The tenant's default policy refuses a fixed `api://` identifier, so the resource app takes `api://<its own app id>`.
+  - Entra requires a description on every app role.
+  - A new app registration issues v1 tokens, which the sample's v2 Authority refuses. The run sets `api.requestedAccessTokenVersion = 2`, and the Audience is the API's client id, which is the v2 `aud`. The sample README and appsettings say so.
+  - The sample strips the caller's `Authorization` before forwarding. The live cell asserts that the caller's bearer never reaches the upstream.
+- **aca.**
+  - `docker push` needs `az acr login` first.
+  - The destroy verdict is the resource-group-gone read-back plus a role-assignment check after the group is gone. In-group deletes are asynchronous.
+  - Container Apps YAML wants `probes` as a list of typed probes. A map parses as YAML but the CLI refuses it.
+  - `az -o tsv` prints JMESPath booleans in lowercase.
+  - The verify job reads the caller key under the name the material step writes.
+  - **Consumer-facing:** the shipped sample builds `new DefaultAzureCredential()`, which takes a user-assigned identity's client id from `AZURE_CLIENT_ID`. Without it, the credential falls back to the system-assigned identity, the Key Vault provider fails on first load, and the host never answers. The sample README now names the setting, and the run's template sets it.
+
+- **graph (consent run).** Entra refuses a brand-new client secret for a short time (401 at the token endpoint), and a new app-role consent reaches issued tokens only after a delay. The run must wait until the secret works and, with consent, until the token carries the role.
+- **githubapp: CredProx bug, shipped in 0.15.0.** CredProx's own token-exchange client sends no `User-Agent`, and GitHub refuses every API request without one: 403 "Please make sure your request has a User-Agent header". Measured with the same App JWT and installation: no `User-Agent` gives 403, with one gives 201. A GitHub App credential therefore cannot get an installation token from real GitHub. The offline stand-in never checked the header.
+
+### What M46 did NOT prove
+
+- The aca leg is script-driven over internal ingress; no test process reaches the
+  app from outside (disclosed in `docs/live-testing.md`).
+- agenttokens repoints the placeholder destination at a loopback stand-in; the
+  token validation and caller mapping are what is under proof.
+- graph proves an app token accepted by Graph (its own 403) and a real 200 through the az sign-in, not an app-token 200: that needs admin consent, which the run deliberately does not take.
+- The graph admin-consent run used the reviewed consent version of the scripts (before the no-consent change) plus an uncommitted wait until the token carried the role; main keeps the no-consent design.
+
 ## Pending
 
 - **Phase 3 — DROPPED 2026-11-03, OBO removed in M27.** The

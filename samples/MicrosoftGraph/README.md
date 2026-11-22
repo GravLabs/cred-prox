@@ -5,7 +5,7 @@ The same Graph endpoint reached with two different credential styles, from one h
 1. **Entra app client credentials** — the classic app registration + secret, spelled out
    in explicit config (`OAuthClientCredentials`, the `/.default` scope, Basic client auth).
 2. **No stored secret at all** — the `TokenCredential` credential type from the
-   `CredProx.AzureKeyVault` add-on: tokens are minted by the ambient Azure identity (a
+   `CredProx.Azure` add-on (the chained `.AddAzure(credential)`): tokens are minted by the ambient Azure identity (a
    user-assigned managed identity in Azure, the Azure CLI during development). Nothing to
    rotate because nothing is stored.
 
@@ -17,7 +17,7 @@ credential type is harmless — so the host you deploy is the host you ran today
 Plus **Key Vault as the secret source** for the first style — via the ordinary Azure
 configuration provider, which is all CredProx's `secret:` references need.
 
-**Packages:** `CredProx`, `CredProx.OAuth`, `CredProx.AzureKeyVault`, `Azure.Identity`
+**Packages:** `CredProx`, `CredProx.Identity`, `CredProx.Azure`, `Azure.Identity`
 (and `Azure.Extensions.AspNetCore.Configuration.Secrets` for the Key Vault config source).
 
 ## Run it — client credentials

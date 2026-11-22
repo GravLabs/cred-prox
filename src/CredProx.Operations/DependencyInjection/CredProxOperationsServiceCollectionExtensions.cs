@@ -14,7 +14,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// and the core refuses startup naming this package.
 /// </summary>
 [Experimental("CREDPROX001")]
-public static class CredProxOperationsServiceCollectionExtensions
+internal static class CredProxOperationsServiceCollectionExtensions
 {
     /// <summary>
     /// Turns on credential health monitoring: binds <c>CredProx:Health</c> (probe interval, certificate warning
@@ -29,7 +29,7 @@ public static class CredProxOperationsServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The application configuration root.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxHealthProbes(
+    internal static IServiceCollection AddCredProxHealthProbes(
         this IServiceCollection services,
         IConfiguration configuration)
     {
@@ -76,7 +76,7 @@ public static class CredProxOperationsServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The application configuration root.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxThrottling(
+    internal static IServiceCollection AddCredProxThrottling(
         this IServiceCollection services,
         IConfiguration configuration)
     {
@@ -116,7 +116,7 @@ public static class CredProxOperationsServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The application configuration root.</param>
     /// <returns>The same <paramref name="services"/>, for chaining.</returns>
-    public static IServiceCollection AddCredProxResilience(
+    internal static IServiceCollection AddCredProxResilience(
         this IServiceCollection services,
         IConfiguration configuration)
     {

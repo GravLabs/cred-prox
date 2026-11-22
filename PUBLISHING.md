@@ -11,7 +11,29 @@ home: package metadata, SourceLink, issues and contribution links all point ther
 repo tree. This runbook deliberately does not print the registry URL: resolve it from the
 `credprox` source on the publishing machine.
 
-Current state (2026-11-20): `0.13.1` is **published on the registry** — the security patch
+Current state (2026-11-22): `0.15.1` is **prepped on `rel-0.15.1-prep`, not yet published** —
+the User-Agent fix for the GitHub App and other token exchanges (GitHub refused the
+installation-token exchange with 403; CHANGELOG `[0.15.1]`), with no public API added,
+changed or removed. The lead fills the nupkg sha256 here after the publish pack:
+`CredProx` TBD · `CredProx.Abstractions` TBD · `CredProx.Azure` TBD · `CredProx.Identity` TBD ·
+`CredProx.Operations` TBD · `CredProx.Testing` TBD. Owner approval d-bd67e0f3 covers the push
+to the registry AND GitHub; GitHub `main` and its tags then move from `0.14.0`, and SourceLink
+resolves from `0.15.1` up. The last published release is `0.15.0` — **on the registry only**
+(2026-11-21): six packages grouped by the outside libraries they bring in, one
+`AddCredProx(configuration)` entry with chained add-on calls (ADR-0007); before it shipped,
+every version of the six retired ids was deleted from the registry. It is **not on GitHub**, and
+its symbol packages' SourceLink names the Gitea commit
+`ce99f5df334a92b66c922b22ef62405c3d1432d7`, which GitHub does not carry (its public line
+is a squashed commit with its own SHA) — source fetch through SourceLink does not work for
+`0.15.0`. See the `0.15.0` history entry. After the publish, `main` reopens at `0.15.2-dev`.
+Previously: `0.14.0` was **published on the registry** — the public API
+surface for 1.0 (every change is to an `[Experimental]` type, listed in the CHANGELOG
+`[0.14.0]` Breaking entries) plus the M47 security hardening: opt-in fail-closed scrubbing,
+the caller's own `Authorization`/`Cookie` removed by default, and an authorize URL carrying
+a secret refused. GitHub `main` and tag `0.14.0` sit on one squashed commit
+`0c0af2196d9662e35f2c636a34bbd2ccb45d8c39` (noreply author, tree identical to the release
+tip `7b60666`), appended on the previous public tip `61b6ef8`; see the `0.14.0` history
+entry. Previously: `0.13.1` was **published on the registry** — the security patch
 for `0.13.0`: credential fetches refuse HTTP redirects, JSON-escaped credential echoes are
 scrubbed, the scrubber's pass-through classes warn, and provider-boundary messages carry the
 exception type only; no public API added, changed or removed. GitHub `main` and tag `0.13.1`
@@ -69,16 +91,49 @@ plus the feature package), additive for everyone else — the CHANGELOG `[0.12.0
 entries are that contract; the CHANGELOG entries remain the consumer
 contract. The `0.7.1` known issues stay resolved (F1: CI-path-mapped PDBs; F2: packed from a
 publicly resident commit); the `0.7.0`/`0.7.1` published packages keep their historical
-metadata (immutable). The latest baseline rotation **ran with the `0.14.0` prep**: `build/baselines/`
-holds the published `0.13.1` bytes (all ten, sha256-verified; ADR-0001); every pack
-validates all ten packages against them; the next rotation runs at the next release prep
-per the rule below.
+metadata (immutable). The latest baseline rotation **ran in the `0.15.1` prep
+(2026-11-22)**: `build/baselines/` holds the published `0.15.0` bytes for all six
+shipped ids — `CredProx`, `CredProx.Abstractions`, `CredProx.Azure`,
+`CredProx.Identity`, `CredProx.Operations`, `CredProx.Testing` — sha256-verified 6/6
+against the `0.15.0` history entry below (ADR-0001); `CredProx.Identity` and
+`CredProx.Azure` now have published bytes, so nothing ships without a baseline.
+Every pack validates against those bytes; the next rotation runs at
+the next release prep per the rule below.
+
+The ADR-0001 record for this rotation — the committed baseline bytes and their
+sha256. Each equals the matching `0.15.0` nupkg hash in the release history below:
+the registry served the pushed bytes unchanged, verified at the `0.15.0` consumer
+verification and again, byte for byte, when these six were downloaded through a
+scratch restore with an isolated cache and a cleared http-cache for this rotation.
+
+```
+build/baselines/CredProx.0.15.0.nupkg               b3c5abb8cf0e5a252e854a21e32faada59fd681c0ca938c23dfe2f320db0b8ab
+build/baselines/CredProx.Abstractions.0.15.0.nupkg  8ee75ef2b01b1fcfbedf1a3a233ed9d3341c5657f995e39db0825afa532799c8
+build/baselines/CredProx.Azure.0.15.0.nupkg         92d25c672f5da4a4620334ee99f91610a2cf30f2298b3aab015fdae4b3950b9e
+build/baselines/CredProx.Identity.0.15.0.nupkg      b8e7a7c82cedb65137779800db2ebece8c9d42f5bf07c0c54123f78161a208b5
+build/baselines/CredProx.Operations.0.15.0.nupkg    7400efad216bb524c4f62386bf574eedeffdf3453d8b13622a3bc90117675d6b
+build/baselines/CredProx.Testing.0.15.0.nupkg       703b1602e9ece48196b563caf95df3e3b919a41e7ad5964916d13edb4ca217a2
+```
+
+Rotation note: executed 2026-11-22 in the `0.15.1` prep; the six files above replaced
+the four `0.14.0` baseline files and the validation version in `Directory.Build.props`
+moved `0.14.0` → `0.15.0`. The two baseline-less csproj overrides (`CredProx.Identity`,
+`CredProx.Azure`) and the two `CompatibilitySuppressions.xml` files were removed: the
+13 suppression entries live inside the `0.15.0` baseline, so a fresh-obj pack must show
+zero CP diagnostics and zero unnecessary suppressions. `docs/adr/0001` carries the same
+six-line list.
 
 ## What gets published
 
-Ten packages and their symbol packages, all at the same version:
+Six packages and their symbol packages, all at the same version (ADR-0007):
 
-`CredProx` · `CredProx.Abstractions` · `CredProx.AzureKeyVault` · `CredProx.CallerTokens` · `CredProx.CallerKeys` · `CredProx.Hmac` · `CredProx.LoginExchange` · `CredProx.OAuth` · `CredProx.Operations` · `CredProx.Testing`
+`CredProx` · `CredProx.Abstractions` · `CredProx.Azure` · `CredProx.Identity` · `CredProx.Operations` · `CredProx.Testing`
+
+From 0.15.0 the packages group by dependency: `CredProx.OAuth` and
+`CredProx.CallerTokens` merge into `CredProx.Identity`, `CredProx.AzureKeyVault`
+renames to `CredProx.Azure`, and `CredProx.CallerKeys`, `CredProx.Hmac` and
+`CredProx.LoginExchange` merge into the core. The ten-id lists below are release
+history, not the current map.
 
 Feed: the `credprox` source from machine-local NuGet config (anonymous download live).
 
@@ -96,12 +151,10 @@ Feed: the `credprox` source from machine-local NuGet config (anonymous download 
 4. **The release tag exists**: `git tag <version> <release-commit>` — pushing the tag
    needs the maintainer's explicit OK, like any push.
 5. **The baseline folder is current**: `build/baselines/` holds the *previously
-   published* version's nupkgs — four through `0.10.0`, six from the release that
-   first ships `CredProx.CallerTokens` and `CredProx.CallerKeys` together, eight
-   from the release that also ships `CredProx.Hmac` and `CredProx.LoginExchange`,
-   nine from the release that also ships `CredProx.OAuth`, ten from the release that
-   also ships `CredProx.Operations`
-   (see Rules and ADR-0001).
+   published* version's nupkgs for every id the next release ships — all six from
+   `0.15.0`; the count grew four → six → eight → nine → ten across
+   `0.11.0`/`0.12.0`, shrank back to four at the `0.15.0` regroup and grew back to
+   six at the `0.15.1` prep (see Rules and ADR-0001).
 
 6. **Benchmark regression pass (required since 2026-11-10):** on a quiet machine, run a
    full `tests/CredProx.Benchmarks` pass at the release commit and gate it with
@@ -122,20 +175,17 @@ source root in the PDB; the published PDB must carry `/_/` paths:
 ```bash
 dotnet pack src/CredProx.Abstractions -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
 dotnet pack src/CredProx              -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
-dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
-dotnet pack src/CredProx.CallerTokens  -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
-dotnet pack src/CredProx.CallerKeys    -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
-dotnet pack src/CredProx.Hmac          -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
-dotnet pack src/CredProx.LoginExchange -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
-dotnet pack src/CredProx.OAuth         -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
-dotnet pack src/CredProx.Operations    -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.Identity     -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.Operations   -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
+dotnet pack src/CredProx.Azure        -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
 dotnet pack src/CredProx.Testing      -c Release -o artifacts/publish -p:ContinuousIntegrationBuild=true
 ```
 
 Packing also runs the APICompat baseline check against `build/baselines` — it must exit 0.
-All ten packages validate: each package's own previously published bytes are its baseline,
-and the six that first shipped at `0.12.0` entered that folder at the `0.13.0`-prep
-rotation, where their temporary `EnablePackageValidation=false` overrides were removed.
+All six packages validate: each package's own previously published bytes are
+its baseline (`CredProx.Identity` and `CredProx.Azure` carried an empty
+`PackageValidationBaselinePath` override at `0.15.0` as new ids; their `0.15.0` bytes
+are the baseline since the `0.15.1` prep rotation).
 
 Sanity-check the symbols before pushing (the CI step asserts the same on every build).
 The path-form assertions are not decoration: `0.7.1` shipped with local build paths in
@@ -152,7 +202,21 @@ for pkg in artifacts/publish/*.snupkg; do
   grep -q "$HOME/" <<<"$paths" \
     && { echo "builder home embedded in PDB: $pkg - rebuild with ContinuousIntegrationBuild=true from clean obj"; exit 1; }
 done
+# The XML docs ship comments from internal types too, so scan them for internal queue
+# row ids (the repo-tree test cannot see inside a package; 0.14.0 and 0.15.0 shipped one).
+for pkg in artifacts/publish/*.nupkg; do
+  unzip -p "$pkg" 'lib/*/*.xml' | grep -qE 'qitem-[0-9a-z]' \
+    && { echo "internal row id in packaged XML docs: $pkg"; exit 1; }
+done
 ```
+
+Carrying the SHA is not the same as resolving it. SourceLink names the commit that was packed,
+and a raw GitHub URL resolves only if GitHub has that exact commit. The GitHub ceremony packs
+at the public squashed commit, so its URLs resolve once that commit is pushed. A registry-only
+publish packs a Gitea commit that GitHub will never carry, so its source fetch does not work
+(as with `0.15.0`), and the record must say so. After the push, fetch one shipped
+SourceLink URL (any source file under the packed SHA) and record the status: `200`, or a
+stated `404` for a registry-only release.
 
 `ContinuousIntegrationBuild=true` maps paths at **compile** time: packing with
 `--no-build`, or against obj reused from a plain build, silently embeds the local source
@@ -268,7 +332,9 @@ then takes time — usually under 15 minutes, watch status.nuget.org if longer, 
 owner's account gets the success email. The consumer check below must therefore run
 *after* the email, not right after the last push.
 
-**Versions cannot be deleted, only unlisted** — the nuget.org Terms are explicit that
+**On nuget.org, versions cannot be deleted, only unlisted** (this applies to the nuget.org
+route; the machine-local registry does allow deletion, used once, for the six retired ids at
+`0.15.0`) — the nuget.org Terms are explicit that
 uploaded content cannot be guaranteed permanently deleted; unlisting hides the package
 from search for new consumers while existing consumers keep resolving it. A bad version
 is therefore permanent: unlist it and (if consumers should move) deprecate it pointing
@@ -317,7 +383,8 @@ all ten packages against nuget.org alone, per-package provenance asserted from e
   the release name), and never push a cross-named local tag.
 - **Baseline rotation each release** (ADR-0001): after publishing `<new>`, the next
   milestone sets `<PackageValidationBaselineVersion>` in `Directory.Build.props` to
-  `<new>` and replaces `build/baselines/` with the release's nupkgs (five since
+  `<new>` and replaces `build/baselines/` with the release's nupkgs for every id the
+  next release ships (four since the `0.15.0` regroup; ten before it; five since
   `CredProx.CallerTokens`; four before) **downloaded from the
   registry** (the published bytes), updating the sha256 list in ADR-0001.
   **Exception recorded 2026-11-04:** the `0.8.0` release shipped WITHOUT the rotation to
@@ -364,6 +431,114 @@ all ten packages against nuget.org alone, per-package provenance asserted from e
 
 ## Release history
 
+- `0.15.0` (registry only; release commit `ce99f5df334a92b66c922b22ef62405c3d1432d7` on Gitea
+  `main`, not on GitHub): **published 2026-11-21** — six packages grouped by dependency and one
+  entry point (M49, ADR-0007). Breaking, as listed in CHANGELOG `[0.15.0]`: the caller-key, HMAC
+  and login-exchange packages join the core; OAuth and caller tokens become `CredProx.Identity`;
+  `CredProx.AzureKeyVault` becomes `CredProx.Azure`; `services.AddCredProx(configuration)`
+  returns a builder with `.AddIdentity()`, `.AddOperations()` and `.AddAzure(credential)`; the
+  reverse-proxy `AddCredProx()` takes no arguments; nineteen registration extensions and seven
+  emptied registration classes are internal; `ICallerStore`/`CallerKeyMatch` are in
+  `CredProx.Abstractions`. 144 public types remain.
+  Retired ids: owner decision 2026-11-21, every published version of `CredProx.CallerKeys`,
+  `CredProx.CallerTokens`, `CredProx.Hmac`, `CredProx.LoginExchange`, `CredProx.OAuth` (4 each)
+  and `CredProx.AzureKeyVault` (20), 40 in all, was deleted from the registry before the push
+  and read back absent on the index and on the package download path; `CredProx` (20),
+  `CredProx.Abstractions` (20), `CredProx.Operations` (4) and `CredProx.Testing` (20) keep every
+  earlier version.
+  Prep `fa1ecb2`, then the docs and examples rounds `0521a52`..`4df03f1` (merged as `5e9e49f`),
+  then text only (`71cd318`, `ce99f5d`: ADR-0004 and the rotation runbook); `src`, `tests`,
+  `samples` and `build` are identical between `4df03f1` and `ce99f5d`. Suppressions: **13**, core
+  12 (`CP0002`) and Operations 1 (`CP0001`, its emptied registration class; the generator
+  replaced that file's three member entries with the one type entry); `CredProx.Identity` and
+  `CredProx.Azure` ship first with no baseline.
+  Gates, run by the builder and re-derived independently by the checker. At `4df03f1`: the build
+  0W/0E; `CredProx.Tests` 2206/2206; the coverage gate passes (core line 98.4 %, branch 94.2 %;
+  the builder's run read 98.42/94.21, the difference being one disposal-race line that flips
+  between runs, with identical instrumented totals); six packs with package validation on, zero
+  `CP000x` and zero unnecessary suppressions; `CredProx.SampleSmokes` 86/86 on the stamped
+  bytes; the public-surface witness with two dumpers, removed 7 and added 0 against the prep
+  tip, each line one of the seven emptied classes. At the prep tip `fa1ecb2`: Security,
+  Conformance, Load and E2E 36/40/7/3; consumer compatibility 15/15 cells from cold caches; no
+  vulnerable dependencies; the surface witness against the published 0.14.0 dlls (251 removals,
+  246 additions, every line inside the CHANGELOG entries); a 3-minute soak, 12,424 checks.
+  Benchmark: the gate compared against `baselines/0.13.0`, because no 0.14.0 baseline was ever
+  committed; that stale base is waived for this release, and the refresh to `baselines/0.15.0`
+  ran after the publish (see below). The checker's pass on a quiet machine (LOAD-AT-START 0.29):
+  `bench-compare: 13 methods compared, FAIL=0 WARN=1`, the one WARN being the `SsePlain` time
+  ratio 1.759 -> 2.419 with its allocation down (7,267 -> 7,208 B); `SseCredProx` allocation
+  12,062 -> 12,307 B, +2.0 %, inside its allowance. The refresh ran (2026-11-21), merged as
+  `32e881e`: four suites from a full pass at the release commit `ce99f5d` (quiet gate 0.93),
+  gated against `baselines/0.13.0` at `13 methods compared, FAIL=0 WARN=4`; the Overhead suite
+  re-pinned from one quiet pass at `cf344b6` (LOAD-AT-START 0.81; `src` and `samples` identical
+  to the release tree), because the first pass's `SsePlain` base of 9,991 B sat above its
+  documented band and would have loosened that arm's gate. The checker re-derived both
+  captures and gated its own 13-method pass against the merged folder at `FAIL=0 WARN=2`. The
+  re-pinned `SseCredProx` base (11,977 B) is the low reading of four from that tree, so a WARN
+  on that arm is the expected ordinary outcome; `baselines/0.15.0/MACHINE.md` records both
+  passes, the deviations and the sample set.
+  Ceremony (2026-11-21): packed **once** from a clean detached worktree at `ce99f5d`, CI path
+  mapping, fresh obj, isolated package cache: six packages, the APICompat success line on the
+  four baselined ids. Sanity over all twelve packages (73 members): SourceLink carries the full
+  release SHA and the `/_/` mapping in every symbol package, every nuspec names the release
+  commit, every dll reads `0.15.0+ce99f5d…`, lib shape `net10.0`-only, zero private-path,
+  private-mail, internal-host or key-material hits. Before the push the registry served nothing
+  at `0.15.0` and nothing at all under `CredProx.Identity` or `CredProx.Azure`. Push round: six
+  nupkgs, each exactly once; all twelve PUTs answered `201 Created`. Nupkg sha256:
+  `CredProx` `b3c5abb8cf0e5a252e854a21e32faada59fd681c0ca938c23dfe2f320db0b8ab`,
+  `CredProx.Abstractions` `8ee75ef2b01b1fcfbedf1a3a233ed9d3341c5657f995e39db0825afa532799c8`,
+  `CredProx.Azure` `92d25c672f5da4a4620334ee99f91610a2cf30f2298b3aab015fdae4b3950b9e`,
+  `CredProx.Identity` `b8e7a7c82cedb65137779800db2ebece8c9d42f5bf07c0c54123f78161a208b5`,
+  `CredProx.Operations` `7400efad216bb524c4f62386bf574eedeffdf3453d8b13622a3bc90117675d6b`,
+  `CredProx.Testing` `703b1602e9ece48196b563caf95df3e3b919a41e7ad5964916d13edb4ca217a2`.
+  Consumer verification: an isolated package cache with a cleared http-cache restored all six
+  from the registry, byte-identical 6/6 to the pushed files; the QuickStart smoke passed on
+  those downloaded bytes (3/3). **Not verified at publish:** CI (there is no public commit to run
+  it on), the SourceLink step-through (its URLs name a commit GitHub will not carry; the checker fetched one shipped URL and it answers `404`, against `200` for the same URL shape at the 0.14.0 commit), the
+  consumer-side `.snupkg` download path, and the nightly fuzz targets.
+- `0.14.0` (GitHub `0c0af2196d9662e35f2c636a34bbd2ccb45d8c39`, release tip `7b60666`): **published
+  2026-11-20** — the public API surface for 1.0 (M48) and the deferred security hardening
+  (M47), plus the HMAC refusal of ambiguous canonical strings. Breaking, `[Experimental]`
+  only: the `ICallerStore`/`CallerKeyMatch` namespace move, `InboundAudience` and
+  `DefaultLifetime` (config keys too; an old key refuses startup by name), thirteen types
+  internal and seven public constructors internal; 146 public types remain. Prep
+  (`67aca2e`..`7b60666`): the baseline rotation to the ten published `0.13.1` nupkgs,
+  sha256-verified 10/10; 31 named suppression entries (core 22, CallerKeys 5, OAuth 2,
+  LoginExchange 2), one per intended break; version `0.14.0` with the nine `CredProx*` pins.
+  Gates at `794e37e` (text-only after), run by the builder and re-derived independently by
+  the checker: the build 0W/0E; APICompat 10/10 against `0.13.1` with zero diagnostics
+  beyond the entries; the public-surface witness with two dumpers (83 removals, 20
+  additions, every line inside the CHANGELOG entries); the battery green with the coverage
+  gate on all ten projects; `CredProx.SampleSmokes` 86/86 on stamped bytes; the benchmark
+  pass inside its recorded bands; a 10-min soak 41,402/41,402 with forwards equal to
+  iterations; no vulnerable dependencies; disclosure scans zero hits.
+  Ceremony (2026-11-20): GitHub ONE squashed commit `0c0af21` on `61b6ef8`, noreply author
+  and committer, tree identical to `7b60666`; the annotated tag `64bea18` built with
+  `git mktag` (noreply tagger, `+0000`, header `tag 0.14.0`). CI on the public commit,
+  Actions run 44732778616: green on all three jobs, first attempt. Packed **once** from a
+  clean detached worktree at the public commit, CI path mapping, fresh obj, isolated
+  package cache: ten packages, APICompat success on all ten. Sanity over all twenty
+  packages (121 members): SourceLink carries the full public SHA and the `/_/` mapping in
+  every symbol package, every nuspec names the public commit, every dll reads
+  `0.14.0+0c0af21…`, lib shape `net10.0`-only, zero private-path, private-mail,
+  internal-host or key-material hits. The registry served nothing at `0.14.0` before the
+  push. Push round: ten nupkgs, each exactly once; all twenty PUTs answered `201 Created`.
+  Nupkg sha256:
+  `CredProx` `42aa8bb5026d5b1cb7ec6e7d19d16ffd4eaa4e644bd856b59171fd8234dc2cd9`,
+  `CredProx.Abstractions` `6c61826aa14d3dc2f05e4f5dc1e535a230140d71d49c24d0e25bdb4320b158d8`,
+  `CredProx.AzureKeyVault` `2f6224fd61831076d96c6c53a15c930a26c333c89e86cc401ee9735fab67c1d3`,
+  `CredProx.CallerKeys` `16e041efe2f57b4ed234f3c5f4f0902d9919658f72990824476dafaf8febebeb`,
+  `CredProx.CallerTokens` `97701a00f4ec975fb63992a829f9751b906cacb5439caacc89f44d60d509a289`,
+  `CredProx.Hmac` `4e35fbfdbe934554bb15d9c4f4525a0b2e772b7faa09fa6610ae1e53854b5868`,
+  `CredProx.LoginExchange` `875b64ab20c15358097bf39b90abc65f61a4f0dc2af701f700e4e1d40ac4312c`,
+  `CredProx.OAuth` `a6c0172b6912eb579d2d889afa053e5d043120f02d47543811156201bb863e1e`,
+  `CredProx.Operations` `c5d278b01f18c10726a4f6c98d36e41f9b3c002fa8c2b0e3d7ef46d45578547d`,
+  `CredProx.Testing` `f537b03de6007a38d69d992dc2515f88394c7138b79257a03bf748df2c51483a`.
+  Consumer verification: an isolated package cache with a cleared http-cache restored all
+  ten from the registry, byte-identical 10/10 to the pushed files; the QuickStart smoke
+  passed on those downloaded bytes (3/3). **Not verified at publish:** the SourceLink
+  debugger step-through, the consumer-side `.snupkg` download path, and the nightly fuzz
+  targets, which first run on this public commit.
 - `0.13.1` (GitHub `61b6ef8eeabc5660582e7b74cf91539fefc00cbe`, release tip `a8a700f`, merged
   into `main` as `ecf965d`): **published 2026-11-20** — the M45 security patch. Security:
   credential acquisition and caller-token validation refuse HTTP redirects (affected:

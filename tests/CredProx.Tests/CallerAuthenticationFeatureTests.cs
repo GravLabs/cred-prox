@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using CredProx;
 using CredProx.Abstractions;
-using CredProx.CallerKeys;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;

@@ -295,6 +295,27 @@ public sealed class ErrorNormalisationFeatureTests
         Assert.Empty(response.Content.Headers.ContentEncoding); // the body is now plain JSON
     }
 
+    [Fact]
+    public async Task GraphShapedErrorBody_VendorDetailCarriesError_Code()
+    {
+        // 09030a9 INFO: the Graph live cell reads the vendor code through
+        // extensions.vendor_detail.error.code and offline nothing pinned that
+        // path - the shipped normaliser's cells proved vendor_detail.error as a
+        // string, not a nested error.code object. A Graph-shaped error body must
+        // keep its code at exactly the path the live cell reads, or the live
+        // cell parses a shape the library never emits.
+        var response = VendorError(
+            HttpStatusCode.Forbidden,
+            Content("""{"error":{"code":"Authorization_RequestDenied","message":"Access to a restricted resource."}}""",
+                "application/json"));
+        using var problem = await ApplyAndReadProblem(Feature(), response);
+        Assert.Equal("credprox.vendor_error",
+            problem.RootElement.GetProperty("extensions").GetProperty("code").GetString());
+        Assert.Equal("Authorization_RequestDenied",
+            problem.RootElement.GetProperty("extensions")
+                .GetProperty("vendor_detail").GetProperty("error").GetProperty("code").GetString());
+    }
+
     // ---- the cap: overflow never truncates, never explodes ----
 
     [Fact]

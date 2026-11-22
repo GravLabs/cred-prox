@@ -12,10 +12,8 @@
   <ItemGroup>
     <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" />
     <PackageReference Include="CredProx" />
-    <PackageReference Include="CredProx.AzureKeyVault" />
-    <PackageReference Include="CredProx.CallerKeys" />
-    <PackageReference Include="CredProx.Hmac" />
-    <PackageReference Include="CredProx.OAuth" />
+    <PackageReference Include="CredProx.Azure" />
+    <PackageReference Include="CredProx.Identity" />
     <PackageReference Include="Azure.Identity" />
   </ItemGroup>
 

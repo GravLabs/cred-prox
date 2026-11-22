@@ -3,7 +3,7 @@ using Xunit;
 namespace CredProx.Tests;
 
 /// <summary>
-/// Boundary binding of the HMAC canonical string (qitem-20261120025812-1841885579827f16):
+/// Boundary binding of the HMAC canonical string (decided 2026-11-20):
 /// the signer REFUSES — never escapes or joins — a component value that carries the
 /// configured separator, or one carrying the ',' that joins a multi-value header's
 /// values. Refusal messages name the component and never carry a value. Vendor
@@ -23,8 +23,8 @@ public sealed class HmacCanonicalBoundaryTests
     public void DefaultSeparator_NewlineBearingUnvalidatedValue_Refuses()
     {
         // TryAddWithoutValidation only: the BCL validator refuses this value, which is
-        // why the newline default is safe on validated attach paths (qitem-bf1a82fd's
-        // measurement). The canonical layer must still refuse it on its own.
+        // why the newline default is safe on validated attach paths (measured
+        // 2026-11-20). The canonical layer must still refuse it on its own.
         var request = Post();
         request.Headers.TryAddWithoutValidation("X-A", "token\nX-B: forged");
         var ex = Assert.Throws<HmacCanonicalAmbiguousException>(() =>

@@ -51,16 +51,16 @@ if (builder.Configuration["CredProx:Credentials:graph:Type"] != "TokenCredential
     }
 }
 
-// Both credential add-ons register always; the loaded config declares which style is
+// Both credential add-ons chain always; the loaded config declares which style is
 // active, and a registered but unused credential type is harmless.
-builder.Services.AddCredProx(builder.Configuration);
-builder.Services.AddCredProxOAuth();
-builder.Services.AddCredProxAzureTokenCredential(new DefaultAzureCredential());
+builder.Services.AddCredProx(builder.Configuration)
+    .AddIdentity()
+    .AddAzure(new DefaultAzureCredential());
 
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 app.MapReverseProxy();

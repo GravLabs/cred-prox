@@ -42,6 +42,8 @@ public class AbstractionsContractTests
         typeof(CallerAuthenticationResult),
         typeof(ICallerRegistryValidator),
         typeof(CallerRegistryEntry),
+        typeof(ICallerStore),
+        typeof(CallerKeyMatch),
     ];
 
     // Pure data holders allowed alongside the interfaces: no behavior, init-only state.
@@ -53,6 +55,7 @@ public class AbstractionsContractTests
         typeof(PipelineFeatureContext),
         typeof(CallerAuthenticationResult),
         typeof(CallerRegistryEntry),
+        typeof(CallerKeyMatch),
     ];
 
     // Contract signal types: sealed exceptions a provider throws to signal a documented

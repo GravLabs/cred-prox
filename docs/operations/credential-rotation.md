@@ -108,22 +108,20 @@ exists the absence is named, not papered over. The config-key shapes are in
 
 ## 4. Signing keys
 
-- **Outbound HMAC credential** (`CredProx.Hmac`): one `Secret` option, `secret:`
+- **Outbound HMAC credential** (the core's `Hmac` type): one `Secret` option, `secret:`
   reference allowed — replace the referenced value and the next signed request
   uses it (`HmacProvider` signs per request, no restart). There is no
   current/next pair, so any vendor-side accept-old-and-new window is the
   vendor's. No test rotates an HMAC secret live — per-request resolution is the
   mechanism; treat it as untested ground and verify against your vendor.
-- **JWT-assertion credential** (`CredProx.OAuth`): `SigningKey` or
+- **JWT-assertion credential** (`CredProx.Identity`): `SigningKey` or
   `SigningCertificate`, mutually exclusive, resolved per assertion — the same
   replace-and-go, the same test absence.
-- **Inbound caller tokens** (`CredProx.CallerTokens`): there is no signing key to
+- **Inbound caller tokens** (`CredProx.Identity`): there is no signing key to
   rotate — caller tokens are validated against the issuer's JWKS. Rotating the
   issuer's keys under the same `Authority` needs nothing from CredProx because
   the ASP.NET Core JWT handler's JWKS cache picks up the new kid — framework
-  behaviour on the host side, described as intent in
-  `CredProxCallerTokenServiceCollectionExtensions` and not a CredProx-pinned
-  guarantee; the vendor-token direct-JWKS path evicts its cache only on
+  behaviour on the host side, not a CredProx-pinned guarantee; the vendor-token direct-JWKS path evicts its cache only on
   key-not-found,
   `tests/CredProx.Tests/TokenExchangeProviderM31Tests.cs` pins that rule.
   Changing `Authority`, `Audience` or `MaxTokenAge` changes a startup snapshot:

@@ -319,7 +319,7 @@ static void Parsers(string input)
 
         // canonical-string separator injection: two header layouts that are distinct
         // documents may only canonicalize identically if signing REFUSES (the boundary-
-        // binding rule of qitem-20261120025812-1841885579827f16: strings differ OR signing
+        // binding rule of the 2026-11-20 boundary-binding decision: strings differ OR signing
         // refuses — a collision without refusal is the finding).
         // Values go on with TryAddWithoutValidation, DELIBERATELY skipping the BCL header
         // validator: the validated shape was measured unreachable (2026-11-20) — a value
@@ -390,14 +390,14 @@ static void Parsers(string input)
     }
 }
 
-// Media-type classification runs as its own target (qitem-20261120022245): inside the
+// Media-type classification runs as its own target (added 2026-11-20): inside the
 // old combined shape it only ever saw fuzz-bytes that MediaTypeHeaderValue.TryParse
 // refused, making the leg unreachable; its own corpus holds parseable media types so
 // classification actually executes. Must not throw on a parsed value — an exception
 // escaping here is the finding (nothing is caught).
 // The leg used to re-call the three shipped predicates and compare the two results.
 // That oracle is unfireable by construction — same pure calls, same argument — and a
-// check that cannot fail is not kept (qitem-20261120031636-7499bc7183b0f7e9). The leg
+// check that cannot fail is not kept (fuzz-target audit, 2026-11-20). The leg
 // now compares the shipped classification against an independent reading of the same
 // documented mapping (the XML docs of ResponseBodies), computed here over the parsed
 // value with its own string logic. A disagreement — from a change on either side — is

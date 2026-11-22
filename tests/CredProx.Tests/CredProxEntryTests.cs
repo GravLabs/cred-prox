@@ -1,6 +1,7 @@
 using CredProx;
 using CredProx.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -24,6 +25,7 @@ public class CredProxEntryTests
     public void AddCredProx_RegistersPipeline_AndChains()
     {
         var services = new ServiceCollection();
+        services.AddCredProx(new ConfigurationBuilder().Build());
         var builder = services.AddReverseProxy();
 
         var returned = builder.AddCredProx();
@@ -38,6 +40,7 @@ public class CredProxEntryTests
     public void AddCredProx_PipelineOrdersRegisteredFeatures_ByStageNotRegistrationOrder()
     {
         var services = new ServiceCollection();
+        services.AddCredProx(new ConfigurationBuilder().Build());
         services.AddReverseProxy().AddCredProx();
         services.AddSingleton<IRequestFeature>(new StubRequestFeature(Stage.Sign));
         services.AddSingleton<IRequestFeature>(new StubRequestFeature(Stage.AuthenticateCaller));
@@ -46,21 +49,14 @@ public class CredProxEntryTests
         using var provider = services.BuildServiceProvider();
         var pipeline = provider.GetRequiredService<CredProxPipeline>();
 
-        Assert.Equal(
-            [Stage.AuthenticateCaller, Stage.AttachCredential, Stage.Sign],
-            pipeline.RequestFeatures.Select(f => f.Stage));
-    }
-
-    [Fact]
-    public void AddCredProx_WithNoFeaturesRegistered_ProducesEmptyPipeline()
-    {
-        var services = new ServiceCollection();
-        services.AddReverseProxy().AddCredProx();
-
-        using var provider = services.BuildServiceProvider();
-        var pipeline = provider.GetRequiredService<CredProxPipeline>();
-
-        Assert.Empty(pipeline.RequestFeatures);
-        Assert.Empty(pipeline.PipelineFeatures);
+        // The leg now runs through the entry, so the pipeline also carries the core's
+        // own features: the assertion is the stage-order invariant through DI, plus the
+        // three stubs present. (The empty-pipeline contract lives in
+        // StageOrderingTests.EmptyRegistration_ProducesEmptyOrderedPipeline.)
+        var stages = pipeline.RequestFeatures.Select(f => f.Stage).ToArray();
+        Assert.Equal(stages.OrderBy(s => s), stages);
+        Assert.Contains(Stage.AuthenticateCaller, stages);
+        Assert.Contains(Stage.AttachCredential, stages);
+        Assert.Contains(Stage.Sign, stages);
     }
 }

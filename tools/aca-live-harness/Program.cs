@@ -16,14 +16,14 @@ using Microsoft.Extensions.Primitives;
 //   --mode proxy         the CredProx forwarder. Credential material is NEVER in config
 //                        values or env: with KeyVault__Uri set, the stock Azure Key Vault
 //                        configuration provider (the shipped MicrosoftGraph pattern:
-//                        AddAzureKeyVault + AddCredProxConfigurationSecrets) feeds the
+//                        AddAzureKeyVault + the core entry's secret: resolver) feeds the
 //                        secret:jwt-signing-key / secret:hmac-key / secret:mtls-client-cert
 //                        (+ password) references declared in appsettings.json. The identity
 //                        is the Container App's user-assigned managed identity via
 //                        DefaultAzureCredential under ACA's env contract. Routes: /arm/*
 //                        (TokenCredential -> ARM, the first real managed-identity egress),
 //                        /jwt/*, /hmac/*, /mtls/* -> the counterparty. Every route demands
-//                        a caller key (AddCredProxCallerAuthentication); the caller
+//                        a caller key (the core's caller-key machinery); the caller
 //                        registry arrives as environment config and stores only the
 //                        SHA-256 HASH of the key value - the registry itself is not
 //                        secret material.
@@ -53,6 +53,18 @@ using Microsoft.Extensions.Primitives;
 //                        NO polling; the samples set 30s explicitly); live Azure-side
 //                        timing is the P10 witness's job, not claimed here. Exit-coded:
 //                        RELOAD PROOF OK / RELOAD PROOF FAILED.
+//   --mode acacheck      no listener (M46). Probes the SHIPPED samples/AzureContainerApps
+//                        host through its internal ingress FQDN as a Container Apps Job,
+//                        driven by scripts/live-m46-aca.sh: /health answers unauthenticated,
+//                        an X-API-Key call through /acme/* comes back 200 with the vendor
+//                        Bearer arriving at the co-located stand-in and REDACTED in the
+//                        caller's own copy ("Bearer [redacted]" - the response scrubber's
+//                        marker), the caller key value appears nowhere in the body, and a
+//                        call without the key is refused 401. One machine line per check
+//                        ("C1 PASS"/"C2 FAIL ...") + terminal ACACHECK OK / ACACHECK FAILED,
+//                        exit-coded. FAIL lines self-scrub known key values before printing:
+//                        a body that shows the raw vendor key is itself the finding, and
+//                        the log must not repeat it.
 //
 //   --smoke (with --mode proxy) full in-process offline proof: counterparty + proxy +
 //   battery checks in one process with generated material - no vault, no Azure. Proves
@@ -82,8 +94,9 @@ return mode switch
     "proxy" => await ProxyRunner.RunAsync(),
     "counterparty" => await CounterpartyRunner.RunAsync(),
     "battery" => await BatteryRunner.RunAsync(args),
+    "acacheck" => await AcaCheckRunner.RunAsync(args),
     "reloadproof" => await ReloadProofRunner.RunAsync(),
-    _ => Fail($"unknown --mode '{mode}' (expected proxy | counterparty | battery | reloadproof)"),
+    _ => Fail($"unknown --mode '{mode}' (expected proxy | counterparty | battery | acacheck | reloadproof)"),
 };
 
 static int Fail(string message)
@@ -259,25 +272,19 @@ internal static class ProxyRunner
                 new AzureKeyVaultConfigurationOptions { ReloadInterval = TimeSpan.FromSeconds(30) });
         }
 
-        // The TokenCredential TYPE is registered by the AzureKeyVault package's helper
-        // (samples/MicrosoftGraph identity variant, Program.cs:21) - the built-in set
+        // The TokenCredential TYPE arrives with the chained AddAzure(credential) call
+        // (CredProx.Azure, the samples/MicrosoftGraph identity shape) - the built-in set
         // alone does not know it. Smoke runs with no Azure environment, so the arm
         // credential is a fixed-token stub there: it still exercises provider attach ->
         // Bearer header -> forwarding, but the managed identity is proven ONLY by the
         // live battery (P5).
-        builder.Services.AddCredProxAzureTokenCredential(
-            smoke ? new SmokeTokenCredential() : RuntimeIdentity.Credential());
-        builder.Services.AddCredProxTokenCache();
-        builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-        builder.Services.AddCredProxBuiltInCredentials();
-        builder.Services.AddCredProxOAuth();
-        builder.Services.AddCredProxHmac();
-        builder.Services.AddCredProxCredentials(builder.Configuration);
-        builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
+        builder.Services.AddCredProx(builder.Configuration)
+            .AddIdentity()
+            .AddAzure(smoke ? new SmokeTokenCredential() : RuntimeIdentity.Credential());
         builder.Services.AddRouting();
         builder.Services.AddReverseProxy()
             .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-            .AddCredProx(builder.Configuration);
+            .AddCredProx();
 
         if (smoke)
         {
@@ -608,6 +615,219 @@ internal static class BatteryRunner
     }
 
     private static int BatteryFail(string message)
+    {
+        Console.Error.WriteLine($"error: {message}");
+        return 1;
+    }
+
+    private static string ReadSwitch(string[] args, string name, string defaultValue)
+    {
+        var value = defaultValue;
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], name, StringComparison.Ordinal))
+            {
+                value = args[i + 1];
+            }
+        }
+
+        return value;
+    }
+}
+
+internal static class AcaCheckRunner
+{
+    // --mode acacheck (see the header): probes the SHIPPED samples/AzureContainerApps host.
+    // The header name is the sample's shipped CredProx:CallerAuth:HeaderName (X-API-Key),
+    // NOT this harness's own proxy registration (Wire.CallerKeyHeader is X-CredProx-Key) -
+    // the probe speaks the header the host under test actually accepts.
+    private const string CallerKeyHeader = "X-API-Key";
+
+    // The response scrubber's replacement marker (CredProx's AuditRedactor.Masked). Its
+    // presence after a forwarded Bearer is the caller-side proof that the vendor received
+    // the credential and the caller's own copy was redacted - the same shape the sample's
+    // offline smoke cell pins (tests/CredProx.SampleSmokes).
+    private const string ScrubbedMarker = "[redacted]";
+
+    public static async Task<int> RunAsync(string[] args)
+    {
+        var proxyBase = ReadSwitch(args, "--proxy", "");
+        if (string.IsNullOrEmpty(proxyBase))
+        {
+            return AcaFail("acacheck needs --proxy https://<internal-ingress-fqdn>");
+        }
+
+        Console.WriteLine($"acacheck UTC {DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ} build " +
+            (Environment.GetEnvironmentVariable("DEPLOY_IMAGE_DIGEST") is { Length: > 0 } stamp ? stamp : "unstamped"));
+
+        var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+        // "__" in env NAMES normalizes to ":" (the battery documents the root cause) - the
+        // vault URI is only reachable as "KeyVault:Uri". In-cluster the job gets the vault
+        // URI + the environment's managed identity; an offline loopback run hands both key
+        // values through CREDPROX_SMOKE_* env instead.
+        var keyVaultUri = configuration["KeyVault:Uri"];
+
+        var callerKey = configuration["CredProx:Secrets:caller-key"] ?? configuration["CREDPROX_SMOKE_CALLER_KEY"];
+        if (string.IsNullOrEmpty(callerKey) && !string.IsNullOrEmpty(keyVaultUri))
+        {
+            // Same no-silent-failure posture as the battery: probe the vault directly and
+            // report what it actually said (status + vault URL, never secret values).
+            try
+            {
+                // The M46 lifecycle writes the caller key VALUE under a validator-inert
+                // CredProxTest-- name (scripts/live-m46-aca.sh NAMES), not as a CredProx
+                // secret key: the job fetches it by name, so it never needs to bind.
+                var direct = new SecretClient(new Uri(keyVaultUri), RuntimeIdentity.Credential())
+                    .GetSecret(AcaCallerKeySecretName);
+                callerKey = direct.Value.Value;
+            }
+            catch (Exception ex)
+            {
+                return AcaFail($"vault fetch of {AcaCallerKeySecretName} failed: " +
+                    $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        if (string.IsNullOrEmpty(callerKey))
+        {
+            return AcaFail($"acacheck needs the caller key: vault secret {AcaCallerKeySecretName} " +
+                "(KeyVault__Uri + managed identity) or CREDPROX_SMOKE_CALLER_KEY (offline).");
+        }
+
+        // The raw vendor key value is OPTIONAL for this probe: knowing it lets C2 also
+        // assert its absence from the caller's copy. Not available = shape assert only,
+        // said out loud on stderr - never silently downgraded.
+        var vendorKey = configuration["CredProx:Secrets:acme-vendor-key"] ?? configuration["CREDPROX_SMOKE_VENDOR_KEY"];
+        if (string.IsNullOrEmpty(vendorKey) && !string.IsNullOrEmpty(keyVaultUri))
+        {
+            try
+            {
+                vendorKey = new SecretClient(new Uri(keyVaultUri), RuntimeIdentity.Credential())
+                    .GetSecret(AcaVendorKeySecretName).Value.Value;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"warn: vault fetch of {AcaVendorKeySecretName} failed " +
+                    $"({ex.GetType().Name}) - C2 asserts the scrubbed shape only, not vendor-key absence.");
+            }
+        }
+
+        if (string.IsNullOrEmpty(vendorKey))
+        {
+            Console.Error.WriteLine("warn: vendor key value not available to this probe - C2 asserts the " +
+                "scrubbed Bearer shape and caller-key absence, not vendor-key absence.");
+        }
+
+        // Strict TLS: the internal ingress serves a Microsoft-issued certificate; a chain
+        // failure is a finding, not something to paper over (battery posture).
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        proxyBase = proxyBase.TrimEnd('/');
+        var failed = 0;
+
+        failed += await CheckAsync("C1", "health unauthenticated", async () =>
+        {
+            var response = await client.GetAsync($"{proxyBase}/health");
+            return response.StatusCode == System.Net.HttpStatusCode.OK
+                ? null
+                : Describe(response, await response.Content.ReadAsStringAsync(), callerKey, vendorKey);
+        });
+
+        failed += await CheckAsync("C2", "caller-key call reaches the vendor, scrubbed for the caller", async () =>
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{proxyBase}/acme/orders");
+            request.Headers.TryAddWithoutValidation(CallerKeyHeader, callerKey);
+            var response = await client.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+            if (response.StatusCode != System.Net.HttpStatusCode.OK)
+            {
+                return Describe(response, body, callerKey, vendorKey);
+            }
+
+            // The co-located stand-in echoes the Authorization it received verbatim; the
+            // scrubber must have replaced the value. "Bearer [redacted]" therefore proves
+            // both halves at once: arrival at the vendor AND caller-side redaction.
+            if (!body.Contains($"Bearer {ScrubbedMarker}", StringComparison.Ordinal))
+            {
+                return Describe(response, body, callerKey, vendorKey);
+            }
+
+            if (body.Contains(callerKey, StringComparison.Ordinal))
+            {
+                return "caller key value present in the response body";
+            }
+
+            if (!string.IsNullOrEmpty(vendorKey) && body.Contains(vendorKey, StringComparison.Ordinal))
+            {
+                return "raw vendor key value present in the response body (scrubber missed)";
+            }
+
+            return null;
+        });
+
+        failed += await CheckAsync("C3", "no caller key refused 401", async () =>
+        {
+            var response = await client.GetAsync($"{proxyBase}/acme/orders");
+            var body = await response.Content.ReadAsStringAsync();
+            if (response.StatusCode != System.Net.HttpStatusCode.Unauthorized)
+            {
+                return Describe(response, body, callerKey, vendorKey);
+            }
+
+            return body.Contains(callerKey, StringComparison.Ordinal)
+                ? "caller key value present in the refusal body"
+                : null;
+        });
+
+        Console.WriteLine(failed == 0 ? "ACACHECK OK" : "ACACHECK FAILED");
+        return failed == 0 ? 0 : 1;
+    }
+
+    // null = pass; a non-null string is the printed FAIL detail. It can only carry a body
+    // after known key values have been masked - a body that leaked the raw vendor key is
+    // the finding itself, and the log must not repeat it.
+    private static string Describe(
+        HttpResponseMessage response, string body, string callerKey, string? vendorKey)
+    {
+        var safe = body;
+        if (safe.Contains(callerKey, StringComparison.Ordinal))
+        {
+            safe = safe.Replace(callerKey, ScrubbedMarker, StringComparison.Ordinal);
+        }
+
+        if (!string.IsNullOrEmpty(vendorKey) && safe.Contains(vendorKey, StringComparison.Ordinal))
+        {
+            safe = safe.Replace(vendorKey, ScrubbedMarker, StringComparison.Ordinal);
+        }
+
+        return $"status={(int)response.StatusCode} body={Wire.Truncate(safe, 180)}";
+    }
+
+    private static async Task<int> CheckAsync(string id, string what, Func<Task<string?>> check)
+    {
+        string? failure;
+        try
+        {
+            failure = await check();
+        }
+        catch (Exception ex)
+        {
+            failure = $"{ex.GetType().Name}: {ex.Message}";
+        }
+
+        Console.WriteLine(failure is null ? $"{id} PASS {what}" : $"{id} FAIL {what} {failure}");
+        return failure is null ? 0 : 1;
+    }
+
+    // Pinned against scripts/live-m46-aca.sh by AcaScaffoldTests (live finding
+    // 2026-11-22: acacheck asked for the M29 battery name and the job failed).
+    internal const string AcaCallerKeySecretName = "CredProxTest--aca-caller-key";
+
+    // Same pinning discipline for the OPTIONAL vendor key: a name mismatch
+    // here only warns while C2 still passes on shape (the fetch path below),
+    // so nothing but the cross-file pin catches a material-side rename.
+    internal const string AcaVendorKeySecretName = "CredProx--Secrets--acme-vendor-key";
+
+    private static int AcaFail(string message)
     {
         Console.Error.WriteLine($"error: {message}");
         return 1;

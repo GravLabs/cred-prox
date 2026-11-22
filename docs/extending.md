@@ -2,7 +2,9 @@
 
 Everything the built-in credential types, authenticators and secret sources use is
 public. A third-party package is written the same way ours are: implement a contract
-from `CredProx.Abstractions`, expose one `AddCredProx…` registration call, and prove
+from `CredProx.Abstractions` (except the caller-registry contributor contract, which
+lives in the core), chain one extension method on the `CredProxBuilder` the
+entry hands back (exactly as `.AddIdentity()` and `.AddOperations()` do), and prove
 the behavior with the conformance suites in `CredProx.Testing`. The smallest complete
 example is [`samples/CustomPlugin`](../samples/CustomPlugin) — a credential type in
 ~50 lines plus its conformance cells.
@@ -11,10 +13,10 @@ example is [`samples/CustomPlugin`](../samples/CustomPlugin) — a credential ty
 
 | Seam | Contract | You register with |
 |---|---|---|
-| Caller authenticator | `ICallerAuthenticator` | `AddCredProxCallerAuthenticator<T>()` — registering one brings the caller policy pipeline with it |
-| Registry validator | `ICallerRegistryValidator` | `AddCredProxCallerRegistryValidator<T>()` — a fail-closed startup check over the built caller registry |
-| Registry contributor | `ICallerRegistryContributor` | register your implementation; the core builds the registry from all contributors, generation-tracked |
-| Credential type | `ICredentialProvider<TOptions>` | `AddCredProxCredentialType<TProvider, TOptions>(typeName)` |
+| Caller authenticator | `ICallerAuthenticator` | `WithCallerAuthenticator<T>()` on the builder — registering one brings the caller policy pipeline with it |
+| Registry validator | `ICallerRegistryValidator` | `WithCallerRegistryValidator<T>()` — a fail-closed startup check over the built caller registry |
+| Registry contributor | `ICallerRegistryContributor` | `WithCallerRegistryContributor<T>()`; the core builds the registry from all contributors, generation-tracked |
+| Credential type | `ICredentialProvider<TOptions>` | `WithCredentialType<TProvider, TOptions>(typeName)` |
 | Secret source | `ISecretSource` (+ `ISecretAccessor` for resolution) | register the source; `secret:` references then resolve through it, unresolvable names refuse startup |
 | Pipeline feature | `IPipelineFeature` (plus the request / connection / response flavours) | register the feature; stages run in a fixed order, and `AbortAsync` short-circuits the pipeline |
 | Body hand-off | `CredProxRequestState` | read-only: features that need the whole outbound body buffer through this measured seam, with a byte cap |
@@ -23,7 +25,7 @@ example is [`samples/CustomPlugin`](../samples/CustomPlugin) — a credential ty
 
 The contract is in [ADR-0006](adr/0006-replace-or-turn-off-a-built-in.md): a single
 service is replaced **host-first** — register your implementation before the
-`AddCredProx…` call and yours is the one used; a pipeline stage is **extend-only** —
+`AddCredProx` entry call and yours is the one used; a pipeline stage is **extend-only** —
 you add a stage beside the built-ins, you do not replace or remove one, because the
 stages are what lets CredProx promise a credential never reaches the upstream and a
 secret never reaches the caller; and an optional stage is turned off **only by its
@@ -36,9 +38,9 @@ The single services, and how to replace each:
 | `ITokenCache` (in-memory) | Caches vendor tokens, one flight per key, early refresh | Register your `ITokenCache` before `AddCredProx` | No switch — the credential path needs a cache; replace it rather than remove it |
 | `ISecretSource` (configuration-backed) | Resolves `secret:` references from `CredProx:Secrets` and reloads on config change | Register your `ISecretSource` before `AddCredProx` (your source owns its own reload) | No switch — it is the core's secret plumbing |
 | `TimeProvider.System` | The clock everything time-based reads | Register your `TimeProvider` before `AddCredProx` (a test clock just works) | No switch |
-| `ICallerStore` (CallerKeys) | Maps a presented caller key to its caller | Register your `ICallerStore` before `AddCredProxCallerAuthentication` | The caller-key feature is opt-in: without its call and callers in config there is nothing to turn off |
-| `ICallerTokenMapper` | Turns an authenticated caller token into a caller | Register your mapper before `AddCredProxCallerTokenAuthentication` | No switch — a caller token that maps to nobody is refused |
-| The caller-token validation handler | Validates the caller token (issuer, audience, expiry) | Pass `registerScheme` to `AddCredProxCallerTokenAuthentication` — your handler owns the scheme; the `MaxTokenAge` bound still applies | The caller-token feature is opt-in |
+| `ICallerStore` (caller keys) | Maps a presented caller key to its caller | Register your `ICallerStore` before `AddCredProx` | The caller-key feature is opt-in: without a key hash under `CredProx:Callers` there is nothing to turn off |
+| `ICallerTokenMapper` | Turns an authenticated caller token into a caller | Register your mapper before `.AddIdentity()` | No switch — a caller token that maps to nobody is refused |
+| The caller-token validation handler | Validates the caller token (issuer, audience, expiry) | Pass `registerScheme` to `.AddIdentity(registerScheme: …)` — your handler owns the scheme; the `MaxTokenAge` bound still applies | The caller-token feature is opt-in |
 | The forwarder client factory | Builds the outbound `HttpClient` | Subclass `CredProxForwarderHttpClientFactory` and `Replace` it after the CredProx calls | No switch — outbound always goes through it |
 | `IAuditSink` registrations | Where audit records go | Add your sinks; the recorder itself is not replaceable (that is deliberate) | `CredProx:Audit:Enabled=false` |
 
@@ -83,9 +85,12 @@ Four interactions worth knowing before you flip a switch:
 
 ## The rules that make a package first-class
 
-- **No `InternalsVisibleTo`.** The built-in packages open their internals only to their
-  own test assemblies. An extension package must compile against the public surface
-  alone — if something you need is internal, that is an API gap worth an issue.
+- **No `InternalsVisibleTo` outside the repository.** The built-in core opens its
+  internals to this repository's own test, bench and fuzz projects and to the companion
+  packages that ship in lockstep with it (`CredProx.Identity`, `CredProx.Azure`,
+  ADR-0007); nothing outside this repository gets them. An extension package must
+  compile against the public surface alone — if something you need is internal, that is
+  an API gap worth an issue.
 - **Unregistered names are refused at startup, never ignored.** A credential section
   naming a `Type` nobody registered fails startup, and there is no discovery scan and
   no default fallback. Your package must call its registration explicitly; the error

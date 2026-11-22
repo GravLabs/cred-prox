@@ -19,8 +19,20 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# Provenance guard BEFORE anything starts: if the image this topology would run
+# carries CredProx library bytes from another commit, refuse the run (attempt 1 of
+# the 0.14.0 release soak ran a stale tag; compose never rebuilds an existing one).
+# The guard prints its own marker line; a refusal exits here, no container and no
+# run dir exists. The output is kept so the run dir can carry it (self-attesting
+# evidence: the preserved dir proves which image it ran under).
+mkdir -p "$HERE/build"
+bash "$HERE/scripts/stamp-guard.sh" > "$HERE/build/stamp-guard.last.out" 2>&1 || {
+  cat "$HERE/build/stamp-guard.last.out"; exit 1; }
+cat "$HERE/build/stamp-guard.last.out"
+
 RUN="/tmp/m33-soak-$(date -u +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN/journal"; touch "$RUN/stats.csv" "$RUN/k6-line.csv"
+cp "$HERE/build/stamp-guard.last.out" "$RUN/stamp-guard.log"
 # the k6 container's user must be able to create the summary and append the CSV line
 chmod 777 "$RUN"; chmod 666 "$RUN/k6-line.csv" "$RUN/stats.csv"
 "$HERE/scripts/init-secrets.sh" "$RUN" || { echo "INIT-FAIL"; exit 1; }
@@ -46,7 +58,7 @@ curl -fsS http://127.0.0.1:18080/healthz >/dev/null || { echo "HEALTH-FAIL (see:
 
 # the step is bounded by the remaining budget (fine enough to still sample load) and the
 # loop's TERM trap reaps the sleep IT started: killing only the loop orphaned the sleep,
-# which held the caller's stdout pipe for up to an hour after TEARDOWN-DONE (qitem-20261120004151)
+# which held the caller's stdout pipe for up to an hour after TEARDOWN-DONE (found 2026-11-20)
 LOAD_LIMIT="${SOAK_LOAD_LIMIT:-40}"
 (
   end=$(( $(date +%s) + (MINUTES + 10) * 60 ))
@@ -67,7 +79,7 @@ LOAD_LIMIT="${SOAK_LOAD_LIMIT:-40}"
       echo "BACKOFF: load $load5 > $LOAD_LIMIT - stopping load generator"
       # `compose stop k6` never touches the `compose run --rm` one-off (it is not a
       # project service) and host pkill cannot see inside its namespace — the run kept
-      # load high after BACKOFF (qitem-20261120021049). The one-off carries this run's
+      # load high after BACKOFF (found 2026-11-20). The one-off carries this run's
       # label, so stop exactly the containers this run started. Marker FIRST and stop
       # tolerant (F-4): a failed stop — empty id list (no-arg docker stop, rc=1) or an
       # already-gone container — must never preempt the marker, whatever shell options

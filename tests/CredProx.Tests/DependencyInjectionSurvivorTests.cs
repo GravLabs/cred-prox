@@ -1,7 +1,6 @@
 using System.Net.Http;
 using CredProx;
 using CredProx.Abstractions;
-using CredProx.CallerKeys;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

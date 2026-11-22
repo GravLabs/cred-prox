@@ -2,7 +2,6 @@ using System.Security.Claims;
 using System.Threading;
 using CredProx;
 using CredProx.Abstractions;
-using CredProx.CallerKeys;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

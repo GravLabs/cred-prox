@@ -99,14 +99,11 @@ public sealed class NginxMTlsTests : IClassFixture<NginxMTlsFixture>
             .ConfigureAppConfiguration(build => build.Add(source))
             .ConfigureServices((context, services) =>
             {
-                services.AddCredProxTokenCache();
-                services.AddCredProxConfigurationSecrets(context.Configuration);
-                services.AddCredProxBuiltInCredentials();
-                services.AddCredProxCredentials(context.Configuration);
+                services.AddCredProx(context.Configuration);
                 services.AddRouting();
                 services.AddReverseProxy()
                     .LoadFromConfig(context.Configuration.GetSection("ReverseProxy"))
-                    .AddCredProx(context.Configuration);
+                    .AddCredProx();
 
                 // Real sockets transport; the throwaway CA is not in the machine trust
                 // store, so the factory pins the server certificate it expects instead.

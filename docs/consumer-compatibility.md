@@ -13,20 +13,22 @@ bash scripts/consumer-compat.sh            # all cells
 bash scripts/consumer-compat.sh web drift  # selected cells
 ```
 
-The script needs the .NET 10 SDK and Docker. It resolves CredProx packages
-from the machine-local CredProx feed — declared as a source in the *user-level*
-NuGet config on publishing machines. Its URL is never committed anywhere, and
-the script itself references the source only by key (`credprox`). Scratch
+The script needs the .NET 10 SDK and Docker. Each cell writes its own
+`NuGet.config` with a `<clear/>` and a `credprox-build` source pointing at
+`artifacts/packages`, so a run always measures the packages built from that
+checkout — no user-level source and no registry URL anywhere in the cells. Scratch
 projects default to `artifacts/consumer-compat/` in the repo (override with
 `M32_SCRATCH`); each run uses an isolated `NUGET_PACKAGES` cache under that
 scratch and clears the per-run HTTP cache, so a published package can be
 re-verified the same day it changes.
 
-Results below were measured on 2026-11-19 against **CredProx 0.13.0** built from
-the release-prep commit `dc097b3ae16b7d4878817bb44f7733f8937abae8` from
+Results below were measured on 2026-11-21 against **CredProx 0.15.0** built from
+the release-prep commit `fa1ecb2d3c2a770c39bacef316d06cd90ee52c53` from
 the local feed (all fifteen cells, cold caches), linux-x64, .NET SDK 10.0.115 —
-the same matrix passed at 0.12.0 on 2026-11-17 (`e10f18c0a622d75c3af6313d2d75cc9234c2f25c`)
-and at 0.8.2 on 2026-11-07. Every smoke asserts the
+15/15 by the builder and 15/15 again on an independent re-run during release
+checks; the same matrix passed at 0.13.0 on 2026-11-19
+(`dc097b3ae16b7d4878817bb44f7733f8937abae8`), at 0.12.0 on 2026-11-17
+(`e10f18c0a622d75c3af6313d2d75cc9234c2f25c`) and at 0.8.2 on 2026-11-07. Every smoke asserts the
 credential contract end to end: the caller-side echo shows `[redacted]` while
 the raw credential is proven vendor-side in the WireMock request journal.
 
@@ -34,20 +36,20 @@ the raw credential is proven vendor-side in the WireMock request journal.
 
 | Cell | Scenario | Result | Notes |
 | --- | --- | --- | --- |
-| web | minimal ASP.NET Core web app, `AddCredProx*` + config-loaded YARP route | pass | warning-clean under `-warnaserror`, no suppression needed |
+| web | minimal ASP.NET Core web app, one `AddCredProx(config)` entry + chained add-ons, no-arg `.AddCredProx()` on the proxy, config-loaded YARP route | pass | warning-clean under `-warnaserror`, no suppression needed |
 | webapi | `dotnet new webapi` + controllers, CredProx route alongside them | pass | controllers keep working; run with `--no-launch-profile` or the profile's port overrides `ASPNETCORE_URLS` |
 | auth | app with ASP.NET authentication + custom middleware in front of the proxy | pass | mount `MapReverseProxy` after `UseAuthentication`/`UseAuthorization`; middleware-set headers reach the upstream through the proxy |
 | container | `dotnet publish /t:PublishContainer` + `docker run` | pass | tag gotcha: `ContainerImageTag` is tag-only (`CONTAINER2007`); the repo name goes in `ContainerImageName` |
 | net8 | class library targeting `net8.0` adds the package | refuses, as designed | exact text below |
 | net9 | class library targeting `net9.0` adds the package | refuses, as designed | exact text below |
-| drift | CPM + `-warnaserror`: CredProx, CredProx.AzureKeyVault, latest `Yarp.ReverseProxy`, `Azure.Identity` 1.17.0 | pass | no `NU1605`; `Azure.Core` converges to a single 1.49.0 for both consumers — see drift notes |
+| drift | CPM + `-warnaserror`: CredProx, CredProx.Azure, `Yarp.ReverseProxy` 2.3.0, `Azure.Identity` 1.17.0 as central pins | pass | no `NU1605`; `Azure.Core` converges to a single 1.49.0 for both consumers — see drift notes |
 | testing | xunit consumer project running `CredentialProviderConformanceTests<TProvider,TOptions>` | pass | needs `NoWarn` of `CREDPROX001` (the suite is `[Experimental]`) |
 | trim | web app `PublishTrimmed` self-contained; console `PublishAot` | measured, **not supported** | see trimming section |
-| keys | minimal web app adding `CredProx` + `CredProx.CallerKeys` | pass | valid key 200, missing/wrong key 401, key value never reaches upstream |
-| keytokens | as `keys` plus `CredProx.CallerTokens` | pass | the two caller-auth packages coexist; key path green (token path not exercised) |
-| hmac | web app adding `CredProx.Hmac`, signed request against WireMock | pass | an independent verifier accepted the signature; an over-cap body answered 413 |
-| loginexchange | web app adding `CredProx.LoginExchange` against a stand-in login | pass | login session attached; blocked partition refused before any vendor call |
-| oauth | web app adding `CredProx.OAuth`, token endpoint against WireMock | pass | bearer attached from the token endpoint; refused client answered 502 without reaching upstream |
+| keys | minimal web app adding `CredProx`; caller keys are core and config-driven | pass | valid key 200, missing/wrong key 401, key value never reaches upstream |
+| keytokens | as `keys` plus `CredProx.Identity` | pass | core caller keys and the Identity caller-token package coexist; key path green (token path not exercised) |
+| hmac | web app adding `CredProx`, an `Hmac` credential in config, signed request against WireMock | pass | an independent verifier accepted the signature; an over-cap body answered 413 |
+| loginexchange | web app adding `CredProx`, a `LoginExchange` credential in config, against a stand-in login | pass | login session attached; blocked partition refused before any vendor call |
+| oauth | web app adding `CredProx` + `CredProx.Identity`, token endpoint against WireMock | pass | bearer attached from the token endpoint; refused client answered 502 without reaching upstream |
 | operations | web app adding `CredProx.Operations` (throttle + resilience + health from the package) | pass | credential attached through the pipeline; health probes report Healthy |
 
 ## Framework support
@@ -58,7 +60,7 @@ the raw credential is proven vendor-side in the WireMock request journal.
 error NU1202: Package CredProx 0.8.2 is not compatible with net8.0 (.NETCoreApp,Version=v8.0). Package CredProx 0.8.2 supports: net10.0 (.NETCoreApp,Version=v10.0)
 ```
 
-The same shape appears for `net9.0` and for the other three packages. This is
+The same shape appears for `net9.0` and for the other five packages. This is
 intentional: the credential pipeline uses .NET 10 APIs, and a restore-time
 refusal beats a runtime surprise.
 
@@ -87,11 +89,11 @@ hygiene diagnostics fire before any conflict ever appears:
   flagged as unnecessary (transitive package pruning). Don't pin them
   explicitly; let the shared framework resolve them.
 
-With those resolved, a drift project pinning the latest `Yarp.ReverseProxy` and
-`Azure.Identity` 1.17.0 restores and builds warning-free. The Azure.Core
-collision the Key Vault package is most likely to cause resolves cleanly:
-`dotnet nuget why` shows a single `Azure.Core (v1.49.0)` reached through both
-`Azure.Identity` and `CredProx.AzureKeyVault`, and no downgrade diagnostic
+With those resolved, a drift project pinning `Yarp.ReverseProxy` 2.3.0 and
+`Azure.Identity` 1.17.0 as central packages restores and builds warning-free.
+The Azure.Core collision the Azure package is most likely to cause resolves
+cleanly: `dotnet nuget why` shows a single `Azure.Core (v1.49.0)` reached
+through both `Azure.Identity` and `CredProx.Azure`, and no downgrade diagnostic
 (`NU1605`) appears.
 
 ## CredProx.Testing from the outside
@@ -123,17 +125,21 @@ Measured, and the answer is deliberately conservative:
   deployments are not supported.**
 - **NativeAOT:** a console probe rooting the CredProx entry-point types
   (`PublishAot`, linux-x64) compiles to a native binary with zero IL
-  diagnostics **for that root set**. That is one probe against four entry
-  points — not a whole-product claim. **NativeAOT is not supported.**
+  diagnostics **for that root set**. That is one probe against five rooted
+  entry-point types (`CredProxAuth`, `CredProxMetadata`, `CredProxBuilder`,
+  `CredProxBuilderExtensions`, `CredProxReverseProxyBuilderExtensions`) —
+  not a whole-product claim. **NativeAOT is not supported.**
 
 ## Consumer-visible API notes
 
 - The DI-based proxy setup — the one-call `AddCredProx(builder.Configuration)`
-  plus `AddReverseProxy().…AddCredProx(builder.Configuration)` — is
-  warning-clean under `-warnaserror` with no suppression. The granular calls
-  (`AddCredProxTokenCache`, `AddCredProxConfigurationSecrets`,
-  `AddCredProxBuiltInCredentials`, `AddCredProxCredentials`) remain available
-  and were the shape measured at 0.8.2.
+  (chained add-on calls per package, ADR-0007) plus
+  `AddReverseProxy().…AddCredProx()` — is warning-clean under `-warnaserror`
+  with no suppression. The granular registration calls that were public before
+  0.15 are internal now; the entry and the chained shape are the surface.
+  The matrix rows above record the 0.15.0 shape: the cells install what the
+  checkout packs into `artifacts/packages`, no longer a per-published-version
+  view — and were measured against the 0.15.0 packages in release prep.
 - Individual `[Experimental(CREDPROX001)]` surfaces — the conformance suite,
   and direct `typeof`/reflection on annotated marker types — require
   suppressing exactly `CREDPROX001`. Do not blanket-suppress.

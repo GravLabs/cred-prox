@@ -18,10 +18,11 @@ provider. The options implement `IHasAttachment` to say where the value goes (he
 `ITokenCache` — which is what buys single-flight, per-partition isolation and
 refresh-on-401 for free. Failure messages name the status, never a body or a secret.
 
-**2. The registration** ([Program.cs](Program.cs)) — one explicit line:
+**2. The registration** ([Program.cs](Program.cs)) — one chained seam call:
 
 ```csharp
-builder.Services.AddCredProxCredentialType<VendorSessionProvider, VendorSessionOptions>("VendorSession");
+builder.Services.AddCredProx(builder.Configuration)
+    .WithCredentialType<VendorSessionProvider, VendorSessionOptions>("VendorSession");
 ```
 
 (plus `AddHttpClient()`, since the provider takes `IHttpClientFactory` from DI — hosts

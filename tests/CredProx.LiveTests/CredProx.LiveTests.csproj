@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- On-demand live runs against real vendors (plan M46). DELIBERATELY outside
+         CredProx.slnx, like the vendor stub projects and the fuzz harness: a plain
+         solution build or test never compiles or discovers this assembly, and CI has
+         no path to it. The entry point is scripts/live-run.sh; cells without their
+         machine-local env file skip loudly. Trait Layer=Live marks the cells that
+         reach a real vendor; Layer=Offline marks the scaffold's own always-local
+         cells (witness proof, env-file contract, leak scanner). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The witness is its own project (exec'd via DOTNET_STARTUP_HOOKS); keep the
+         nested project's sources and obj out of this assembly's glob. -->
+    <Compile Remove="Witness/**" />
+    <None Remove="Witness/**" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- The AgentTokens live cell mints REAL Entra app tokens with the run's
+         client secrets (ClientSecretCredential) — the same stack the samples
+         use, same CPM pins. -->
+    <PackageReference Include="Azure.Identity" />
+    <PackageReference Include="Azure.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Builds the sample and the witness first; the fixtures exec the produced dlls
+         as their own processes, so no assembly is referenced here. -->
+    <ProjectReference Include="..\..\samples\GitHubApp\GitHubApp.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\GitHubApp\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AiGateway\AiGateway.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AiGateway\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\MicrosoftGraph\MicrosoftGraph.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AgentTokens\AgentTokens.csproj" ReferenceOutputAssembly="false" />
+    <!-- The aca loopback cells exec these three dlls (host + shipped stand-in +
+         acacheck harness), same no-assembly-reference discipline as above. -->
+    <ProjectReference Include="..\..\samples\AzureContainerApps\AzureContainerApps.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AzureContainerApps\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\tools\aca-live-harness\AcaLiveHarness.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="Witness\CredProx.LiveWitness.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

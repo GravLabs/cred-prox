@@ -89,8 +89,9 @@ public sealed class CallerOperationRule
 /// A configured caller: its identity, its operation allow-list (an empty list means every
 /// operation is allowed — the allow-list is opt-in per caller) and its request budget
 /// (<see langword="null"/> means unlimited, also opt-in). Authentication
-/// material — caller keys under <c>CredProx.CallerKeys</c>, token client ids under
-/// <c>CredProx.CallerTokens</c> — is read by the package that owns it, never by the core.
+/// material — caller keys and token client ids under <c>CredProx:Callers</c> — is
+/// validated by the layer that owns the path: caller keys by the core, caller tokens
+/// by <c>CredProx.Identity</c>.
 /// </summary>
 [Experimental("CREDPROX001")]
 public sealed class CallerDefinition

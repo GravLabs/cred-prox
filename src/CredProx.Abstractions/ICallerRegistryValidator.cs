@@ -14,7 +14,7 @@ namespace CredProx.Abstractions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Register through <c>AddCredProxCallerRegistryValidator&lt;TValidator&gt;</c> (or the
+/// Register through <c>WithCallerRegistryValidator&lt;TValidator&gt;()</c> (or the
 /// plain singleton registration). A validator is a pure function of the current
 /// configuration: no side effects, nothing cached, no assumption about which other
 /// validators ran. Cross-caller rules — one client id claimed by two callers — are why

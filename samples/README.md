@@ -8,9 +8,13 @@ only**, with no vendor-specific C#.
 **Start here:** AgentTokens for AI agents on Entra, then AgentEgress, AiGateway,
 MicrosoftGraph, OAuthKeycloak, ADP, TokenExchange and CallerApiKey. QuickStart is the
 smallest host. The README's "Start here" table maps each one to the problem it solves.
-Every host is production-shaped: a short config-driven `Program.cs`, offline settings in
-`appsettings`, a `StubApi/` stand-in project where the vendor is stood in locally, and a
-`smoke.sh` that runs the sample's cells from `tests/CredProx.SampleSmokes`.
+Every host is a short config-driven `Program.cs` and a `smoke.sh` that runs the sample's
+cells from `tests/CredProx.SampleSmokes`, with the vendor stood in locally — per page that
+stand-in is a `StubApi/` project, a `wiremock/` mapping set, nginx in a compose file, or an
+in-process stub. The offline repoint is page-specific too: some hosts' shipped
+`appsettings.json` already points at the stub; the others repoint through
+`appsettings.Development.json`, the compose files, the page's own `export` lines, or the
+sample's own smoke cells.
 
 | Project | Demonstrates | Needs | Verified by |
 |---------|--------------|-------|-------------|
@@ -55,5 +59,6 @@ feed, `samples/nuget.config` drops the local source.)
 
 Examples read secrets from environment variables or user-secrets and fail at startup naming
 the exact missing value. Demo values that do appear (QuickStart's static key,
-OAuthKeycloak's container-local Keycloak client, ADP's WireMock stubs) are throwaway
-and only ever talk to local stubs.
+OAuthKeycloak's container-local Keycloak client, ADP's WireMock stubs) are throwaway:
+on each page's documented offline path they only ever talk to local stubs, and where a
+shipped `appsettings.json` names a real vendor, that page's offline path repoints at the stub.

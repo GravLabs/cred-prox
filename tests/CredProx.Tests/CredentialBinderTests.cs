@@ -52,12 +52,30 @@ public sealed class CredentialBinderTests
     }
 
     [Fact]
-    public void UnregisteredLoginExchangePackage_FailsStartupNamingThePackage()
+    public void BuiltInRegistration_BindsHmacWithoutAnyPackageCall()
     {
-        // The Type discriminator is unchanged by the split (ADR-0005); a credential naming
-        // the packaged type without its add-on fails like any unregistered type, and the
-        // message names the package to add. The built-in registration alone must not
-        // bring the type — that is what makes the hint reachable.
+        // M49 (ADR-0007): the Hmac type rides the core — no outside library, so the
+        // built-in registration brings it and a credential binds with no add-on call.
+        var configuration = Config(
+            ("Credentials:hmac:Type", "Hmac"),
+            ("Credentials:hmac:Secret", "vault-hmac-key"),
+            ("Credentials:hmac:SignatureHeader", "X-Signature"),
+            ("Credentials:hmac:Components:0", "method"));
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxCredentials(configuration);
+
+        var registry = services.BuildServiceProvider().GetRequiredService<CredentialRegistry>();
+        Assert.Contains("hmac", registry.Names);
+    }
+
+    [Fact]
+    public void BuiltInRegistration_BindsLoginExchangeWithoutAnyPackageCall()
+    {
+        // The LoginExchange twin of the Hmac pin above: core-resident, config-only.
         var configuration = Config(
             ("Credentials:login:Type", "LoginExchange"),
             ("Credentials:login:LoginEndpoint", "https://vendor.example/login"));
@@ -65,49 +83,47 @@ public sealed class CredentialBinderTests
         var services = new ServiceCollection();
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
-        services.AddCredProxBuiltInCredentials(); // deliberately no AddCredProxLoginExchange
+        services.AddCredProxBuiltInCredentials();
         services.AddCredProxCredentials(configuration);
 
-        var error = Assert.Throws<OptionsValidationException>(() =>
-            services.BuildServiceProvider().GetRequiredService<CredentialRegistry>());
-
-        Assert.Contains("The LoginExchange type ships in the CredProx.LoginExchange package", error.Message);
-        Assert.Contains("AddCredProxLoginExchange()", error.Message);
+        var registry = services.BuildServiceProvider().GetRequiredService<CredentialRegistry>();
+        Assert.Contains("login", registry.Names);
     }
 
     [Fact]
-    public void UnregisteredHmacPackage_FailsStartupNamingThePackage()
+    public void BuiltInPlusExplicitCalls_RegisterEachTypeOnce()
     {
-        // The Hmac twin of the LoginExchange pin above: the packaged type without its
-        // add-on fails at startup naming the package to reference and the registration
-        // to call. The built-in registration alone must not bring the type.
-        var configuration = Config(
-            ("Credentials:hmac:Type", "Hmac"),
-            ("Credentials:hmac:Secret", "vault-hmac-key"));
+        // Hosts on the 0.14 call shape (explicit AddCredProxHmac / AddCredProxLoginExchange)
+        // must not end up with the same type registered twice once the built-in batch
+        // brings those types: one CredentialTypeRegistration descriptor per type name.
+        var configuration = Config(("Credentials:none:Type", "StaticKey"), ("Credentials:none:Name", "k"));
 
         var services = new ServiceCollection();
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
-        services.AddCredProxBuiltInCredentials(); // deliberately no AddCredProxHmac
-        services.AddCredProxCredentials(configuration);
+        services.AddCredProxBuiltInCredentials();
+        services.AddCredProxHmac();
+        services.AddCredProxLoginExchange();
+        services.AddCredProxBuiltInCredentials(); // a second entry pass, same types
 
-        var error = Assert.Throws<OptionsValidationException>(() =>
-            services.BuildServiceProvider().GetRequiredService<CredentialRegistry>());
-
-        Assert.Contains("The Hmac type ships in the CredProx.Hmac package", error.Message);
-        Assert.Contains("AddCredProxHmac()", error.Message);
+        var registrations = services
+            .Where(d => d.ServiceType == typeof(CredentialTypeRegistration))
+            .Select(d => ((CredentialTypeRegistration)d.ImplementationInstance!).TypeName)
+            .ToList();
+        Assert.Equal(3, registrations.Count); // StaticKey, Hmac, LoginExchange
+        Assert.Equal(registrations.Count, registrations.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Theory]
     [InlineData("OAuthClientCredentials")]
     [InlineData("TokenExchange")]
     [InlineData("JwtAssertion")]
-    public void UnregisteredOAuthPackage_FailsStartupNamingThePackage(string type)
+    public void UnregisteredIdentityTypes_FailStartupNamingPackageAndCall(string type)
     {
-        // The OAuth twins of the Hmac and LoginExchange pins above: each packaged type
-        // without its add-on fails at startup naming the package to reference and the
-        // registration to call. The built-in registration alone must not bring any of
-        // the three types — that is what makes the hint reachable.
+        // R2 (ADR-0007, M49): a credential type whose package is not set up refuses
+        // startup naming the package AND the one call — the identity family rides
+        // CredProx.Identity from 0.15. The built-in batch must not bring any of the
+        // three types — that is what makes the refusal reachable.
         var configuration = Config(
             ("Credentials:oauth:Type", type),
             ("Credentials:oauth:TokenEndpoint", "https://vendor.example/token"));
@@ -115,14 +131,39 @@ public sealed class CredentialBinderTests
         var services = new ServiceCollection();
         services.AddCredProxTokenCache();
         services.AddCredProxConfigurationSecrets(configuration);
-        services.AddCredProxBuiltInCredentials(); // deliberately no AddCredProxOAuth
+        services.AddCredProxBuiltInCredentials(); // deliberately no CredProx.Identity setup
         services.AddCredProxCredentials(configuration);
 
         var error = Assert.Throws<OptionsValidationException>(() =>
             services.BuildServiceProvider().GetRequiredService<CredentialRegistry>());
 
-        Assert.Contains($"The {type} type ships in the CredProx.OAuth package", error.Message);
-        Assert.Contains("AddCredProxOAuth()", error.Message);
+        Assert.Contains("oauth", error.Message);
+        Assert.Contains(
+            $"Credential type '{type}' needs the CredProx.Identity package: install it and call .AddIdentity().",
+            error.Message);
+    }
+
+    [Fact]
+    public void TokenCredentialWithoutAzure_FailsStartupNamingPackageAndCall()
+    {
+        // The Azure arm of the same R2 shape: the TokenCredential type names the package
+        // and its one call.
+        var configuration = Config(
+            ("Credentials:az:Type", "TokenCredential"),
+            ("Credentials:az:Scope", "https://graph.microsoft.com/.default"));
+
+        var services = new ServiceCollection();
+        services.AddCredProxTokenCache();
+        services.AddCredProxConfigurationSecrets(configuration);
+        services.AddCredProxBuiltInCredentials(); // deliberately no CredProx.Azure setup
+        services.AddCredProxCredentials(configuration);
+
+        var error = Assert.Throws<OptionsValidationException>(() =>
+            services.BuildServiceProvider().GetRequiredService<CredentialRegistry>());
+
+        Assert.Contains(
+            "Credential type 'TokenCredential' needs the CredProx.Azure package: install it and call .AddAzure(credential).",
+            error.Message);
     }
 
     [Fact]

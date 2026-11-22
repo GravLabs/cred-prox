@@ -112,7 +112,9 @@ public sealed class ThrottleResilienceCompositionTests
         Assert.Equal("CredProx.Operations", throttle.GetType().Assembly.GetName().Name);
         Assert.Equal("CredProx.Operations", resilience.GetType().Assembly.GetName().Name);
 
-        // The Hmac sign stage still precedes the outbound pipeline, from its own package.
+        // The Hmac sign stage still precedes the outbound pipeline; the package that
+        // shipped it joined the core at 0.15 (ADR-0007), the split across packages is
+        // now sign (core) against throttle and resilience (Operations).
         var configuration = TestConfig.Root(
             ("CredProx:Credentials:signer:Type", "Hmac"),
             ("CredProx:Credentials:signer:Secret", "secret:hmac-key"),
@@ -133,7 +135,7 @@ public sealed class ThrottleResilienceCompositionTests
             NullLogger<HmacSignFeature>.Instance);
 
         Assert.Equal(Stage.Sign, sign.Stage);
-        Assert.Equal("CredProx.Hmac", sign.GetType().Assembly.GetName().Name);
+        Assert.Equal("CredProx", sign.GetType().Assembly.GetName().Name);
         Assert.True((int)sign.Stage < (int)throttle.Stage);
     }
 

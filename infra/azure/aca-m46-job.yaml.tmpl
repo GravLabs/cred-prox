@@ -1,0 +1,46 @@
+# M46 unit-3 verification Job (az containerapp job create --yaml, rendered by
+# scripts/live-m46-aca.sh via envsubst). Sibling of aca-job-r2.yaml.tmpl, same
+# shape rules: Manual trigger with the explicit empty manualTriggerConfig
+# (absent -> ContainerAppsJobTriggerConfigurationMissing, live finding
+# 2026-11-06); container under properties.template.containers[] (the legacy
+# flat shape is dropped on create); identities ATTACHED after create via
+# `az containerapp job identity assign` (a job pulls only when an execution
+# starts, which begins after that step); location = environment region.
+# The runner's --mode args are built by the deploy script with the CLI-args
+# workaround documented in scripts/live-azure-smoke.sh (plain job args cannot
+# carry --mode through the az CLI); this yaml is the create-time shape.
+# Substitutions: $REGISTRY $ENV_ID $UAI_CLIENT_ID $VAULT_URI $APP_FQDN $LOCATION $KUBELET_ID $DEPLOY_IMAGE_DIGEST
+name: credprox-m46-verify
+location: $LOCATION
+properties:
+  configuration:
+    registries:
+      - server: $REGISTRY
+        identity: $KUBELET_ID
+    triggerType: Manual
+    manualTriggerConfig: {}
+    # acacheck runtime is seconds; the cap bounds a wedged probe run only
+    replicaTimeout: 900
+    replicaRetryLimit: 0
+    completionMode: Succeeded
+  template:
+    containers:
+      - name: acacheck
+        image: $REGISTRY/credprox-m46-harness:latest
+        args: ["--mode", "acacheck", "--proxy", "https://$APP_FQDN"]
+        env:
+          # runtime identity binding - the job reads the caller key value and
+          # (for the absence assert) the vendor key value from the vault with
+          # the SAME identity the app uses; no secret values in this file.
+          - name: MANAGED_IDENTITY_CLIENT_ID
+            value: "$UAI_CLIENT_ID"
+          - name: DEPLOY_IMAGE_DIGEST
+            value: "$DEPLOY_IMAGE_DIGEST"
+          - name: KeyVault__Uri
+            value: "$VAULT_URI"
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi
+    scale:
+      executorCount: 1
+  environmentId: $ENV_ID

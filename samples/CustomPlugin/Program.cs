@@ -6,17 +6,15 @@ using CredProx;
 var builder = WebApplication.CreateBuilder(args);
 
 // A plugin-only host supplies what its provider takes from DI — here the standard
-// HttpClient machinery. Registration is the plugin's entire footprint in the host.
-builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
+// HttpClient machinery. The With seam is the plugin's entire footprint in the host.
 builder.Services.AddHttpClient();
-builder.Services.AddCredProxCredentialType<VendorSessionProvider, VendorSessionOptions>("VendorSession");
-builder.Services.AddCredProxCredentials(builder.Configuration);
+builder.Services.AddCredProx(builder.Configuration)
+    .WithCredentialType<VendorSessionProvider, VendorSessionOptions>("VendorSession");
 
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 app.MapReverseProxy();

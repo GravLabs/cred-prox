@@ -6,18 +6,12 @@ using CredProx;
 // StubApi/ is the vendor stand-in the offline cells drive.
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-builder.Services.AddCredProxBuiltInCredentials();
-builder.Services.AddCredProxLoginExchange();
-builder.Services.AddCredProxCredentials(builder.Configuration);
-builder.Services.AddCredProxCallerAuthentication(builder.Configuration);
-builder.Services.AddCredProxAudit(builder.Configuration);
+builder.Services.AddCredProx(builder.Configuration);
 
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 app.MapReverseProxy();

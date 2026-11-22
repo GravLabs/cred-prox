@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using CredProx;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -117,9 +118,9 @@ public sealed class CallerTokenBackchannelTests : IAsyncLifetime
     {
         var handler = options.BackchannelHttpHandler;
         Assert.NotNull(handler);
-        // Three packages ship one internal guard each under the same name; assert by
-        // identity of the chain, not by an ambiguous type name.
-        Assert.Equal("CredProxRedirectGuard", handler!.GetType().Name);
+        // The caller-token validation guard carries its own name since M49 merged the
+        // packages that each shipped a same-named internal copy; assert the exact type.
+        Assert.Equal("CallerTokenRedirectGuard", handler!.GetType().Name);
         Assert.Same(expectedInner, Assert.IsAssignableFrom<DelegatingHandler>(handler).InnerHandler);
     }
 
@@ -167,7 +168,7 @@ public sealed class CallerTokenBackchannelTests : IAsyncLifetime
 
         var bearer = BearerOptions(services);
         Assert.NotNull(bearer.BackchannelHttpHandler);
-        Assert.Equal("CredProxRedirectGuard", bearer.BackchannelHttpHandler!.GetType().Name);
+        Assert.Equal("CallerTokenRedirectGuard", bearer.BackchannelHttpHandler!.GetType().Name);
         using var client = new HttpClient(bearer.BackchannelHttpHandler);
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             client.GetStringAsync($"http://127.0.0.1:{_idpPort}/metadata"));
@@ -185,7 +186,10 @@ public sealed class CallerTokenBackchannelTests : IAsyncLifetime
         services.AddCredProxCallerTokenAuthentication(ValidConfig());
 
         var bearer = BearerOptions(services);
-        var primary = Assert.IsType<SocketsHttpHandler>(bearer.BackchannelHttpHandler);
+        // CredProx's default carries its own User-Agent over the closed primary — the
+        // same stamp the token-exchange clients send (product bug 2026-11-22).
+        var userAgent = Assert.IsType<CredProxUserAgentHandler>(bearer.BackchannelHttpHandler);
+        var primary = Assert.IsType<SocketsHttpHandler>(userAgent.InnerHandler);
         Assert.False(primary.AllowAutoRedirect);
     }
 
@@ -225,5 +229,68 @@ public sealed class CallerTokenBackchannelTests : IAsyncLifetime
         // Closed default: the 302 comes back unfollowed — metadata parsing fails on it,
         // and the redirecting authority's key set is never fetched.
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+    }
+
+    // ---- CredProx's own default transport identifies itself like the token clients do ----
+    //
+    // Discovery and the JWKS fetch ride options.Backchannel, and an identity provider's
+    // edge can refuse a User-Agent-less request before it answers (the same class as the
+    // GitHub 403 of product bug 2026-11-22). Only the transport CredProx builds itself
+    // is stamped; the two host-handler cells above already pin that a host's handler
+    // stays byte-identical on the chain — AssertWrappedWith asserts the guard's inner is
+    // the host handler itself, so no stamp layer can hide between them.
+
+    [Fact]
+    public async Task DefaultChain_StampsCredProxUserAgentOnTheRealBackchannel()
+    {
+        var seen = new List<string>();
+        using var capture = Start(ctx =>
+        {
+            seen.Add(ctx.Request.Headers.UserAgent.ToString());
+            return ctx.Response.WriteAsync("ok");
+        });
+        var port = ReadPort(capture);
+
+        var services = new ServiceCollection();
+        services.AddCredProxCallerTokenAuthentication(ValidConfig());
+
+        var bearer = BearerOptions(services);
+        var userAgent = Assert.IsType<CredProxUserAgentHandler>(bearer.BackchannelHttpHandler);
+        var primary = Assert.IsType<SocketsHttpHandler>(userAgent.InnerHandler);
+        Assert.Equal(TimeSpan.FromMinutes(2), primary.PooledConnectionLifetime);
+
+        // Drive the transport the discovery and JWKS fetches really take, not the property.
+        using var response = await bearer.Backchannel.GetAsync($"http://127.0.0.1:{port}/discover");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var ua = Assert.Single(seen);
+        Assert.Equal(CredProxUserAgentHandler.DefaultUserAgent, ua);
+        // Recomputed here so a typo in the shared constant cannot hide behind itself.
+        var core = typeof(CredProxUserAgentHandler).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion
+            .Split('+')[0];
+        Assert.Equal($"CredProx/{core}", ua);
+    }
+
+    [Fact]
+    public void CallerSchemeReload_DoesNotStackHandlerLayers()
+    {
+        var postConfigure = new CallerTokenBackchannelPostConfigure();
+        var options = new JwtBearerOptions();
+        postConfigure.PostConfigure(CallerTokenOptions.Scheme, options);
+        postConfigure.PostConfigure(CallerTokenOptions.Scheme, options);
+
+        // Still exactly one stamp over the closed primary — a reload that re-entered the
+        // wrap case would show a guard (or a second stamp) at the head here.
+        var userAgent = Assert.IsType<CredProxUserAgentHandler>(options.BackchannelHttpHandler);
+        Assert.IsType<SocketsHttpHandler>(userAgent.InnerHandler);
+    }
+
+    [Fact]
+    public void OtherScheme_BackchannelHandlerStaysUntouched()
+    {
+        var postConfigure = new CallerTokenBackchannelPostConfigure();
+        var options = new JwtBearerOptions();
+        postConfigure.PostConfigure("SomeOtherScheme", options);
+        Assert.Null(options.BackchannelHttpHandler);
     }
 }

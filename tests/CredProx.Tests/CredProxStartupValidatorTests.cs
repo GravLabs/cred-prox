@@ -589,9 +589,8 @@ public sealed class CredProxStartupValidatorTests
         var error = await Assert.ThrowsAsync<OptionsValidationException>(
             () => validator.StartAsync(default));
         Assert.Contains(
-            "The 'CredProx:Throttling' section is configured but the outbound throttle is not "
-            + "registered: it ships in the CredProx.Operations package: add the package "
-            + "reference and call AddCredProxThrottling().",
+            "The 'CredProx:Throttling' section needs the CredProx.Operations package: "
+            + "install it and call .AddOperations().",
             error.Message);
     }
 
@@ -605,9 +604,8 @@ public sealed class CredProxStartupValidatorTests
         var error = await Assert.ThrowsAsync<OptionsValidationException>(
             () => validator.StartAsync(default));
         Assert.Contains(
-            "The 'CredProx:Resilience' section is configured but the resilience adapter is not "
-            + "registered: it ships in the CredProx.Operations package: add the package "
-            + "reference and call AddCredProxResilience().",
+            "The 'CredProx:Resilience' section needs the CredProx.Operations package: "
+            + "install it and call .AddOperations().",
             error.Message);
     }
 
@@ -621,9 +619,8 @@ public sealed class CredProxStartupValidatorTests
         var error = await Assert.ThrowsAsync<OptionsValidationException>(
             () => validator.StartAsync(default));
         Assert.Contains(
-            "The 'CredProx:Health' section is configured but the credential health probes are "
-            + "not registered: they ship in the CredProx.Operations package: add the package "
-            + "reference and call AddCredProxHealthProbes().",
+            "The 'CredProx:Health' section needs the CredProx.Operations package: "
+            + "install it and call .AddOperations().",
             error.Message);
     }
 
@@ -643,8 +640,8 @@ public sealed class CredProxStartupValidatorTests
 
         var error = await Assert.ThrowsAsync<OptionsValidationException>(
             () => validator.StartAsync(default));
-        Assert.Contains("The 'CredProx:Health' section is configured", error.Message);
-        Assert.Contains("call AddCredProxHealthProbes().", error.Message);
+        Assert.Contains("The 'CredProx:Health' section needs the CredProx.Operations package", error.Message);
+        Assert.Contains("call .AddOperations().", error.Message);
     }
 
     [Fact]

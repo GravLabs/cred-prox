@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Add-on for CredProx: every identity credential family in one package (ADR-0007). OAuthClientCredentials, TokenExchange and JwtAssertion with their options, validators and the OpenID Connect key-retrieval dependency; caller (agent) tokens, where the stock JWT bearer handler validates short-lived OIDC access tokens under the caller-token scheme, app roles narrow the caller to its named operation rules, and MaxTokenAge caps token age from iat (ADR-0004). The host installs this package for the Microsoft identity libraries it brings and adds one chained setup call.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CredProx\CredProx.csproj" />
+    <ProjectReference Include="..\CredProx.Abstractions\CredProx.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- JWKS retrieval for inbound-token validation (TokenExchangeAuthority / JwksUri). -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+    <!-- The stock JWT bearer handler for caller tokens travels with this package (M39,
+         ADR-0004); .NET 10 moved it out of Microsoft.AspNetCore.App. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CredProx.Tests" />
+    <InternalsVisibleTo Include="CredProx.Fuzz" />
+  </ItemGroup>
+  <PropertyGroup>
+    <!-- The add-on dogfoods the experimental plugin contract (plan §3.5 rule 2). -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+  </PropertyGroup>
+</Project>

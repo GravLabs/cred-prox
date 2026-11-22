@@ -20,7 +20,7 @@ FINDINGS="${FINDINGS_DIR:-/tmp/m31-fuzz-findings}"
 
 cd "$REPO"
 # One source of truth across the three target homes (Program.cs labels, this list, the
-# nightly matrix) - a drift here silently drops or misblames a target (qitem-20261120031636-7499bc7183b0f7e9).
+# nightly matrix) - a drift here silently drops or misblames a target (fuzz-target audit, 2026-11-20).
 bash tests/CredProx.Fuzz/check-targets-agree.sh || { echo "RUNTARGETS-FAIL target homes disagree (see above)"; exit 1; }
 dotnet publish tests/CredProx.Fuzz/CredProx.Fuzz.csproj -c Release -o /tmp/fuzzpub
 

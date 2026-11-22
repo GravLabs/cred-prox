@@ -81,16 +81,17 @@ internal sealed class CredentialBinder
             if (registration is null)
             {
                 var known = string.Join(", ", _registrations.Select(r => r.TypeName).Order(StringComparer.Ordinal));
-                // A type that moved out of the core names the add-on the host must
-                // reference — the only package knowledge the core keeps, as strings, so a
-                // host that forgot the package hears its name at startup.
+                // R2 (ADR-0007): a type the core does not ship names its package and its
+                // one call — the only package knowledge the core keeps, as strings, so a
+                // host that skipped the add-on setup hears the fix at startup. One shape:
+                // "<thing> needs the <package> package: install it and call <call>."
+                // Hmac and LoginExchange ride the core since M49 and never reach here.
                 var packageHint = typeName switch
                 {
-                    "Hmac" => " The Hmac type ships in the CredProx.Hmac package: add the package reference and call AddCredProxHmac().",
-                    "LoginExchange" => " The LoginExchange type ships in the CredProx.LoginExchange package: add the package reference and call AddCredProxLoginExchange().",
-                    "OAuthClientCredentials" => " The OAuthClientCredentials type ships in the CredProx.OAuth package: add the package reference and call AddCredProxOAuth().",
-                    "TokenExchange" => " The TokenExchange type ships in the CredProx.OAuth package: add the package reference and call AddCredProxOAuth().",
-                    "JwtAssertion" => " The JwtAssertion type ships in the CredProx.OAuth package: add the package reference and call AddCredProxOAuth().",
+                    "OAuthClientCredentials" or "TokenExchange" or "JwtAssertion" =>
+                        $" Credential type '{typeName}' needs the CredProx.Identity package: install it and call .AddIdentity().",
+                    "TokenCredential" =>
+                        " Credential type 'TokenCredential' needs the CredProx.Azure package: install it and call .AddAzure(credential).",
                     _ => string.Empty,
                 };
                 errors.Add(

@@ -422,7 +422,7 @@ public sealed class ScrubFailClosedTests
         Assert.Contains("forwarded untouched", warning.Message, StringComparison.Ordinal);
     }
 
-    // ---- M47 rounds 2-3 (qitem-20261120061207-0cf7d137, qitem-20261120070254-54ae4d77):
+    // ---- M47 rounds 2-3 (2026-11-20):
     // the scrubber's OWN readable-charset rule. The byte matcher reads only the EXACT
     // published single-byte names on IsCharsetReadable — utf-8/ascii, iso-8859-1..11 and
     // 13..16, windows-1250..1258 — so those bodies are scrubbed and never refused, with

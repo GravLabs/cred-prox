@@ -53,15 +53,12 @@ else
 builder.Configuration.AddEnvironmentVariables();
 builder.Configuration.AddCommandLine(args);
 
-builder.Services.AddCredProxTokenCache();
-builder.Services.AddCredProxConfigurationSecrets(builder.Configuration);
-builder.Services.AddCredProxBuiltInCredentials();
-builder.Services.AddCredProxOAuth();
-builder.Services.AddCredProxCredentials(builder.Configuration);
+builder.Services.AddCredProx(builder.Configuration)
+    .AddIdentity();
 builder.Services.AddRouting();
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddCredProx(builder.Configuration);
+    .AddCredProx();
 
 var app = builder.Build();
 app.MapReverseProxy();

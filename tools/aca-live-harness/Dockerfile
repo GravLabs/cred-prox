@@ -3,7 +3,8 @@
 # consumes the packed CredProx packages from artifacts/packages - pack before building):
 #   dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
 #   dotnet pack src/CredProx -c Release -o artifacts/packages
-#   dotnet pack src/CredProx.AzureKeyVault -c Release -o artifacts/packages
+#   dotnet pack src/CredProx.Azure -c Release -o artifacts/packages
+#   dotnet pack src/CredProx.Identity -c Release -o artifacts/packages
 #   docker build -f tools/aca-live-harness/Dockerfile -t credprox-m29:latest .
 # Offline proof (G1): docker run --rm credprox-m29:latest --mode proxy --smoke
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build

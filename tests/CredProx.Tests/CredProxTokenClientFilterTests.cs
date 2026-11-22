@@ -13,8 +13,9 @@ namespace CredProx.Tests;
 /// The per-connection token client filter (M5 note N2): <c>credprox-token:&lt;name&gt;</c>
 /// clients get the connection's certificate from the <em>live</em> registry at
 /// handler-creation time — including a connection added by a reload — while other clients
-/// are untouched and an unknown connection fails loudly instead of presenting no
-/// certificate.
+/// keep their own transport, and an unknown connection fails loudly instead of presenting
+/// no certificate. Across the whole credprox-token name space the filter also appends the
+/// default User-Agent stamp (product bug 2026-11-22).
 /// </summary>
 public sealed class CredProxTokenClientFilterTests
 {
@@ -88,15 +89,20 @@ public sealed class CredProxTokenClientFilterTests
     }
 
     [Fact]
-    public void PlainTokenClient_LeftUntouched()
+    public void PlainTokenClient_KeepsItsPrimary_AndCarriesUserAgent()
     {
         var (provider, _) = ProviderWithContoso(out _);
         var filter = new CredProxTokenClientFilter();
 
-        var (handler, sentinel) = Build(filter, CredProxHttpClientNames.TokenClient, Services(provider.Current));
+        var builder = Builder(CredProxHttpClientNames.TokenClient, Services(provider.Current));
+        var sentinel = new SocketsHttpHandler();
+        filter.Configure(b => b.PrimaryHandler = sentinel)(builder);
 
-        // The client's own configuration stands: the filter only owns credprox-token:<name>.
-        Assert.Same(sentinel, handler);
+        // The client's own configuration stands — the filter takes no position on the
+        // plain client's transport — but it carries the default User-Agent stamp
+        // (product bug 2026-11-22: GitHub 403s a UA-less token exchange at its edge).
+        Assert.Same(sentinel, builder.PrimaryHandler);
+        Assert.Contains(builder.AdditionalHandlers, static h => h is CredProxUserAgentHandler);
     }
 
     [Fact]

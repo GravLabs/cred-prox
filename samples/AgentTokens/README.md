@@ -21,9 +21,9 @@ a stored secret — Entra-first, but any OIDC issuer works the same way (ADR-000
   after authenticating (journal-proven below).
 
 `Program.cs` is the deployable host and nothing else: `AddCredProx(builder.Configuration)`
-(one call for the core defaults — token cache, secret stack, credential binder; ADR-0005
-item 5), `AddCredProxCallerTokenAuthentication` (the token path above, ADR-0004), the
-reverse proxy from config, run. All policy lives in `appsettings.json`; the offline demo
+(one call for the core defaults — token cache, secret stack, credential binder) chained
+with `.AddIdentity()` (arms the token path above, ADR-0004), the reverse proxy from
+config, run. All policy lives in `appsettings.json`; the offline demo
 values live in `appsettings.Development.json`. Replace the three `YOUR-*` placeholders and
 the same host runs against your tenant.
 
@@ -31,13 +31,13 @@ the same host runs against your tenant.
 
 ```bash
 dotnet add package CredProx
-dotnet add package CredProx.CallerTokens
+dotnet add package CredProx.Identity
 ```
 
 `CredProx.Abstractions` and the JWT bearer handler arrive transitively. A token-only host
-needs nothing else: registering the token authenticator brings the core caller policy with
-it (ADR-0004/0005). Add `CredProx.CallerKeys` only when the same proxy also admits API-key
-callers.
+needs nothing else: chaining `.AddIdentity()` arms the caller-token scheme and brings the
+core caller policy with it (ADR-0004). The same proxy admits API-key callers through the
+same core package — declare key hashes under `CredProx:Callers` and nothing more.
 
 ## The config, key by key
 
@@ -61,9 +61,14 @@ no named operations`); the response body never carries one.
 ## Running it for real
 
 1. **Expose the proxy API.** App registration "CredProx API" → *Expose an API* → application
-   ID URI `api://YOUR-AGENT-API` (or your verified-domain URI). Add app role **`docs-read`**,
-   allowed for *Applications*. The token audience is this URI (or the API's client id) —
-   that is what `CredProx:CallerToken:Audience` must equal.
+   ID URI `api://YOUR-AGENT-API` (or your verified-domain URI). A tenant's default protection
+   policy can refuse a name that is neither a verified domain nor an id — it accepts
+   `api://<client-id>` always, so that is the safest choice. Add app role **`docs-read`**,
+   allowed for *Applications*. In the API's **Manifest**, set `requestedAccessTokenVersion`
+   to `2`: a new registration issues v1 tokens by default, whose issuer
+   (`https://sts.windows.net/<tenant>/`) does not match the v2 `Authority` above, so every
+   token would be refused with 401. A v2 token's audience is the API's **client id** (a
+   GUID, not the URI) — that is what `CredProx:CallerToken:Audience` must equal.
 2. **Register the agent app** (or use its managed identity). Assign it the `docs-read`
    app role (*API permissions → Granted roles*, or Enterprise-app role assignment). Entra
    then writes `"roles": ["docs-read"]` into the app token it issues for that client.
@@ -75,8 +80,8 @@ no named operations`); the response body never carries one.
      maps the external assertion (Kubernetes service-account token, GitHub OIDC token, …)
      to the Entra app; Azure.Identity exchanges it for the same access token — again no
      secret to store.
-4. **Fill the placeholders** in `appsettings.json`: your tenant id in `Authority`, the API
-   URI in `Audience`, the agent's client id in `TokenClientIds`. Don't set
+4. **Fill the placeholders** in `appsettings.json`: your tenant id in `Authority`, the API's
+   client id in `Audience`, the agent's client id in `TokenClientIds`. Don't set
    `RequireHttpsMetadata` — the default is what Entra needs.
 
 **Revocation** is Entra-side: remove the app-role assignment (or disable the SP / identity)
@@ -112,7 +117,7 @@ machine):
 ```bash
 dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
 dotnet pack src/CredProx -c Release -o artifacts/packages
-dotnet pack src/CredProx.CallerTokens -c Release -o artifacts/packages
+dotnet pack src/CredProx.Identity -c Release -o artifacts/packages
 ```
 
 Repacking the same version does not change its bytes' identity to NuGet: if you have packed

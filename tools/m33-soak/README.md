@@ -20,7 +20,7 @@ owner's OK.
 | `compose/` | digest-pinned topology with CPU/mem caps; only localhost-bound ports (host 18080, WireMock admin 18081, Toxiproxy API 8474) |
 | `wiremock/mappings/` | stub IdP + stub vendor templates (echo of received secrets for scrub witnesses, SSE stream, 429/5xx scenarios, skew token) |
 | `k6/soak.js` | bounded mixed workload (cc/static/login/SSE) + caller-side scrub witness |
-| `scripts/` | `init-secrets.sh` (per-run sentinels + hashed caller keys) · `run-soak.sh` (runner + watchdog + teardown trap) · `faults.sh` (levers, each prints its pre-stated expectation) · `secret-scan.sh` (zero-hit doctrine) · `slowloris.py` (bounded) · `teardown.sh` |
+| `scripts/` | `init-secrets.sh` (per-run sentinels + hashed caller keys) · `stamp-guard.sh` (image-bytes provenance; refuses a host image whose `CredProx*.dll` or `SoakHost.dll` stamp is not this checkout's commit) · `run-soak.sh` (runner + watchdog + teardown trap) · `faults.sh` (levers, each prints its pre-stated expectation) · `secret-scan.sh` (zero-hit doctrine) · `slowloris.py` (bounded) · `teardown.sh` |
 
 ## Before the first run
 
@@ -47,6 +47,20 @@ owner's OK.
 3. Pull the pinned proxies once if absent: `docker compose -f compose/docker-compose.yml pull` (run from this dir with `SOAK_RUN_DIR` set to any scratch dir just for validation).
 
 ## Run
+
+Before a soak, at the candidate SHA: pack, then publish, then `docker build` — every
+new commit invalidates the existing image even when `src/` did not change (the stamp
+names the commit), and rebuilding only some layers is the fresh-libraries-plus-stale-host
+state the guard exists to catch.
+
+The runner's first act is the provenance guard (`stamp-guard.sh`): it reads the
+`CredProx*.dll` and `SoakHost.dll` files out of the soakhost image compose would start
+and requires each one's InformationalVersion to name this checkout's commit —
+`STAMP-GUARD-OK`, or a `STAMP-GUARD-FAIL` naming the expected and found stamps, printed
+before any container is created. The runner keeps the guard's output and writes it into
+the run dir as `stamp-guard.log`, so a preserved run dir is self-attesting. Run it
+standalone to check the tag without starting anything:
+`tools/m33-soak/scripts/stamp-guard.sh`.
 
 ```bash
 SOAK_RUN_DIR=... # the runner creates its own /tmp/m33-soak-<utc> dir and exports this itself

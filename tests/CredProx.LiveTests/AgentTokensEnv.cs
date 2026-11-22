@@ -1,0 +1,29 @@
+namespace CredProx.LiveTests;
+
+// The AgentTokens vendor's machine-local contract (plan M46 unit 3): one
+// variable, TENANT_ID, in the central ~/.config/credprox-live/live.env at mode
+// exactly 600 (the value is shared with graph and aca). The run's three app registrations and their secrets are NOT in
+// this file — scripts/live-agenttokens-app.sh creates them and deletes them
+// again at the end. Shape problems name the variable and the expectation only,
+// never the value.
+public static class AgentTokensEnv
+{
+    public const string Vendor = "agenttokens";
+
+    public static readonly IReadOnlyList<string> RequiredKeys = ["TENANT_ID"];
+
+    public static LiveEnvResult Probe() => LiveEnv.Probe(Vendor, RequiredKeys);
+
+    // A tenant id is a GUID. Anything else is a wrong-shape value: FAIL in the
+    // cell, naming the variable, never the value.
+    public static IReadOnlyList<string> ValueProblems(IReadOnlyDictionary<string, string> values)
+    {
+        var problems = new List<string>();
+        if (values.TryGetValue("TENANT_ID", out var value) && !Guid.TryParse(value, out _))
+        {
+            problems.Add("TENANT_ID must be the Entra tenant id (a GUID)");
+        }
+
+        return problems;
+    }
+}
