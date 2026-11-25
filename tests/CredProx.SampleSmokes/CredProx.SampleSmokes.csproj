@@ -20,6 +20,7 @@
     <!-- Builds the sample first; the fixture execs the produced dll as its own process,
          so no assembly is referenced (the sample's entry point stays its own). -->
     <ProjectReference Include="..\..\samples\AgentTokens\AgentTokens.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AgentTokens\Agent\Agent.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\QuickStart\QuickStart.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\OAuthKeycloak\OAuthKeycloak.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\MutualTls\MutualTls.csproj" ReferenceOutputAssembly="false" />
