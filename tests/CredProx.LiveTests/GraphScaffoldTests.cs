@@ -373,7 +373,7 @@ public sealed class GraphAppScriptTests : IDisposable
 // name matches none of live-run.sh's filters, so a runner leg can never exec
 // this cell and recurse into itself.
 [Trait("Layer", "Offline")]
-public sealed class RunnerLeakScanTests : IDisposable, IExecutesLiveRunner
+public sealed class RunnerLeakScanTests : ExecutesLiveRunner, IDisposable
 {
     private const string PlantedJwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJjYW5hcnktbWVtYmVyIn0.p0kfc3Ffak3sig2natureX9_p0kfc3Ffak3sig2";
     private const string PlantedGhp = "ghp_LeakScanCanaryValue0123456789abcdef";

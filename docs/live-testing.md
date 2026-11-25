@@ -19,7 +19,11 @@ the solution the same way the vendor stub projects are, and guard cells in
 
 Exit codes: **PASS 0**, **FAIL 1**, **SKIP or refused 2**. A run is vendor-scoped:
 running one vendor never executes the other vendor's live cell, so filling one
-vendor's file can never spend or touch the other. An aigateway run still starts the
+vendor's file can never spend or touch the other — and it is doubly enforced
+inside the cells: `scripts/live-run.sh` exports `CREDPROX_LIVE_VENDOR` for its
+own leg only, and every live attribute requires it to name its own vendor, so a
+plain `dotnet test` of the live project skips every live cell even when the env
+file or leftover scratch is present. An aigateway run still starts the
 GitHubApp sample against its local stand-in for the shared offline legs; that makes no
 GitHub traffic. The graph run carries a real lifecycle: `scripts/live-graph-app.sh`
 creates one Entra app registration (plus its service principal and one 30-day
@@ -27,9 +31,14 @@ secret, held only in a mode-600 scratch file), the run uses it, and destroy dele
 it again on every exit path — the destroy's read-back (zero apps, zero service
 principals) decides whether the run may PASS. The agenttokens run mirrors that
 discipline with `scripts/live-agenttokens-app.sh`: three app registrations (one
-resource app carrying an `api://` identifier and a `docs-read` application role,
-two client apps whose 30-day secrets are piped straight into the mode-600 scratch
-handoff), and the same destroy read-back over all three names gating the PASS. The aca
+resource app carrying an `api://` identifier and two application roles,
+`docs-read` and `model-call`, both assigned to both client apps, whose 30-day
+secrets are piped straight into the mode-600 scratch handoff), and the same
+destroy read-back over all three names plus zero leftover app-role values
+gating the PASS. The agenttokens and foundrylocal runs share this one lifecycle
+script and scratch, so they never run at the same time: create refuses while the
+scratch's `resource-audience.txt` handoff already exists, and destroy removes
+the scratch. The aca
 run drives `scripts/live-m46-aca.sh` end to end: apply creates the resource set
 (resource group, Key Vault, two user-assigned identities, container apps environment,
 registry) and resolves every role id from the API at run time, material writes the
@@ -40,13 +49,42 @@ mismatch, verify starts one acacheck job whose C-lines decide, and destroy delet
 everything back to the resource group on every exit path with poll-to-gone read-backs.
 Its live leg is script-driven — the app serves internal ingress only, so no test
 process can reach it (disclosed; the offline proofs are canned-az and a loopback cell).
+The azureopenai run creates and destroys its OWN resource (the standing-resource
+form was removed on 2026-11-24 at the owner's choice): under the go-ahead flag,
+`scripts/live-m52-aoai.sh` creates a dedicated resource group, an Azure OpenAI
+account with local (key) auth disabled, one small chat deployment, and grants
+"Cognitive Services OpenAI User" to the signed-in `az` principal at the account
+scope; the runner polls the created endpoint until the role is live — bounded,
+with the deadline printed — then exports the run's endpoint and deployment to
+the test process, and on every exit path destroys the group again with
+read-backs (group gone; the soft-deleted account purged and its absence read
+back from the soft-deleted list — the read-back, not the verb's exit, is the
+verdict; role assignments zero — an unresolvable scope prints
+SKIPPED, explicitly NOT a confirmed zero, rather than claim a zero it never
+measured). A run only ever touches a resource group it created itself: the
+fixed group name must be FREE — if it already exists, `create` refuses before
+any write and names how to clear it, and `destroy` deletes only the group its
+own scratch recorded, never the fixed name as a guess (no recorded group means
+a SKIPPED group read-back and a non-zero exit, not a sweep). If a group of
+that name is a leftover from an earlier run whose handoff was lost, the owner
+confirms by hand that it holds only `credprox-m52` resources and deletes it
+themselves; the script never deletes a group it did not create. Only names come
+from `live.env` — location, model, model version, account SKU,
+deployment SKU; the run mints the account name `credprox-m52-<6 hex>` itself, because the
+account name and its DNS subdomain are global namespaces. The zero-billable run
+needs neither `az` nor `curl`: the create, the authenticated role-wait probe
+and both those gates belong to the armed leg, and the single tiny chat spends
+only under `CREDPROX_M52_BILLABLE=1`.
 Every outward step (create, destroy,
 deploy) is a lead action; build seats prove only the offline legs. The PASS line names what was
 observed — for githubapp the exchange count, cache hits and the two forwarded
 calls and their 200s; for aigateway the forwarded models call, its 200 and the two
 refusal statuses; for graph the two credential styles' Graph statuses; for
-agenttokens the mapped caller's 200 and the unconfigured client's 401; for aca the
-acacheck pass count and the job status — and never
+agenttokens the mapped caller's 200 and the unconfigured client's 401 (plus the
+real agent round-trip when the billable opt-in is on); for aca the
+acacheck pass count and the job status; for azureopenai the caller's 200 on the
+admitted deployment with its usage counts, and the 403 on the deployment its rule
+does not admit — and never
 contains an App id, installation id, token, caller key, repository name, or tenant
 or subscription id.
 
@@ -61,13 +99,33 @@ mode **exactly 600** (the runner refuses any other mode). Flat `KEY=VALUE` lines
 | `APP_ID` | githubapp | your GitHub App's numeric App id |
 | `INSTALLATION_ID` | githubapp | numeric installation id of the App on your org/repos |
 | `PRIVATE_KEY_BASE64` | githubapp | the App's private-key PEM, base64 on one line |
-| `ANTHROPIC_API_KEY` | aigateway | an Anthropic API key (starts with `sk-ant-`) |
-| `TENANT_ID` | graph, agenttokens, aca | your Entra tenant id (a GUID) — one value, shared |
+| `ANTHROPIC_API_KEY` | aigateway, agenttokens, foundrylocal | an Anthropic API key (starts with `sk-ant-`) |
+| `CREDPROX_M53_BILLABLE` | agenttokens | set to `1` to run the billable agent cell; absent or any other value skips it |
+| `CREDPROX_M54_BILLABLE` | foundrylocal | set to `1` to run the billable cloud-leg cell (one tiny Anthropic messages call through the local-plus-cloud sample); absent or any other value skips it |
+| `TENANT_ID` | graph, agenttokens, foundrylocal, aca | your Entra tenant id (a GUID) — one value, shared |
+| `FOUNDRY_LOCAL_MODEL` | foundrylocal | OPTIONAL: the model id the run must use. The preflight validates it with one tiny chat before anything is created and exports exactly it to the live cell; absent, the default comes from the sample's own appsettings (`FoundryLocal:Model`) and is validated the same way |
+| `AZURE_OPENAI_LOCATION` | azureopenai | the Azure region the run creates its one-run resource in (e.g. `swedencentral`) — a name, not a secret |
+| `AZURE_OPENAI_MODEL` | azureopenai | the chat model the run deploys (e.g. `gpt-4o`) |
+| `AZURE_OPENAI_MODEL_VERSION` | azureopenai | the exact model version to deploy (e.g. `2024-11-20`) |
+| `AZURE_OPENAI_SKU` | azureopenai | the account SKU the run creates (e.g. `s0`) |
+| `AZURE_OPENAI_DEPLOYMENT_SKU` | azureopenai | the deployment SKU tier the run requests for its chat deployment (e.g. `Standard`; the tier choice and its trade-off are in `docs/azureopenai-notes.md`) |
+| `CREDPROX_M52_BILLABLE` | azureopenai | set to `1` to arm the whole billable run: create the resource, spend one tiny chat through it, destroy it again; absent or any other value creates nothing and skips the chat |
+| `CREDPROX_M52_AOAI_ROLE_WAIT_SECONDS` | azureopenai | OPTIONAL: how long the armed run waits for its role assignment to go live on the created endpoint (default 300); must be a positive whole number of seconds or the run refuses |
+| `CREDPROX_M52_AOAI_PURGE_WAIT_SECONDS` | azureopenai | OPTIONAL: how long destroy polls the soft-deleted list for the run's account name to go absent (default 300); must be a positive whole number of seconds or destroy refuses before issuing any write |
 
 A file holding only some vendors' variables is normal, not an error: each run
 SKIPs listing its own missing names and says nothing about the rest. Vendor
 isolation stays: a vendor's run sees only its own variables — another vendor's
-line in this file never reaches its test process — and the runner's leak scan
+line in this file never reaches its test process. The only exceptions are the
+opt-in billable extras: agenttokens children receive `ANTHROPIC_API_KEY` and
+`CREDPROX_M53_BILLABLE` as well when set, and foundrylocal children receive
+`CREDPROX_M54_BILLABLE` and `ANTHROPIC_API_KEY` — but only together and only
+when `CREDPROX_M54_BILLABLE=1`, so a stray key can never arm a billable call;
+azureopenai armed runs hand their children `CREDPROX_M52_BILLABLE` plus the endpoint
+and deployment THE RUN CREATED (runner-exported from the scratch handoff) — a stray
+`AZURE_OPENAI_ENDPOINT` or `AZURE_OPENAI_DEPLOYMENT` sitting in the file is simply
+ignored, the standing-resource form is gone —
+and the runner's leak scan
 covers the loaded values of every secret variable present, whoever put it there.
 Old per-vendor files are no longer read; if one still sits beside the central
 file, the runner names it once and says it is ignored, never echoing its content.
@@ -85,7 +143,9 @@ line and stays out of your shell history; `TENANT_ID` can be read from your
 (read-only) az sign-in instead of typed. A tenant id is not a secret, but it
 follows the same file discipline, and the graph run's client id and secret, the
 agenttokens run's apps and secrets, and the aca run's vault material are NOT in
-this file — each run creates them and deletes them again.
+this file — each run creates them and deletes them again. The agenttokens billable
+leg, on the other hand, reads its API key and its opt-in flag from this file like
+every other live variable.
 
 Or build the file by hand — the `umask` makes it owner-only as it is created,
 `read -rsp` hides the key, and the final `chmod` is explicit:
@@ -105,8 +165,8 @@ unset key
 chmod 600 ~/.config/credprox-live/live.env
 ```
 
-Drop the lines for vendors you do not run; the file may hold any subset. The Azure
-vendors (graph, agenttokens, aca) also need the az CLI on PATH and signed in
+Drop the lines for vendors you do not run; the file may hold any subset. The Entra/Azure
+vendors (graph, agenttokens, foundrylocal, aca) also need the az CLI on PATH and signed in
 (`az login`) — both gates are read-only; the sign-in is what the secretless
 credential style rides. An aca run additionally needs the az `containerapp`
 extension — its gate dies before any write verb — and docker on PATH for the push
@@ -118,7 +178,7 @@ step, which runs after apply.
 |---|---|---|
 | PASS | every check for that vendor below held against the real vendor | 0 |
 | FAIL | a check failed, or secret material appeared in the run log (the kind is named, the content never is) | 1 |
-| SKIP / refused | env file missing or a variable missing (each name listed), or mode is not exactly 600 (the actual octal is named); for the Azure vendors (graph, agenttokens, aca) also when the az CLI is absent or not signed in — both checked before anything is created | 2 |
+| SKIP / refused | env file missing or a variable missing (each name listed), or mode is not exactly 600 (the actual octal is named); for the Azure vendors (graph, agenttokens, foundrylocal, aca) also when the az CLI is absent or not signed in — both checked before anything is created; for the armed azureopenai leg also when az is absent, not signed in, or curl is missing (the zero-billable azureopenai run needs none of them); for foundrylocal also when no loopback model server answers, or the selected model id answers no tiny chat (SKIP names the id and the http code; nothing is created) | 2 |
 
 Values are read exactly as written, with no quote stripping. A value with the wrong shape (a quoted
 key, a key that is not base64) is not a SKIP: the live cell checks it and FAILs, naming which
@@ -127,6 +187,12 @@ The secret wait is an outcome source too: if a run-created client secret never m
 CREDPROX_M46_SECRET_WAIT_SECONDS (default 120, polled every 5 s with a 15 s cap per poll), the run
 FAILs before the live cell starts — and the armed destroys still run, so nothing created is left
 behind by the timeout.
+The role wait is a second outcome source of the same shape: Entra lands a fresh
+app-role assignment into issued tokens only after a delay, so an agenttokens run
+waits for the mapped token to carry BOTH app roles (docs-read and model-call) and
+FAILs before the live cell starts — armed destroys still running — when it never
+does within CREDPROX_M46_ROLE_WAIT_SECONDS (default 300, polled every 5 s with a
+15 s cap per poll; a run can overshoot that budget by about 20 s).
 
 ## What a GitHubApp PASS proves
 
@@ -195,8 +261,8 @@ Everything the live test does against GitHub is read-only.
   run-registered API with **200** and forwarded the request stripped: CredProx
   removes the caller's `Authorization` header after authenticating, and the
   stand-in upstream confirmed the caller's `Bearer` token never arrived.
-- A second real token — same tenant, the same `docs-read` app role, but minted by
-  a client that is NOT a configured caller — was refused with **401** as CredProx's
+- A second real token — same tenant, the same `docs-read` and `model-call` app
+  roles, but minted by a client that is NOT a configured caller — was refused with **401** as CredProx's
   own `credprox.caller_unauthenticated` problem document, and the stand-in's
   request counter did not move: the refusal is CredProx's decision before any
   upstream was touched, not a vendor artifact.
@@ -205,20 +271,26 @@ Everything the live test does against GitHub is read-only.
   destination is not the thing under proof; the token validation and caller
   mapping are. The stand-in never echoes the `Authorization` value it receives.
 - The three app registrations (resource app with its exposed identifier
-  `api://<its own app id>` and its `docs-read` application role, mapped and
-  unmapped client apps, role assigned to both) and both 30-day client secrets
+  `api://<its own app id>` and its `docs-read` and `model-call` application roles,
+  mapped and unmapped client apps, both roles assigned to both) and both 30-day
+  client secrets
   belonged to this run; the secrets and that identifier were piped straight to
   the mode-600 scratch handoff and never printed. The identifier takes the
   app-id form because a tenant's default protection policy refuses a fixed
   `api://` name at create; the live cell reads the audience from the handoff.
   The destroy
-  read-back — zero app registrations and zero service principals under all three
-  display names, scratch removed — is what lets the run PASS, and any leftover
-  fails it.
+  read-back — zero app registrations, zero service principals and zero app-role
+  values under all three display names, scratch removed — is what lets the run
+  PASS, and any leftover fails it.
 - The captured run log and caller-visible bodies contain neither minted client
   secret nor any `eyJ` JWT shape (the scanner runs in-test and in the runner).
-- Cost per run: nothing billable. Entra app registrations and their password
-  credentials carry no charge, and the run creates nothing in any resource group.
+- Cost per run: nothing billable by default. Entra app registrations and their
+  password credentials carry no charge, and the run creates nothing in any resource
+  group.
+- Billable opt-in: with `CREDPROX_M53_BILLABLE=1` and an Anthropic key loaded (the
+  Secrets table above), one cell runs the shipped agent for real against the vendor
+  — cheapest model, small token budget, fixed short prompt, a few cents. Without
+  the opt-in that cell skips with a stated reason; it never fails for being absent.
 ## What an AzureContainerApps PASS proves
 
 - The shipped AzureContainerApps sample ran **as shipped** — two containers in one
@@ -267,11 +339,14 @@ lone `gho_` and a lone `sk-ant-` value), and the env-file contract (missing name
 mode refusal, 600 round-trip, value-shape problems) is pinned for all five vendors.
 The Entra vendors' lifecycle scripts are pinned too, against a canned `az` stub on
 PATH: the destroy read-back flips its own exit code when the canned lists still
-show leftovers (app registrations and service principals for both vendors), create
+show leftovers (app registrations and service principals for both vendors, plus
+leftover app-role values for agenttokens), create
 pipes the run-created secrets to the mode-600 scratch handoff without echoing them
 anywhere, the create-side read-backs fail loudly when the canned API output shows
-no `api://` identifier or no role assignment, the agenttokens cells also prove the
-three apps stay three distinct principals end to end, the signed-in and no-az
+no `api://` identifier, an app-role set that is not exactly `docs-read` plus
+`model-call` (the canned values arrive in reversed order, so a positional compare
+cannot pass by luck), or no role assignment on a client SP, the agenttokens cells
+also prove the three apps stay three distinct principals end to end, the signed-in and no-az
 gates die before any write verb, and `--dry-run` prints the plan without calling
 a write verb. The aca script carries the same proof depth: its sign-in and extension
 gates die before any write verb, vault secrets are passed only as `--file` arguments

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    Deliberately NO PackageReference: the point of this client is that it holds only its
+    own Entra token. Plain HttpClient + System.Text.Json speak the Anthropic Messages
+    protocol fine; the vendor key never appears here because CredProx attaches it.
+  -->
+
+</Project>

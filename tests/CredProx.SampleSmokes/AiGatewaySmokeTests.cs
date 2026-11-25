@@ -225,6 +225,44 @@ public class AiGatewaySmokeTests(AiGatewayFixture fixture)
         Assert.DoesNotContain(AiGatewayFixture.BatchAppKey, output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait("Sample", "AiGateway")]
+    public async Task Metering_EmitsPerCallerCounters_OnTheConfiguredExporter()
+    {
+        // The metering leg (M50): with Metrics__Console=true the sample prints the
+        // CredProx meter instead of exporting OTLP. One forwarded chat call must show
+        // up as request and byte measurements carrying the caller name — proving the
+        // leg arms from the CredProx:Metering section and the config switch works.
+        var host = fixture.StartHost(new Dictionary<string, string>
+        {
+            ["Metrics__Console"] = "true",
+            ["OTEL_METRIC_EXPORT_INTERVAL"] = "1000",
+        });
+        await fixture.WaitForHostAsync(host);
+
+        using var client = new HttpClient { BaseAddress = new Uri(AiGatewayFixture.HostUrl) };
+        using var call = await client.PostAsync(
+            "/ai/v1/chat/completions", KeyedJson(AiGatewayFixture.ChatAppKey));
+        Assert.True(call.IsSuccessStatusCode, $"chat call failed: {(int)call.StatusCode}\n{host.Stderr}");
+
+        await AiGatewayFixture.WaitUntilAsync(
+            () => Task.FromResult(
+                host.Stdout.Contains("credprox.requests", StringComparison.Ordinal)
+                && host.Stdout.Contains("credprox.request.bytes", StringComparison.Ordinal)
+                && host.Stdout.Contains("credprox.response.bytes", StringComparison.Ordinal)),
+            $"metering lines never appeared on the console exporter:\n{host.Stdout}");
+
+        // The caller identity rode the measurements: check the window after the request
+        // counter's metric line carries the caller tag (the exporter prints tag lines
+        // under the metric they belong to).
+        var log = host.Stdout;
+        var at = log.IndexOf("credprox.requests", StringComparison.Ordinal);
+        var window = log[at..Math.Min(at + 800, log.Length)];
+        Assert.Contains("credprox.caller", window, StringComparison.Ordinal);
+        Assert.Contains("chat-app", window, StringComparison.Ordinal);
+        Assert.DoesNotContain(AiGatewayFixture.ChatAppKey, host.Stdout, StringComparison.Ordinal);
+    }
+
     private static StringContent Json() => new("""{"model":"demo"}""", Encoding.UTF8, "application/json");
 
     private static StringContent KeyedJson(string callerKey)

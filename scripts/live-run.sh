@@ -16,14 +16,24 @@
 # a mode-600 scratch file), the run uses it, and destroy deletes it again on every
 # exit path — the destroy's read-back decides whether the run may PASS. The
 # agenttokens run mirrors it with scripts/live-agenttokens-app.sh: three app
-# registrations (one resource app with an api:// identifier and a docs-read app
-# role, two client apps each with one secret piped straight to scratch), and the
-# same create-read-back / destroy-read-back discipline. After either create the
-# runner first WAITS for Entra to propagate the brand-new client secret - it
-# polls the tenant's v2 token endpoint with client_credentials every 5 s (up to
+# registrations (one resource app with an api:// identifier and two app roles,
+# docs-read and model-call, both assigned to both client apps, each client app
+# with one secret piped straight to scratch), and the same create-read-back /
+# destroy-read-back discipline. The foundrylocal run reuses that lifecycle script
+# and its scratch handoff UNCHANGED — the same three apps, the same waits, the
+# same discipline — because its proof is the same Entra admission story (mapped
+# client admitted, unmapped client 401) on a free loopback local model instead of
+# a paid cloud endpoint. After either create the runner first WAITS for
+# Entra to propagate the brand-new client secret - it polls the tenant's v2 token
+# endpoint with client_credentials every 5 s (up to
 # CREDPROX_M46_SECRET_WAIT_SECONDS, default 120) until a token comes back 200,
 # because a cell that starts against an unpropagated secret only ever sees a 401
-# the vendor cannot serve (live finding 2026-11-22). The aca run drives
+# the vendor cannot serve (live finding 2026-11-22). On the agenttokens leg (and
+# its foundrylocal twin, which shares these waits through the same script) it
+# then waits for that token to carry BOTH app roles - Entra lands a fresh role
+# assignment into issued tokens only after a delay (up to
+# CREDPROX_M46_ROLE_WAIT_SECONDS, default 300; live finding 2026-11-23). The aca
+# run drives
 # scripts/live-m46-aca.sh apply|push|deploy|verify|destroy over the whole Azure
 # resource set; its live leg is the verify job's acacheck C-lines (internal
 # ingress - no external test process can reach the app) and its destroy
@@ -57,6 +67,16 @@ case "$vendor" in
         # lifecycle script's canned-az read-back cells) and the env-contract legs
         test_filter="FullyQualifiedName~AgentTokens|FullyQualifiedName~LiveEnvContractTests"
         ;;
+    foundrylocal)
+        required="TENANT_ID"
+        # the FoundryLocal live cells (a REAL Entra caller token against the
+        # sample gate: mapped client 200 through the loopback model, unmapped
+        # client 401 with nothing moved, a tool no rule admits 403 at the gate),
+        # the vendor's offline legs (env contract, scratch contract, runner
+        # wiring) and the env-contract legs. No billable gate: Foundry Local on
+        # loopback costs nothing per call.
+        test_filter="FullyQualifiedName~FoundryLocal|FullyQualifiedName~LiveEnvContractTests"
+        ;;
     aca)
         required="TENANT_ID"
         # the lifecycle script's canned-az read-back cells, the acacheck loopback
@@ -64,8 +84,20 @@ case "$vendor" in
         # leg below (internal ingress: no xunit cell can reach it; disclosed)
         test_filter="FullyQualifiedName~Aca|FullyQualifiedName~LiveEnvContractTests"
         ;;
+    azureopenai)
+        required="AZURE_OPENAI_LOCATION AZURE_OPENAI_MODEL AZURE_OPENAI_MODEL_VERSION AZURE_OPENAI_SKU AZURE_OPENAI_DEPLOYMENT_SKU"
+        # the AzureOpenAI live cell (ONE tiny chat against the deployment THIS run
+        # creates and later destroys — creating the resource is itself the billable
+        # action, so without CREDPROX_M52_BILLABLE=1 the run creates nothing, dials
+        # nothing, spends nothing) plus this vendor's offline legs whose names carry
+        # the vendor token (env contract and the scaffold pins). The canned-runner
+        # and canned-helper witnesses are deliberately named Aoai*, so this filter
+        # does NOT select them: a leg the runner execs must never exec a nested
+        # runner - the naming invariant enforced by NamesCarryNoRunnerFilterToken.
+        test_filter="FullyQualifiedName~AzureOpenAI|FullyQualifiedName~LiveEnvContractTests"
+        ;;
     *)
-        echo "SKIP: no live vendor '$vendor' (known vendors: githubapp, aigateway, graph, agenttokens, aca)"
+        echo "SKIP: no live vendor '$vendor' (known vendors: githubapp, aigateway, graph, agenttokens, foundrylocal, aca, azureopenai)"
         exit 2
         ;;
 esac
@@ -78,7 +110,7 @@ display="~/.config/credprox-live/live.env"
 # Printed ABOVE the gates below on purpose: the loop stats files and reads nothing,
 # so it lands even when the central file is missing (SKIP) or wrongly-moded
 # (REFUSED) — a run that never starts still names the dead file it did not use.
-for stale_vendor in githubapp aigateway graph agenttokens aca; do
+for stale_vendor in githubapp aigateway graph agenttokens foundrylocal aca azureopenai; do
     if [ -f "$HOME/.config/credprox-live/$stale_vendor.env" ]; then
         echo "NOTE: ~/.config/credprox-live/$stale_vendor.env exists but is IGNORED - every vendor reads $display"
     fi
@@ -102,17 +134,45 @@ fi
 # refused here before anything is created (review LOW-2, 2026-11-22: a value such
 # as "10s" made the wait's numeric comparison error out and the loop never end
 # while a run-created app registration was held).
-case "${CREDPROX_M46_SECRET_WAIT_SECONDS:-120}" in
+# The default rides `-`, not `:-`: a name EXPORTED EMPTY is exactly the
+# dangerous shape - the empty string is already the first refused arm below,
+# and the old `:-` papered it over with the 120 default.
+case "${CREDPROX_M46_SECRET_WAIT_SECONDS-120}" in
     ''|*[!0-9]*|0|0*|???????*)
         echo "REFUSED: CREDPROX_M46_SECRET_WAIT_SECONDS must be a positive whole number of seconds, at most 6 digits"
         exit 2 ;;
 esac
 
-# The az vendors (Entra's graph and agenttokens, and aca's Azure resource set)
-# ride the owner's az sign-in. Both gates
-# below are read-only; the only writes are the create/destroy pairs further down,
-# and everything they create is deleted again before this script exits — the
-# destroy read-back flips the run to FAIL if anything survives.
+# The azureopenai role-propagation wait (M52 part B) gets the same refusal: the
+# wait below compares numbers, and a value such as "5m" must never let its loop
+# run on while a created resource is held.
+# Same `-` choice: an exported-empty name is refused, an unset one still
+# defaults to 300.
+case "${CREDPROX_M52_AOAI_ROLE_WAIT_SECONDS-300}" in
+    ''|*[!0-9]*|0|0*|???????*)
+        echo "REFUSED: CREDPROX_M52_AOAI_ROLE_WAIT_SECONDS must be a positive whole number of seconds, at most 6 digits"
+        exit 2 ;;
+esac
+
+# The M46 role-propagation wait (wait_roles_in_token below) gets the same
+# refusal. It was the last wait budget with NO shape guard anywhere in the
+# file: flipping its expansion to `-` without this block would turn an
+# exported-empty value into the very hang the guards above exist to refuse,
+# so both halves land together - every non-numeric shape (including empty)
+# is refused by name before anything is created, and unset still defaults
+# to 300.
+case "${CREDPROX_M46_ROLE_WAIT_SECONDS-300}" in
+    ''|*[!0-9]*|0|0*|???????*)
+        echo "REFUSED: CREDPROX_M46_ROLE_WAIT_SECONDS must be a positive whole number of seconds, at most 6 digits"
+        exit 2 ;;
+esac
+
+# The az vendors (Entra's graph, agenttokens and foundrylocal, aca's Azure
+# resource set) ride the owner's az sign-in; azureopenai's az and curl gates
+# moved into its armed create leg below, because its zero-spend run needs
+# neither. The gates below are read-only; the only writes are the create/destroy
+# pairs further down, and everything they create is deleted again before this
+# script exits — the destroy read-back flips the run to FAIL if anything survives.
 graph_secret=""
 graph_scratch="${CREDPROX_M46_SCRATCH:-/tmp/credprox-m46-graph}"
 graph_app_created=0
@@ -155,6 +215,29 @@ aca_destroy() {
         echo "aca destroy: READ-BACK FAILED - leftovers remain; see above"
     fi
 }
+aoai_scratch="${CREDPROX_M52_AOAI_SCRATCH:-/tmp/credprox-m52-aoai}"
+aoai_principal=""
+aoai_infra_created=0
+aoai_destroy_rc=0
+aoai_destroy() {
+    # once, on every exit path after create was armed (trap EXIT)
+    [ "$aoai_infra_created" = "1" ] || return 0
+    aoai_infra_created=0
+    echo "--- live-m52-aoai.sh destroy (read-backs decide, group included) ---"
+    if "$repo_root/scripts/live-m52-aoai.sh" destroy 2>&1 | tee -a "$log"; then
+        # count over the whole file, no tail|grep pipe: aoai_destroy runs at most
+        # once per run, and the count reader consumes the stream to EOF (the aca
+        # note above on SIGPIPE applies to any future change here).
+        if [ "$(grep -c 'SKIPPED: role-assignment read-back' "$log" || true)" -gt 0 ]; then
+            echo "aoai destroy: resource group gone; the role-assignment check was SKIPPED (unresolved account scope - NOT a confirmed zero, see the destroy lines)"
+        else
+            echo "aoai destroy: read-back clean (resource group gone, role assignments zero)"
+        fi
+    else
+        aoai_destroy_rc=1
+        echo "aoai destroy: READ-BACK FAILED - leftovers remain; see above"
+    fi
+}
 agenttokens_secret2=""
 agenttokens_secret3=""
 agenttokens_scratch="${CREDPROX_M46_SCRATCH:-/tmp/credprox-m46-agenttokens}"
@@ -166,7 +249,9 @@ agenttokens_destroy() {
     agenttokens_apps_created=0
     echo "--- live-agenttokens-app.sh destroy (read-back decides) ---"
     if "$repo_root/scripts/live-agenttokens-app.sh" destroy 2>&1 | tee -a "$log"; then
-        echo "agenttokens destroy: read-back clean"
+        # $vendor is agenttokens or foundrylocal here (the only arms that set the
+        # created flag); the pinned string stays byte-identical for agenttokens
+        echo "$vendor destroy: read-back clean"
     else
         agenttokens_destroy_rc=1
     fi
@@ -203,7 +288,46 @@ for name in $required; do
     export "$name=${loaded[$name]}"
 done
 
-if [ "$vendor" = "graph" ] || [ "$vendor" = "agenttokens" ] || [ "$vendor" = "aca" ]; then
+# Opt-in extras (M53): agenttokens carries the billable-cell go-ahead through when the
+# central file sets it — CREDPROX_M53_BILLABLE=1 plus ANTHROPIC_API_KEY, both of which the
+# cell skips without. Absent means skipped with a reason, never a failure; nothing else
+# is ever passed through, and the leak scan still reads only the loaded map.
+if [ "$vendor" = "agenttokens" ]; then
+    for name in CREDPROX_M53_BILLABLE ANTHROPIC_API_KEY; do
+        if [ -n "${loaded[$name]:-}" ]; then
+            export "$name=${loaded[$name]}"
+        fi
+    done
+fi
+
+# Opt-in extras (M54): foundrylocal's cloud leg is the vendor's one billable cell,
+# armed by CREDPROX_M54_BILLABLE=1 plus ANTHROPIC_API_KEY in the central file, both
+# of which the cell skips without. Unlike agenttokens the key travels ONLY with the
+# go-ahead: an ANTHROPIC_API_KEY sitting in the central file without the flag
+# exports neither name, so a stray key can never arm a billable call. Absent means
+# skipped with a reason, never a failure; the leak scan still reads only the loaded map.
+if [ "$vendor" = "foundrylocal" ] && [ "${loaded[CREDPROX_M54_BILLABLE]:-}" = "1" ]; then
+    export CREDPROX_M54_BILLABLE=1
+    if [ -n "${loaded[ANTHROPIC_API_KEY]:-}" ]; then
+        export ANTHROPIC_API_KEY="${loaded[ANTHROPIC_API_KEY]}"
+    fi
+fi
+
+# Opt-in extra (M52): the azureopenai run CREATES its own Azure OpenAI resource —
+# the creation is the billable action — so the go-ahead now arms CREATE, not a dial
+# into a standing one: CREDPROX_M52_BILLABLE=1 inside an azureopenai run alone (a
+# stray flag outside the run exports nothing). The endpoint and deployment the live
+# cell dials are RUNNER-EXPORTED after create from the scratch names handoff, never
+# read from the central file; without the go-ahead neither name is exported
+# anywhere and the live cell skips with a reason, spending nothing. The leak scan
+# still reads only the loaded map.
+aoai_armed=0
+if [ "$vendor" = "azureopenai" ] && [ "${loaded[CREDPROX_M52_BILLABLE]:-}" = "1" ]; then
+    export CREDPROX_M52_BILLABLE=1
+    aoai_armed=1
+fi
+
+if [ "$vendor" = "graph" ] || [ "$vendor" = "agenttokens" ] || [ "$vendor" = "foundrylocal" ] || [ "$vendor" = "aca" ]; then
     if ! command -v az >/dev/null 2>&1; then
         echo "SKIP: the $vendor vendor needs the az CLI on PATH (see docs/live-testing.md)"
         exit 2
@@ -214,20 +338,81 @@ if [ "$vendor" = "graph" ] || [ "$vendor" = "agenttokens" ] || [ "$vendor" = "ac
     fi
 fi
 
-# The graph and agenttokens runs poll Entra's token endpoint to wait for a
-# freshly created client secret to propagate; that needs curl before any create
-# can spend anything. (The aca run has no such wait: its vault material is
-# written, not minted by Entra.)
-if [ "$vendor" = "graph" ] || [ "$vendor" = "agenttokens" ]; then
+# The graph, agenttokens and foundrylocal runs poll Entra's token endpoint to
+# wait for a freshly created client secret to propagate; that needs curl before
+# any create can spend anything. (The aca run has no such wait: its vault
+# material is written, not minted by Entra.)
+if [ "$vendor" = "graph" ] || [ "$vendor" = "agenttokens" ] || [ "$vendor" = "foundrylocal" ]; then
     if ! command -v curl >/dev/null 2>&1; then
         echo "SKIP: the $vendor vendor waits for a created client secret to become usable and needs curl on PATH"
         exit 2
     fi
 fi
 
+# (M52 part B) The zero-billable preflight dialed the owner's STANDING endpoint and
+# died with that form: an armed run now proves its OWN endpoint by dialing it
+# authenticated in the role wait below (a role that never lands FAILs the leg before
+# the cell spends a call), and an unarmed run dials nothing at all.
+
+# The foundrylocal run answers a loopback Foundry Local server, which is not part
+# of the harness and authenticates nothing: without it the live cell has no model
+# to call. Checked BEFORE any create, so a missing local model spends no Entra
+# resources; SKIP (exit 2), never a failure.
+if [ "$vendor" = "foundrylocal" ]; then
+    fl_base="${CREDPROX_FOUNDRYLOCAL_URL:-http://127.0.0.1:5273}"
+    if ! curl -s --max-time 10 -o /dev/null "$fl_base/v1/models"; then
+        echo "SKIP: no Foundry Local server answered $fl_base/v1/models (start Foundry Local or set CREDPROX_FOUNDRYLOCAL_URL)"
+        exit 2
+    fi
+    # One shared predicate for the model, checked BEFORE any create. The id is
+    # FOUNDRY_LOCAL_MODEL from the central env file, defaulting to the model the
+    # sample's appsettings names; /v1/models also lists catalog entries that
+    # were never downloaded, so presence there is NOT proof — one tiny chat to
+    # THIS id must answer before the run is armed. The validated id is then
+    # EXPORTED, so the live cell calls exactly the model this preflight proved;
+    # nothing anywhere picks a model by catalog order.
+    fl_model="${FOUNDRY_LOCAL_MODEL:-}"
+    if [ -z "$fl_model" ]; then
+        fl_model="$(awk '/"FoundryLocal"/{f=1} f && match($0, /"Model": "[^"]*"/) {print substr($0, RSTART+10, RLENGTH-11); exit}' \
+            "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/samples/FoundryLocalAgent/appsettings.json")"
+    fi
+    if [ -z "$fl_model" ]; then
+        echo "FAIL: no model id to validate: FOUNDRY_LOCAL_MODEL is unset and the sample appsettings names no FoundryLocal Model"
+        exit 1
+    fi
+    fl_probe="$(curl -s --max-time 60 -w '\n%{http_code}' -H 'Content-Type: application/json' \
+        -d "{\"model\":\"$fl_model\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
+        "$fl_base/v1/chat/completions")" || fl_probe=""
+    fl_code="${fl_probe##*$'\n'}"
+    fl_resp="${fl_probe%$'\n'*}"
+    case "$fl_resp" in
+        *'"choices"'*) fl_answers=1 ;;
+        *) fl_answers=0 ;;
+    esac
+    if [ "$fl_code" != "200" ] || [ "$fl_answers" != "1" ]; then
+        echo "SKIP: model '$fl_model' is not loaded and answering at $fl_base (http $fl_code, body: $(printf '%s' "$fl_resp" | head -c 200)) - download it or set FOUNDRY_LOCAL_MODEL in $display to an id the server has loaded"
+        exit 2
+    fi
+    export FOUNDRY_LOCAL_MODEL="$fl_model"
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-log="$(mktemp "${TMPDIR:-/tmp}/credprox-live-run.XXXXXX.log")"
+log="$(mktemp "${TMPDIR:-/tmp}/credprox-live-run-$vendor.XXXXXX.log")"
 echo "log: $log"
+# Post-release item 4 (2026-11-25): every run created a log and removed nothing -
+# the pile grows without bound (961 orphan files observed in /tmp). A sweep on
+# each run: only this script's OWN pattern, only plain files, only older than
+# 24h (own fresh log and any concurrent run's log can never match). Logs stay
+# kept as evidence - the leak-scan witnesses read the log back after a PASS run -
+# so hygiene is the sweep, not deletion; the name now carries the vendor.
+swept_logs=0
+while IFS= read -r -d '' stale_log; do
+    rm -f "$stale_log" 2>/dev/null && swept_logs=$((swept_logs+1))
+done < <(find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -mmin +1440 \
+    \( -name 'credprox-live-run.*.log' -o -name 'credprox-live-run-*.log' \) -print0 2>/dev/null)
+if [ "$swept_logs" -gt 0 ]; then
+    echo "swept $swept_logs orphan run log(s) older than 24h"
+fi
 
 # Leak scan over the captured log: loaded material verbatim (folded so a PEM that
 # spans console line wraps still matches) and vendor token/key/JWT shapes. Names of
@@ -278,13 +463,20 @@ leak_scan() {
         # warning, never the value, and the run still passes.
         case "$flat_log" in *"${loaded[TENANT_ID]}"*) warn="$warn tenant-id-in-log";; esac
     fi
+    if [ -n "$aoai_principal" ]; then
+        # the armed azureopenai run's signed-in principal object id (its role
+        # assignee): it identifies the OWNER's user, so a GUID match is leak
+        # material - the helper and the role wait capture it in variables only
+        # and never print it; the names-handoff and counts are what may print.
+        case "$flat_log" in *"$aoai_principal"*) leak="yes"; kind="$kind aoai-principal-guid";; esac
+    fi
     if [ "$vendor" = "graph" ]; then
         # the run-created client secret is this vendor's secret material: it may
         # exist only in the scratch file, never in the env file, the log or argv
         if [ -n "$graph_secret" ]; then
             case "$flat_log" in *"$graph_secret"*) leak="yes"; kind="$kind run-created-client-secret";; esac
         fi
-    elif [ "$vendor" = "agenttokens" ]; then
+    elif [ "$vendor" = "agenttokens" ] || [ "$vendor" = "foundrylocal" ]; then
         # both run-created client secrets are this vendor's secret material: they may
         # exist only in the scratch files, never in the env file, the log or argv
         if [ -n "$agenttokens_secret2" ]; then
@@ -323,7 +515,7 @@ leak_scan() {
     fi
 }
 
-trap 'graph_destroy; agenttokens_destroy; aca_destroy; leak_scan' EXIT
+trap 'graph_destroy; agenttokens_destroy; aca_destroy; aoai_destroy; leak_scan' EXIT
 
 # Wait for a run-created client secret to actually mint a token before the live
 # cell starts (live finding 2026-11-22: Entra answers 401 for a brand-new secret
@@ -341,7 +533,7 @@ trap 'graph_destroy; agenttokens_destroy; aca_destroy; leak_scan' EXIT
 # $1 label  $2 client-id file (scratch)  $3 secret value  $4 scope
 wait_secret_usable() {
     local label="$1" id_file="$2" secret="$3" scope="$4"
-    local wait_budget="${CREDPROX_M46_SECRET_WAIT_SECONDS:-120}"
+    local wait_budget="${CREDPROX_M46_SECRET_WAIT_SECONDS-120}"
     local client_id code start now
     client_id="$(tr -d '\n' < "$id_file" 2>/dev/null)"
     if [ -z "$client_id" ]; then
@@ -371,6 +563,125 @@ wait_secret_usable() {
     done
 }
 
+# Entra answers a freshly-created secret with 401 for a short while (M46 finding,
+# wait_secret_usable above); a freshly-ASSIGNED app role has the same propagation
+# delay before it appears in issued tokens. The sample's routes name roles
+# (docs-read for docs, model-call for the model), so a token that lands without
+# both roles 403s in the live cell exactly like the harness gap this leg exists
+# to catch (live run 2) — indistinguishable from a real regression. Poll until
+# the mapped caller's token carries BOTH. Unlike wait_secret_usable this probe
+# reads the body (the roles live in the access token's claims), but the body and
+# the token are never printed and never enter argv or a file: the token travels
+# to curl on STDIN only, the claims are decoded in shell variables, and only the
+# pass/fail lines print. Budget: CREDPROX_M46_ROLE_WAIT_SECONDS (default 300).
+# $1 label  $2 client-id file (scratch)  $3 secret value  $4 scope
+wait_roles_in_token() {
+    local label="$1" id_file="$2" secret="$3" scope="$4"
+    local wait_budget="${CREDPROX_M46_ROLE_WAIT_SECONDS-300}"
+    local client_id body token payload claims has_roles has_docs has_model start now
+    client_id="$(tr -d '\n' < "$id_file" 2>/dev/null)"
+    if [ -z "$client_id" ]; then
+        echo "FAIL: create reported success but $id_file is missing or empty; see $log"
+        exit 1
+    fi
+    start="$(date +%s)"
+    while :; do
+        body="$(printf '%s' "$secret" | curl -s --max-time 15 \
+            --data-urlencode "grant_type=client_credentials" \
+            --data-urlencode "client_id=$client_id" \
+            --data-urlencode "scope=$scope" \
+            --data-urlencode 'client_secret@-' \
+            "https://login.microsoftonline.com/$TENANT_ID/oauth2/v2.0/token" 2>/dev/null)" || body=""
+        case "$body" in
+            *'"access_token"'*) ;;
+            *) body="";;
+        esac
+        if [ -n "$body" ]; then
+            token="${body#*'"access_token":"'}"
+            token="${token%%\"*}"
+            payload="$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')"
+            while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="${payload}="; done
+            claims="$(printf '%s' "$payload" | base64 -d 2>/dev/null)" || claims=""
+            has_roles=0; has_docs=0; has_model=0
+            case "$claims" in *'"roles"'*) has_roles=1;; esac
+            case "$claims" in *docs-read*) has_docs=1;; esac
+            case "$claims" in *model-call*) has_model=1;; esac
+            if [ "$has_roles" = "1" ] && [ "$has_docs" = "1" ] && [ "$has_model" = "1" ]; then
+                now="$(date +%s)"
+                echo "OK: $label token carries both app roles after $((now - start)) s"
+                return 0
+            fi
+        fi
+        now="$(date +%s)"
+        if [ $((now - start)) -ge "$wait_budget" ]; then
+            echo "FAIL: the $label token never carried BOTH app roles (docs-read and model-call) within ${wait_budget} s of polling the tenant token endpoint; aborting before the live cell (the destroy below still runs)"
+            exit 1
+        fi
+        sleep 5
+    done
+}
+
+# A freshly-assigned role needs up to five minutes to take effect on the resource
+# (Microsoft: a 403 right after the assignment means wait and retry, not
+# troubleshoot - see the citations in live-m52-aoai.sh). Poll the run's OWN
+# endpoint's data-plane MODELS LIST (GET /openai/models, the GA release named in
+# the variable below) with a bearer token for the cognitive-services scope:
+# a zero-cost, authorised, read-only call, and the role this run grants carries
+# Microsoft.CognitiveServices/accounts/OpenAI/*/read, which admits it (Azure
+# built-in role definitions, ai-machine-learning page). 200 = the role is live;
+# 401 and 403 keep polling (the token is valid; the role decision has not reached
+# this resource yet) and so does the no-answer code 000 (the fresh
+# custom-subdomain DNS may still be resolving - the account's own provisioning
+# enum carries a ResolvingDNS state); anything else is a dial no waiting fixes.
+# Live run 4 (2026-11-25) chose this probe the hard way: the OLD deployments-list
+# verb is not in the current data-plane API, so a correctly authorised caller got
+# 404 and the probe aborted - the right call on the wrong target.
+# A timeout FAILs BEFORE the live cell spends a call on
+# it, and the armed destroy still runs through the trap. The bearer never enters
+# argv (curl reads its header from stdin config) and is never printed; only the
+# deadline, codes and elapsed time print. Budget:
+# CREDPROX_M52_AOAI_ROLE_WAIT_SECONDS (default 300, shape-refused at the top).
+# $1 endpoint base (no trailing slash)
+# One named variable for the probe's api-version. 2024-10-21 is the GA release of
+# the Azure OpenAI data-plane inference specification (Azure OpenAI reference
+# page) and the view the Models list operation is documented under (its REST page,
+# fetched 2026-11-25). The reference's chat-route EXAMPLE names the older GA
+# 2024-06-01 - the same specification at an earlier release - so the probe and the
+# sample's chat route deliberately do NOT share a version, stated rather than
+# papered over; both are GA releases with the operations they dial.
+AOAI_DATA_PLANE_API_VERSION="2024-10-21"
+wait_aoai_role_active() {
+    local base="$1"
+    local wait_budget="${CREDPROX_M52_AOAI_ROLE_WAIT_SECONDS-300}"
+    local token code start now
+    echo "aoai role wait: polling the created endpoint up to ${wait_budget} s - deadline $(date -u -d "+${wait_budget} seconds" +%H:%M:%SZ) UTC"
+    token="$(az account get-access-token --scope https://cognitiveservices.azure.com/.default --query accessToken -o tsv 2>/dev/null)" || token=""
+    if [ -z "$token" ]; then
+        echo "FAIL: no bearer token for the role-propagation probe; aborting before the live cell (the destroy below still runs)"
+        exit 1
+    fi
+    start="$(date +%s)"
+    while :; do
+        code="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -s --max-time 15 -K - -o /dev/null -w '%{http_code}' "$base/openai/models?api-version=$AOAI_DATA_PLANE_API_VERSION" 2>/dev/null)" || code=""
+        case "$code" in
+            200)
+                now="$(date +%s)"
+                echo "OK: the role is live on the endpoint after $((now - start)) s"
+                return 0 ;;
+            401|403|000|'') ;;
+            *)
+                echo "FAIL: the endpoint answered http $code to an authenticated models list - that is not role propagation; aborting before the live cell (the destroy below still runs)"
+                exit 1 ;;
+        esac
+        now="$(date +%s)"
+        if [ $((now - start)) -ge "$wait_budget" ]; then
+            echo "FAIL: the role never went live within ${wait_budget} s of polling the endpoint (last answer: ${code:-no-code}); aborting before the live cell (the destroy below still runs)"
+            exit 1
+        fi
+        sleep 5
+    done
+}
+
 cd "$repo_root"
 if [ "$vendor" = "graph" ]; then
     # The run creates exactly one app registration (+ its service principal and
@@ -394,7 +705,7 @@ if [ "$vendor" = "graph" ]; then
     fi
     wait_secret_usable "graph client" "$graph_scratch/client-id.txt" "$graph_secret" \
         "https://graph.microsoft.com/.default"
-elif [ "$vendor" = "agenttokens" ]; then
+elif [ "$vendor" = "agenttokens" ] || [ "$vendor" = "foundrylocal" ]; then
     # The run creates exactly three app registrations (resource app + mapped and
     # unmapped client apps, with service principals and two 30-day secrets piped
     # straight to the scratch handoff) and deletes them again before exiting.
@@ -432,6 +743,12 @@ elif [ "$vendor" = "agenttokens" ]; then
     fi
     wait_secret_usable "mapped" "$agenttokens_scratch/app2-id.txt" "$agenttokens_secret2" "$agenttokens_resource_id/.default"
     wait_secret_usable "unmapped" "$agenttokens_scratch/app3-id.txt" "$agenttokens_secret3" "$agenttokens_resource_id/.default"
+    # The mapped token must actually CARRY both app roles before the cell runs:
+    # fresh role assignments reach issued tokens only after an Entra delay, and a
+    # token without model-call would 403 like the harness gap this leg fixes
+    # (live run 2). The unmapped caller needs no wait — it must stay refused
+    # whatever roles its token carries.
+    wait_roles_in_token "mapped" "$agenttokens_scratch/app2-id.txt" "$agenttokens_secret2" "$agenttokens_resource_id/.default"
 elif [ "$vendor" = "aca" ]; then
     # The aca live leg is SCRIPT-driven (disclosed: the app serves internal
     # ingress only, so no test process outside the environment can reach it).
@@ -476,6 +793,65 @@ elif [ "$vendor" = "aca" ]; then
     fi
 fi
 
+if [ "$vendor" = "azureopenai" ] && [ "$aoai_armed" = "1" ]; then
+    # The armed leg creates its own resource (owner's go-ahead; the lead runs it).
+    # Gates FIRST: this path writes to a subscription, so az sign-in and curl (the
+    # role wait) are required HERE - an unarmed zero-spend run never reaches them
+    # and needs neither.
+    if ! command -v az >/dev/null 2>&1; then
+        echo "SKIP: the armed azureopenai leg creates resources and needs the az CLI on PATH (see docs/live-testing.md)"
+        exit 2
+    fi
+    if ! az account get-access-token >/dev/null 2>&1; then
+        echo "SKIP: no active az login for the armed azureopenai leg (run: az login)"
+        exit 2
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "SKIP: the armed azureopenai leg waits for its role assignment to go live and needs curl on PATH"
+        exit 2
+    fi
+    # The role assignee's object id, for the leak scan only: captured into a
+    # variable, never exported, never printed (the helper resolves its own copy;
+    # an empty value simply disables that scan arm).
+    aoai_principal="$(az ad signed-in-user show --query id -o tsv 2>/dev/null)" || aoai_principal=""
+    # Arm the destroy BEFORE the create: a create that fails partway can leave
+    # real resources, and the destroy is read-back based, so it is safe on
+    # partial or empty state. Destroy deletes ONLY the group rg.txt records as
+    # this run's own - a create that died before recording its group is reported
+    # as an unconfirmed read-back (non-zero), never swept by guessing the fixed
+    # name: a group this run did not create is not this run's to delete.
+    aoai_infra_created=1
+    echo "--- live-m52-aoai.sh create (rg + account + deployment + role) ---"
+    if ! "$repo_root/scripts/live-m52-aoai.sh" create 2>&1 | tee -a "$log"; then
+        echo "FAIL: live-m52-aoai.sh create failed (ids never shown); see $log"
+        exit 1
+    fi
+    aoai_endpoint=""
+    aoai_deployment=""
+    if [ -s "$aoai_scratch/endpoint.txt" ] && [ -s "$aoai_scratch/deployment.txt" ]; then
+        aoai_endpoint="$(tr -d '\n' < "$aoai_scratch/endpoint.txt")"
+        aoai_deployment="$(tr -d '\n' < "$aoai_scratch/deployment.txt")"
+    fi
+    if [ -z "$aoai_endpoint" ] || [ -z "$aoai_deployment" ]; then
+        echo "FAIL: create reported success but the scratch names handoff is missing or empty; see $log"
+        exit 1
+    fi
+    # The live cell's env contract is unchanged - the dial names come from the
+    # runner's environment; only their SOURCE is now the run's own resource, and
+    # the cell validates the shape (the same IsPlausibleEndpoint the old central
+    # file was checked with).
+    export AZURE_OPENAI_ENDPOINT="$aoai_endpoint"
+    export AZURE_OPENAI_DEPLOYMENT="$aoai_deployment"
+    wait_aoai_role_active "${aoai_endpoint%/}"
+fi
+
+# Runner-only marker: the vendor-scratch-gated live cells require this variable
+# to name THIS leg on top of the run-created handoff, so leftover scratch from
+# any interrupted run — this vendor's or another's — can never arm a live cell
+# inside an offline test run. It is exported here and nowhere else: never read
+# from the central env file, so a bare dotnet test process never carries it.
+export CREDPROX_LIVE_VENDOR="$vendor"
+
 if dotnet test tests/CredProx.LiveTests -c Release --filter "$test_filter" --logger "console;verbosity=detailed" 2>&1 | tee -a "$log"; then
     tests_ok=1
 else
@@ -484,10 +860,12 @@ fi
 
 if [ "$vendor" = "graph" ]; then
     graph_destroy
-elif [ "$vendor" = "agenttokens" ]; then
+elif [ "$vendor" = "agenttokens" ] || [ "$vendor" = "foundrylocal" ]; then
     agenttokens_destroy
 elif [ "$vendor" = "aca" ]; then
     aca_destroy
+elif [ "$vendor" = "azureopenai" ]; then
+    aoai_destroy
 fi
 
 # Happy path: the destroys above already landed, so scan inline before the PASS
@@ -507,15 +885,29 @@ if [ "$aca_destroy_rc" -ne 0 ]; then
     echo "FAIL: the run's Azure resources were not fully deleted (read-back incl resource group); see $log"
     exit 1
 fi
+if [ "$aoai_destroy_rc" -ne 0 ]; then
+    echo "FAIL: the run's Azure OpenAI resources were not fully deleted (read-back incl resource group); see $log"
+    exit 1
+fi
 
 if [ "$tests_ok" -ne 1 ]; then
     echo "FAIL: the live test run did not pass; see $log"
     exit 1
 fi
 
-observed="$(grep -m1 'OBSERVED ' "$log" || true)"
+observed="$(grep 'OBSERVED ' "$log" || true)"
 if [ -n "$observed" ]; then
-    echo "PASS $vendor: ${observed#*OBSERVED }"
+    # Post-release item 3 (2026-11-25): a vendor's run may print one OBSERVED line
+    # per live cell (several vendors legitimately run several cells), and the old
+    # grep -m1 silently dropped every line but the first from the PASS record.
+    # Aggregate: every payload joins into the one PASS line.
+    joined=""
+    while IFS= read -r observed_line; do
+        [ -n "$observed_line" ] || continue
+        payload="${observed_line#*OBSERVED }"
+        if [ -n "$joined" ]; then joined="$joined; $payload"; else joined="$payload"; fi
+    done <<< "$observed"
+    echo "PASS $vendor: $joined"
     exit 0
 fi
 
@@ -523,6 +915,7 @@ skip_line="$(grep -m1 'SKIP (live):' "$log" || true)"
 if [ -n "$skip_line" ]; then
     echo "SKIP: the live cell did not run."
     echo "      $skip_line"
+    echo "      kept for inspection: $log"
     exit 2
 fi
 

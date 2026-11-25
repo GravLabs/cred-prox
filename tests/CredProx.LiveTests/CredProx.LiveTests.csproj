@@ -19,6 +19,9 @@
     <None Remove="Witness/**" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The h2 vendor stand-in in AiGatewayMeteredH2StandInTests hosts Kestrel
+         in-process; the fixtures exec every other host they drive as its own process. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
@@ -37,11 +40,28 @@
     <ProjectReference Include="..\..\samples\AiGateway\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\MicrosoftGraph\MicrosoftGraph.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\AgentTokens\AgentTokens.csproj" ReferenceOutputAssembly="false" />
+    <!-- The AgentTokens fixture execs the Agent dll as its own process too; without
+         this build-only reference a fresh worktree that builds only this project has
+         no Agent.dll and the live leg dies in the fixture ctor. -->
+    <ProjectReference Include="..\..\samples\AgentTokens\Agent\Agent.csproj" ReferenceOutputAssembly="false" />
     <!-- The aca loopback cells exec these three dlls (host + shipped stand-in +
          acacheck harness), same no-assembly-reference discipline as above. -->
     <ProjectReference Include="..\..\samples\AzureContainerApps\AzureContainerApps.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\AzureContainerApps\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\tools\aca-live-harness\AcaLiveHarness.csproj" ReferenceOutputAssembly="false" />
+    <!-- The foundrylocal live fixture execs the sample gate dll as its own
+         process; live run 1 at 7ae9bf8 died in the fixture ctor with no built
+         FoundryLocalAgent.dll because a full-solution build had been masking
+         this missing reference. Same build-only discipline as above. -->
+    <ProjectReference Include="..\..\samples\FoundryLocalAgent\FoundryLocalAgent.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalGateway\FoundryLocalGateway.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalCloud\FoundryLocalCloud.csproj" ReferenceOutputAssembly="false" />
+    <!-- The Azure OpenAI live cell execs the sample dll as its own process; live
+         run 5 died with no built AzureOpenAI.dll after a bins sweep because the
+         full-solution build had been masking this missing build-only reference
+         the whole time - the same failure shape foundry-local live run 1 showed
+         at 7ae9bf8. Same build-only discipline as above. -->
+    <ProjectReference Include="..\..\samples\AzureOpenAI\AzureOpenAI.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="Witness\CredProx.LiveWitness.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>

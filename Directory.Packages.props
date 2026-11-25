@@ -10,13 +10,23 @@
          1.5+ drags Core 1.61 which re-exposes DefaultAzureCredential and collides
          (CS0433) with the repo-pinned Azure.Identity 1.13.1. -->
     <PackageVersion Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.3.2" />
-    <PackageVersion Include="CredProx" Version="0.15.1" />
-    <PackageVersion Include="CredProx.Azure" Version="0.15.1" />
-    <PackageVersion Include="CredProx.Identity" Version="0.15.1" />
-    <PackageVersion Include="CredProx.Operations" Version="0.15.1" />
-    <PackageVersion Include="CredProx.Testing" Version="0.15.1" />
+    <PackageVersion Include="CredProx" Version="0.15.2" />
+    <PackageVersion Include="CredProx.Azure" Version="0.15.2" />
+    <PackageVersion Include="CredProx.Identity" Version="0.15.2" />
+    <PackageVersion Include="CredProx.Operations" Version="0.15.2" />
+    <PackageVersion Include="CredProx.Testing" Version="0.15.2" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageVersion Include="Azure.Identity" Version="1.13.1" />
+    <!-- M50 metering leg of the AiGateway sample: OTel SDK with OTLP as default and the
+         console exporter by configuration. 1.15.3: first version clear of the GHSA-g94r
+         and GHSA-4625 advisories (the NuGet audit is warnings-as-errors here). -->
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Exporter.Console" Version="1.15.3" />
+    <!-- Test-only (M50 live-failure export-seam witness in CredProx.Tests): the real
+         MeterProvider the shipped exporters attach to, asserted in-process through a
+         collecting reader. Same 1.15.3 family and advisory status as the lines above. -->
+    <PackageVersion Include="OpenTelemetry" Version="1.15.3" />
   </ItemGroup>
   <ItemGroup>
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />

@@ -11,8 +11,14 @@
     <Project Path="samples/ADP/ADP.csproj" />
     <Project Path="samples/AgentEgress/AgentEgress.csproj" />
     <Project Path="samples/AgentTokens/AgentTokens.csproj" />
+    <Project Path="samples/AgentTokens/Agent/Agent.csproj" />
     <Project Path="samples/AiGateway/AiGateway.csproj" />
     <Project Path="samples/AzureContainerApps/AzureContainerApps.csproj" />
+    <Project Path="samples/AzureOpenAI/AzureOpenAI.csproj" />
+    <Project Path="samples/FoundryLocalAgent/Agent/LocalAgent.csproj" />
+    <Project Path="samples/FoundryLocalAgent/FoundryLocalAgent.csproj" />
+    <Project Path="samples/FoundryLocalCloud/FoundryLocalCloud.csproj" />
+    <Project Path="samples/FoundryLocalGateway/FoundryLocalGateway.csproj" />
     <Project Path="samples/CallerApiKey/CallerApiKey.csproj" />
     <Project Path="samples/CustomPlugin/CustomPlugin.csproj" />
     <Project Path="samples/GitHubApp/GitHubApp.csproj" />

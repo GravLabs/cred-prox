@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Examples use the experimental contract on purpose. -->
+    <NoWarn>$(NoWarn);CREDPROX001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- StubApi/ is its own project; keep its files out of this compilation. -->
+    <Compile Remove="StubApi/**" />
+    <Content Remove="StubApi/**" />
+    <None Remove="StubApi/**" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="CredProx" />
+    <PackageReference Include="CredProx.Operations" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" />
+  </ItemGroup>
+
+</Project>

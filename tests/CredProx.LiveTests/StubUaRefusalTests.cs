@@ -23,6 +23,7 @@ public sealed class StubUaRefusalCollection : ICollectionFixture<GitHubAppFixtur
 }
 
 [Collection("StubUaRefusal")]
+[Trait("Layer", "Offline")]
 public sealed class StubUaRefusalTests
 {
     private readonly GitHubAppFixture _fixture;

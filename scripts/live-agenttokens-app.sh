@@ -5,22 +5,31 @@
 #                                         api://<its own appId> (set by PATCH
 #                                         after create - the tenant's default
 #                                         protection policy refuses a fixed
-#                                         api:// name at create), plus one
-#                                         APPLICATION app role docs-read
+#                                         api:// name at create), plus two
+#                                         APPLICATION app roles: docs-read and
+#                                         model-call (the sample's model route
+#                                         names model-call; a token without it
+#                                         is refused 403 before any vendor call
+#                                         — live run 2 finding)
 #                credprox-m46-agent-mapped     client app whose token the sample
 #                                         WILL map (its id goes into TokenClientIds)
-#                credprox-m46-agent-unmapped   client app that also carries the
-#                                         role assignment, but whose id is NOT
-#                                         configured — its token must be refused
-#                                         for not being a configured caller
+#                credprox-m46-agent-unmapped   client app that carries BOTH
+#                                         role assignments, exactly like the
+#                                         mapped one (lead ruling 2026-11-23:
+#                                         with every role present its 401 can
+#                                         only come from caller mapping, which
+#                                         is the discriminator), but whose id
+#                                         is NOT configured — its token must be
+#                                         refused for not being a configured
+#                                         caller
 #              service principals for all three (not auto-provisioned, M26
 #              finding), role assignments for both client apps, and one secret
 #              per client app piped straight to the scratch dir - no secret value
 #              ever prints or enters argv of any later step.
 #   destroy  - deletes all three apps (their service principals go with them),
-#              read-back proves ZERO apps and service principals under those
-#              display names, and the exit code reflects the read-back (the
-#              destroy-r2 discipline).
+#              read-back proves ZERO apps, service principals and app-role
+#              values under those display names, and the exit code reflects the
+#              read-back (the destroy-r2 discipline).
 #   --dry-run- prints the plan; touches nothing.
 #
 # Only a seat's LEAD runs create/destroy against the real tenant; read verbs are
@@ -84,18 +93,26 @@ case "$verb" in
         echo "  az ad app create --display-name $RES_NAME (NO --identifier-uris: a fixed api:// name is refused by the tenant's default protection policy)"
         echo "  az ad sp create --id <resource app id>"
         echo "  az rest PATCH applications/<resource obj id> identifierUris=[api://<resource appId>] (the one form every tenant accepts)"
-        echo "  az rest PATCH applications/<resource obj id> appRoles=[{value:docs-read,type Application}]"
+        echo "  az rest PATCH applications/<resource obj id> appRoles=[{value:docs-read,type Application},{value:model-call,type Application}]"
         echo "  create client apps $MAPPED_NAME and $UNMAPPED_NAME (SP + one 30-day secret each, piped to $SCRATCH)"
-        echo "  az rest POST appRoleAssignments for BOTH client service principals"
-        echo "  read-backs: identifierUris exactly [api://<resource appId>], role count 1, both assignments present, both secrets non-empty"
+        echo "  az rest POST appRoleAssignments: BOTH client SPs get docs-read AND model-call (identical role sets — the unmapped 401 must come from caller mapping alone)"
+        echo "  read-backs: identifierUris exactly [api://<resource appId>], role count 2 with values docs-read model-call, each client SP exactly 2 assignments, both secrets non-empty"
         echo "  handoff: app ids + secrets + resource-audience.txt (the api:// audience) into $SCRATCH at mode 600"
         echo "DRY-RUN destroy would run:"
         echo "  az ad app delete per listed app of the three display names"
-        echo "  read-back: app and service-principal counts 0 for all three names; exit reflects the read-back"
+        echo "  read-back: app, service-principal and app-role-value counts 0 for all three names; exit reflects the read-back"
         ;;
     create)
         require_signed_in
         mkdir -p "$SCRATCH" && chmod 700 "$SCRATCH"
+        # One az-vendor leg at a time: agenttokens and foundrylocal share this
+        # scratch and the same three apps, so a handoff already present here
+        # means another leg created (or is mid-create of) them. Writing over it
+        # would leave that run's apps with no recorded ids and orphan them, so
+        # refuse before minting anything.
+        if [ -f "$SCRATCH/resource-audience.txt" ]; then
+            die "a run-created handoff already exists under $SCRATCH - another az-vendor leg is or was in flight on the shared scratch; run one vendor at a time, destroy before the next, or remove the stale handoff only after confirming no live leg is running"
+        fi
         # No --identifier-uris at create: the tenant's default protection policy
         # refuses a fixed api:// name ("All newly added URIs must contain a
         # tenant verified domain, tenant ID, or app ID" — measured 2026-11-22).
@@ -120,12 +137,13 @@ case "$verb" in
             --body "{\"identifierUris\":[\"api://$RES_APP_ID\"],\"api\":{\"requestedAccessTokenVersion\":2}}" \
             >/dev/null || die "identifierUris PATCH failed"
         # App-role creation goes through the Graph API (az ad app update --set is
-        # rejected on the app schema — M26 finding). The role id is minted here
-        # for this app only; it is not a tenant fact being recalled.
-        ROLE_ID="$(cat /proc/sys/kernel/random/uuid)"
+        # rejected on the app schema — M26 finding). The role ids are minted here
+        # for this app only; they are not tenant facts being recalled.
+        ROLE_ID_DOCS="$(cat /proc/sys/kernel/random/uuid)"
+        ROLE_ID_MODEL="$(cat /proc/sys/kernel/random/uuid)"
         az rest --method PATCH \
             --uri "https://graph.microsoft.com/v1.0/applications/$RES_OBJ_ID" \
-            --body "{\"appRoles\":[{\"id\":\"$ROLE_ID\",\"allowedMemberTypes\":[\"Application\"],\"description\":\"Read docs through the CredProx live test\",\"displayName\":\"docs-read\",\"isEnabled\":true,\"origin\":\"Application\",\"value\":\"docs-read\"}]}" \
+            --body "{\"appRoles\":[{\"id\":\"$ROLE_ID_DOCS\",\"allowedMemberTypes\":[\"Application\"],\"description\":\"Read docs through the CredProx live test\",\"displayName\":\"docs-read\",\"isEnabled\":true,\"origin\":\"Application\",\"value\":\"docs-read\"},{\"id\":\"$ROLE_ID_MODEL\",\"allowedMemberTypes\":[\"Application\"],\"description\":\"Call the model through the CredProx live test\",\"displayName\":\"model-call\",\"isEnabled\":true,\"origin\":\"Application\",\"value\":\"model-call\"}]}" \
             >/dev/null || die "appRoles PATCH failed"
         # A die inside $( ) only kills the subshell, so re-check the result:
         MAPPED_APP_ID="$(create_client_app "$MAPPED_NAME" app2)"
@@ -136,12 +154,17 @@ case "$verb" in
         UNMAPPED_SP_ID="$(az ad sp list --filter "appId eq '$UNMAPPED_APP_ID'" --query "[0].id" -o tsv)"
         [ -n "$MAPPED_SP_ID" ] && [ "$MAPPED_SP_ID" != "None" ] || die "mapped client SP not found"
         [ -n "$UNMAPPED_SP_ID" ] && [ "$UNMAPPED_SP_ID" != "None" ] || die "unmapped client SP not found"
-        assign_role "$MAPPED_SP_ID" "$RES_SP_ID" "$ROLE_ID"
-        assign_role "$UNMAPPED_SP_ID" "$RES_SP_ID" "$ROLE_ID"
+        # Both client SPs carry the IDENTICAL role set: the unmapped 401 can then
+        # only come from caller mapping, not from a missing role (lead ruling).
+        assign_role "$MAPPED_SP_ID" "$RES_SP_ID" "$ROLE_ID_DOCS"
+        assign_role "$MAPPED_SP_ID" "$RES_SP_ID" "$ROLE_ID_MODEL"
+        assign_role "$UNMAPPED_SP_ID" "$RES_SP_ID" "$ROLE_ID_DOCS"
+        assign_role "$UNMAPPED_SP_ID" "$RES_SP_ID" "$ROLE_ID_MODEL"
         # Read-backs (create side pairs with destroy's):
         URI_COUNT="$(az ad app show --id "$RES_APP_ID" --query "identifierUris | length(@)" -o tsv)"
         URI_AUD="$(az ad app show --id "$RES_APP_ID" --query "join(' ', identifierUris)" -o tsv)"
         ROLE_COUNT="$(az ad app show --id "$RES_APP_ID" --query "appRoles | length(@)" -o tsv)"
+        ROLE_VALUES="$(az ad app show --id "$RES_APP_ID" --query "join(' ', appRoles[].value)" -o tsv)"
         ASSIGN_2="$(az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$MAPPED_SP_ID/appRoleAssignments" \
             --query "value | length(@)" -o tsv)"
         ASSIGN_3="$(az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$UNMAPPED_SP_ID/appRoleAssignments" \
@@ -152,9 +175,18 @@ case "$verb" in
         # an audience the sample never accepts.
         [ "$URI_AUD" = "api://$RES_APP_ID" ] \
             || die "read-back: resource app identifier is not its own api://<appId> (found $URI_COUNT uri(s))"
-        [ "$ROLE_COUNT" = "1" ] || die "read-back: expected 1 app role on the resource app, found $ROLE_COUNT"
-        [ "$ASSIGN_2" -ge 1 ] 2>/dev/null || die "read-back: mapped client SP has no role assignment"
-        [ "$ASSIGN_3" -ge 1 ] 2>/dev/null || die "read-back: unmapped client SP has no role assignment"
+        [ "$ROLE_COUNT" = "2" ] || die "read-back: expected 2 app roles on the resource app, found $ROLE_COUNT"
+        # Exact role SET, not just the count: the sample's routes name docs-read
+        # and model-call; a PATCH that landed a different value would mint tokens
+        # the routes refuse, and the count alone would not catch a swapped value.
+        # Graph may return appRoles in any order (live run 3 died here when the
+        # join came back "model-call docs-read"), so the compare sorts first —
+        # a duplicate or a wrong value still misses the exact-string check.
+        ROLE_SET="$(printf '%s\n' $ROLE_VALUES | LC_ALL=C sort | paste -sd' ' -)"
+        [ "$ROLE_SET" = "docs-read model-call" ] \
+            || die "read-back: resource app roles are not exactly docs-read model-call (found: $ROLE_VALUES)"
+        [ "$ASSIGN_2" = "2" ] 2>/dev/null || die "read-back: mapped client SP has no role assignment for both roles (found $ASSIGN_2)"
+        [ "$ASSIGN_3" = "2" ] 2>/dev/null || die "read-back: unmapped client SP has no role assignment for both roles (found $ASSIGN_3)"
         # v2 access tokens (requestedAccessTokenVersion 2, set with the identifier)
         # carry the v2 issuer the sample's Authority names and the API's client id
         # as aud, so the client id is the audience. The live cell cannot know a
@@ -163,12 +195,13 @@ case "$verb" in
         printf '%s\n' "$RES_APP_ID" > "$SCRATCH/resource-audience.txt" \
             || die "could not write the audience handoff"
         chmod 600 "$SCRATCH/resource-audience.txt"
-        echo "OK live-agenttokens-app create: 3 apps, 3 service principals, 2 role assignments, 2 secrets + audience piped to scratch (values not shown)"
+        echo "OK live-agenttokens-app create: 3 apps, 3 service principals, 4 app-role assignments (both client SPs: docs-read + model-call), 2 secrets + audience piped to scratch (values not shown)"
         ;;
     destroy)
         require_signed_in
         APP_LEFT_TOTAL=0
         SP_LEFT_TOTAL=0
+        ROLE_LEFT_TOTAL=0
         for name in "$RES_NAME" "$MAPPED_NAME" "$UNMAPPED_NAME"; do
             ids="$(az ad app list --display-name "$name" --query "[].appId" -o tsv)"
             if [ -n "$ids" ]; then
@@ -178,15 +211,19 @@ case "$verb" in
             fi
             left="$(az ad app list --display-name "$name" --query "length(@)" -o tsv)"
             sp_left="$(az ad sp list --display-name "$name" --query "length(@)" -o tsv)"
+            # An app deleted with its roles leaves no appRoles anywhere; a
+            # half-deleted registration would still surface its role values.
+            role_left="$(az ad app list --display-name "$name" --query "[].appRoles[].value | length(@)" -o tsv)"
             [ "$left" = "0" ] || APP_LEFT_TOTAL=$((APP_LEFT_TOTAL + left))
             [ "$sp_left" = "0" ] || SP_LEFT_TOTAL=$((SP_LEFT_TOTAL + sp_left))
+            [ "$role_left" = "0" ] || ROLE_LEFT_TOTAL=$((ROLE_LEFT_TOTAL + role_left))
         done
         rm -rf "$SCRATCH"
-        if [ "$APP_LEFT_TOTAL" != "0" ] || [ "$SP_LEFT_TOTAL" != "0" ]; then
-            echo "DESTROY-READBACK FAILED: apps left=$APP_LEFT_TOTAL service-principals left=$SP_LEFT_TOTAL" >&2
+        if [ "$APP_LEFT_TOTAL" != "0" ] || [ "$SP_LEFT_TOTAL" != "0" ] || [ "$ROLE_LEFT_TOTAL" != "0" ]; then
+            echo "DESTROY-READBACK FAILED: apps left=$APP_LEFT_TOTAL service-principals left=$SP_LEFT_TOTAL app-role values left=$ROLE_LEFT_TOTAL" >&2
             exit 1
         fi
-        echo "OK live-agenttokens-app destroy: app registrations 0, service principals 0, scratch removed"
+        echo "OK live-agenttokens-app destroy: app registrations 0, service principals 0, app-role values 0, scratch removed"
         ;;
     *)
         echo "usage: live-agenttokens-app.sh create|destroy|--dry-run" >&2

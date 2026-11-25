@@ -3,6 +3,7 @@ using CredProx;
 using CredProx.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Yarp.ReverseProxy.Configuration;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -139,6 +140,70 @@ internal static class CredProxOperationsServiceCollectionExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton<ClusterResilienceRegistry>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IPipelineFeature, CredProxResilienceFeature>());
+        return services;
+    }
+
+    /// <summary>
+    /// Turns on usage metering (M50, ADR-0008): binds <c>CredProx:Metering</c> (the token
+    /// parse window) and registers the metering features — the outbound-body counter, the
+    /// per-request record at response completion, and the opt-in usage peek. Instruments
+    /// land on the same <c>CredProx</c> meter as the throttle, resilience and health
+    /// instruments. LLM token counts are a per-route opt-in through the
+    /// <see cref="CredProxMetering.UsageRouteMetadata"/> metadata key, whose value NAMES
+    /// the usage format — <c>"anthropic"</c>, <c>"openai"</c>, or a host reader's own
+    /// <see cref="IUsageReader.Format"/>. Readers are selected by format first, media type
+    /// second, so vendors sharing a media type never compete (M54, ADR-0009). Unknown keys
+    /// are refused at startup and on every configuration reload, and so is a route value
+    /// that names no registered format — metering config that cannot bind or cannot be
+    /// served fails, never sits inert. Options are validated eagerly here — a bad window
+    /// fails startup.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The application configuration root.</param>
+    /// <returns>The same <paramref name="services"/>, for chaining.</returns>
+    internal static IServiceCollection AddCredProxMetering(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+        services.AddLogging();
+        // M17 (§3.3): unknown keys under CredProx:Metering would bind to nothing — rejected.
+        CredProxConfigValidation.RejectUnknownKeysAtStartup(configuration, "CredProx:Metering", typeof(CredProxMeteringOptions));
+        // Reload protection, on the public one-shot surface: the metering leg keeps its own
+        // change-token walk alive (CredProxMeteringReloadGuard, M50 fold LOW-4), so an
+        // unknown key introduced by a reload fails closed the same way it does at startup —
+        // logged by kind on the M45 F-5 house pattern, never thrown on the reload thread.
+        // The guard is resolved by the metering response feature, which the startup
+        // validator constructs at host start. (Throttling and resilience bind snapshots and
+        // restart to change; metering's window is reload-checked because this leg promises it.)
+        services.TryAddSingleton(sp => new CredProxMeteringReloadGuard(
+            configuration,
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CredProxMeteringReloadGuard>>()));
+        var options = new CredProxMeteringOptions();
+        configuration.GetSection("CredProx:Metering").Bind(options);
+        var validation = new CredProxMeteringOptionsValidator().Validate(null, options);
+        if (validation.Failed)
+        {
+            throw new Microsoft.Extensions.Options.OptionsValidationException(
+                nameof(CredProxMeteringOptions), typeof(CredProxMeteringOptions), validation.Failures);
+        }
+
+        services.TryAddSingleton(options);
+        // Built-in provider readers first; a host's own transient IUsageReader registrations
+        // are considered alongside them. One fresh reader per response. Selection matches
+        // Format against the route's named format, so registration order no longer decides
+        // which vendor parses a response.
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IUsageReader, AnthropicJsonUsageReader>());
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IUsageReader, AnthropicSseUsageReader>());
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IUsageReader, OpenAiJsonUsageReader>());
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IUsageReader, OpenAiSseUsageReader>());
+        // Fail-closed usage-format check (M54, ADR-0009): YARP runs every registered
+        // IConfigValidator at startup and on every reload, so a route naming a format no
+        // reader declares is refused at both moments, naming the route id and the value.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigValidator, CredProxUsageFormatConfigValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRequestFeature, CredProxMeteringRequestFeature>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IResponseFeature, CredProxMeteringResponseFeature>());
         return services;
     }
 }

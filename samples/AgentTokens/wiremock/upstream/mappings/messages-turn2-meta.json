@@ -1,0 +1,27 @@
+{
+  "metadata": { "note": "Turn 2: the agent reported the docs result; now ask for the tool the allow-list does NOT cover — the proxy will answer 403 and the agent must carry on. Scenario chain: docs-answered -> meta-answered." },
+  "priority": 1,
+  "scenarioName": "agent-loop",
+  "requiredScenarioState": "docs-answered",
+  "newScenarioState": "meta-answered",
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/messages"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "id": "msg_stub_turn2",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-haiku-5-5",
+      "content": [
+        { "type": "tool_use", "id": "tu_meta", "name": "github_meta", "input": {} }
+      ],
+      "stop_reason": "tool_use",
+      "stop_sequence": null,
+      "usage": { "input_tokens": 410, "output_tokens": 30 }
+    }
+  }
+}

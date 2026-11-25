@@ -3,7 +3,9 @@
 Do-this steps for the version jumps you are actually on, plus how to read a future
 CHANGELOG entry as an operator. CredProx is pre-1.0: a minor version may carry
 breaking changes, and every one of them ships under a `### Breaking` heading with
-its replacement — nothing breaks silently.
+its replacement — nothing breaks silently. Opt-in feature surfaces get their own
+operator pages under `docs/operations/` — usage metering, for instance, is at
+[operations/metrics.md](operations/metrics.md).
 
 ## 0.11 → 0.12: the package split (the one that needs work)
 

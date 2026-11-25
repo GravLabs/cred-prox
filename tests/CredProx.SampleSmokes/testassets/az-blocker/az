@@ -1,0 +1,6 @@
+#!/bin/sh
+# A stand-in for the Azure CLI that always fails. The AzureOpenAI fixture prepends its
+# directory to the sample host's PATH: if the canned-token seam ever breaks, the host's
+# DefaultAzureCredential chain must fail the cell — it must never fall through to a real
+# az sign-in on this machine and mint a live token inside an offline test.
+exit 1

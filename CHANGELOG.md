@@ -5,6 +5,68 @@ All notable changes to CredProx are documented here. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html). Pre-1.0, the public API may
 change between minor versions; `[Experimental]` APIs may change at any time.
 
+## [Unreleased]
+
+## [0.15.2] - 2026-11-25
+
+### Added
+- **Usage metering** (`CredProx.Operations`, ADR-0008): a `CredProx:Metering` section arms
+  the leg through `.AddOperations()` and emits on the existing `CredProx` meter — a
+  `credprox.requests` counter and `credprox.request.bytes`/`credprox.response.bytes`
+  histograms tagged by caller, credential, destination, route and status class (never a
+  key, token or any per-traffic value; cardinality is bounded by configuration). Routes
+  that opt in with `CredProx.Metering.Usage: "<format>"` route metadata also get
+  `credprox.usage.input_tokens`/`credprox.usage.output_tokens` counters read from the
+  provider's own usage report (built-in formats `anthropic` and `openai`, each covering
+  its non-streaming and streaming reports); a response that reports no usage is counted
+  unmetered for tokens, never guessed, and reading usage never buffers or alters what the
+  caller receives. An unregistered leg creates no instruments and runs no pipeline code. See
+  `docs/operations/metrics.md`; the AiGateway sample exports the meters (OTLP by default,
+  console by `Metrics:Console`). Experimental (`CREDPROX001`): `CredProxMetering`,
+  `CredProxMeteringOptions`, `IUsageReader`.
+- **Per-route usage formats** (`CredProx.Operations`, M54, ADR-0009): `IUsageReader` gained
+  a `Format` member and the `CredProx.Metering.Usage` route value now NAMES the usage
+  format (`"anthropic"`, `"openai"`, or a host reader's own format) instead of the `"true"`
+  preview spelling. Selection takes the reader whose `Format` matches the route (ordinal,
+  case-insensitive) whose `CanRead` claims the media type, so vendors sharing a media type
+  never compete and a host reader with its own format wins its route outright. Built in:
+  `openai` JSON (`prompt_tokens`/`completion_tokens`; detail objects such as
+  `completion_tokens_details.reasoning_tokens` are already included upstream and never
+  added again) and `openai` streaming — exactly the usage-only event (empty `choices` plus
+  `usage`); a stream that never carries it (`stream_options.include_usage` unset) stays
+  unmetered for tokens. A route naming a format no registered reader declares is refused at
+  startup and on every configuration reload, naming the route id and the value — the
+  metering leg contributes its own route validator; zero core changes.
+- **Scope as an assertion claim** (`CredProx.Identity`, M55): `JwtAssertion` gained
+  `ScopeInAssertion` — on, it mints the configured `Scope` as the `scope` claim inside
+  the signed assertion and the token request carries no scope form parameter (one
+  supplier: Google requires `scope` in the claim set and its token POST carries only
+  `grant_type` and `assertion`; other vendors want the form parameter, which stays the
+  unchanged default). Startup refuses the option on with no `Scope`.
+  `docs/vendors/google.md` is now a working recipe for service accounts.
+- New example `samples/FoundryLocalGateway`: CredProx as the only gate on a local
+  model — the model id comes from configuration and every caller reaches the model
+  through a registered credential, with an offline proof of the gate.
+- New example `samples/FoundryLocalCloud`: local and cloud model routes behind one
+  front, chosen by configuration, each route carrying its own credential.
+- New example `samples/FoundryLocalAgent`: the tool-calling agent pattern on a local
+  model — the agent holds its own Entra caller token (not a caller key) and the model
+  id comes from configuration.
+- New example `samples/AzureOpenAI`: callers reach an Azure OpenAI deployment through
+  CredProx with an Entra-only credential; ships with an offline stand-in, and the live
+  leg is create-and-destroy.
+- `samples/AgentTokens` is now a real tool-calling agent: a Messages-API client holding
+  only its own Entra bearer, the model route carrying CredProx's own `x-api-key`
+  credential with the usage-metering leg armed; the shipped config gained the
+  `CredProx:Metering` section (`.AddOperations()` arms only when it exists) and the
+  README's setup steps assign both app roles, so step 2 no longer leads into a 403.
+- Five new vendor guides (`docs/vendors/`), listed in both docs indexes: **OpenAI**
+  (StaticKey bearer with the caller's own key stripped), **Slack** (bot token as a
+  StaticKey bearer on slack.com hosts), **Stripe** (key-as-bearer StaticKey with the
+  Basic-encoding route), **Atlassian Jira and Confluence** (the Basic header expressed
+  with the existing built-in types) and **Google** (the `ScopeInAssertion` service-account
+  recipe). Every gotcha is cited to public vendor docs.
+
 ## [0.15.1] - 2026-11-22
 
 ### Fixed

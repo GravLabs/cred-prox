@@ -64,6 +64,15 @@ likewise outside `CredProx.slnx`: it talks to real vendors only on demand via
 `scripts/live-run.sh` and must never run in CI (the guard cells in `CredProx.Tests`
 keep it out of the solution and out of every workflow).
 
+Gate legs (builder or checker battery) must pin the LiveTests leg to offline: build
+the project explicitly in the configuration, then
+`dotnet test tests/CredProx.LiveTests -c <configuration> --filter "Layer=Offline"`.
+Never run LiveTests unfiltered on a credentialed host: most cells' skips come from a
+credential probe that stops skipping exactly where the owner environment exists, and
+only the billable metered cell adds a second gate (`CREDPROX_LIVE_METERED=1`), so an
+unfiltered leg there really spends vendor calls. Live legs run only through
+`scripts/live-run.sh`.
+
 Coverage gates run from the repo root:
 
 ```bash

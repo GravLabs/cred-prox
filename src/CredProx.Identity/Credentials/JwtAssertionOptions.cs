@@ -61,8 +61,21 @@ public sealed class JwtAssertionOptions : IHasAttachment, IHasPartitionConfig, I
     /// </summary>
     public string? ClientId { get; set; }
 
-    /// <summary>Optional <c>scope</c> form parameter for the exchange.</summary>
+    /// <summary>
+    /// The <c>scope</c> value: sent as a form parameter for the exchange by default;
+    /// carried inside the signed assertion instead when <see cref="ScopeInAssertion"/> is on.
+    /// </summary>
     public string? Scope { get; set; }
+
+    /// <summary>
+    /// Mints <see cref="Scope"/> as the <c>scope</c> claim inside the signed assertion and
+    /// omits the scope form parameter — one supplier, never both. Google requires
+    /// <c>scope</c> in the claim set and its token request carries only <c>grant_type</c>
+    /// and <c>assertion</c>; other vendors want the form parameter. Default
+    /// <see langword="false"/>: the claim set and the form keep today's exact bytes.
+    /// Startup refuses this option on with no <see cref="Scope"/>.
+    /// </summary>
+    public bool ScopeInAssertion { get; set; }
 
     /// <summary>
     /// The JSON field carrying the access token in the exchange response.

@@ -48,6 +48,15 @@
     <ProjectReference Include="..\..\samples\SessionCookie\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\AzureContainerApps\AzureContainerApps.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\samples\AzureContainerApps\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AzureOpenAI\AzureOpenAI.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\AzureOpenAI\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalGateway\FoundryLocalGateway.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalGateway\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalCloud\FoundryLocalCloud.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalCloud\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalAgent\FoundryLocalAgent.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalAgent\Agent\LocalAgent.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\samples\FoundryLocalAgent\StubApi\StubApi.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

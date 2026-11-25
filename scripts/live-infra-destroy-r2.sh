@@ -37,7 +37,16 @@ az keyvault purge -n "$VAULT" -l "$LOC" -o none 2>/dev/null || true
 az identity delete -n credprox-m29-uai -g "$RG" -o none 2>/dev/null || true
 az identity delete -n credprox-m29-kubelet -g "$RG" -o none 2>/dev/null || true
 
-if [[ "$(az keyvault list-deleted --query "[?name=='$VAULT'] | length(@)" -o tsv 2>/dev/null)" == "1" ]]; then
+# Three states, never two (post-release item 1, 2026-11-25): the list-deleted
+# read-back can itself fail - its RBAC is separate from delete/purge - and an
+# UNKNOWN state must never print PURGED. DESTROY_FAIL is initialised BEFORE the
+# read-back so the vault state rides the exit line at EOF together with the
+# resource read-backs below.
+DESTROY_FAIL=0
+if ! LIST_DELETED_COUNT="$(az keyvault list-deleted --query "[?name=='$VAULT'] | length(@)" -o tsv 2>/dev/null)"; then
+  echo "could-not-verify: $VAULT deletion state UNKNOWN - az keyvault list-deleted failed; the name may still be soft-delete-locked (apply must RECOVER, not create)"
+  DESTROY_FAIL=1
+elif [[ "$LIST_DELETED_COUNT" == "1" ]]; then
   echo "destroyed: $VAULT deleted but SOFT-DELETED (purge refused - apply will RECOVER it)"
 else
   echo "destroyed: $VAULT deleted and PURGED (name lock cleared - apply creates fresh)"
@@ -48,7 +57,7 @@ echo "destroyed: $APP, $JOB, $CAPENV, $ACR, credprox-m29-uai, credprox-m29-kubel
 # deleted moments later. And the script exited 0 even with a read-back present, so the
 # caller's OK marker masked a real leftover. Poll until gone (bounded), then let the
 # EXIT CODE reflect the read-backs.
-DESTROY_FAIL=0
+# (DESTROY_FAIL is already initialised above, before the vault read-back.)
 for R in "Microsoft.App/containerApps $APP" "Microsoft.App/jobs $JOB" "Microsoft.App/managedEnvironments $CAPENV" "Microsoft.ContainerRegistry/registries $ACR"; do
   set -- $R
   i=0

@@ -175,7 +175,7 @@ jobs:
 
       - name: Build all examples (Release, against the packages)
         run: |
-          for p in QuickStart OAuthKeycloak MutualTls MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie AzureContainerApps CallerApiKey AgentTokens; do
+          for p in QuickStart OAuthKeycloak MutualTls MicrosoftGraph ADP LoginExchange PerCallerCredentials GitHubApp HmacSigning CustomPlugin Operations AiGateway TokenExchange AgentEgress SessionCookie AzureContainerApps CallerApiKey AgentTokens FoundryLocalGateway FoundryLocalCloud FoundryLocalAgent AzureOpenAI; do
             dotnet build "samples/$p" --configuration Release
           done
 
@@ -220,6 +220,31 @@ jobs:
       # Caller keys, injected provider key, SSE passthrough, allow-list, throttle, audit.
       - name: Smoke AiGateway (in-process provider stub)
         run: samples/AiGateway/smoke.sh
+
+      # Upstream with no auth of its own: caller keys are the only gate, the per-caller
+      # allow-list refuses before the model is touched, and both OpenAI usage shapes
+      # (inline block, usage-only SSE event) reach the meter through the route's usage
+      # format (in-process Foundry Local stand-in).
+      - name: Smoke FoundryLocalGateway (in-process Foundry Local stand-in)
+        run: samples/FoundryLocalGateway/smoke.sh
+
+      # One front, two model routes: local for every caller, cloud (Anthropic) only for
+      # callers whose allow-list names it — config chooses, never failover — and both
+      # vendor usage shapes meter on their own route format (in-process stand-ins for
+      # both upstreams).
+      - name: Smoke FoundryLocalCloud (in-process local and cloud stand-ins)
+        run: samples/FoundryLocalCloud/smoke.sh
+
+      # OpenAI-format agent loop through the gate on a local-model stand-in: tool round
+      # trip, the empty-content-beside-reasoning thinking shape handled as normal, and a
+      # tool the caller's allow-list omits refused at the gate and answered around.
+      - name: Smoke FoundryLocalAgent (in-process model and tool stand-ins)
+        run: samples/FoundryLocalAgent/smoke.sh
+      # Entra-only Azure OpenAI stand-in on loopback: the caller key gate, the
+      # deployment allow-list, the api-key refusal, the exact canned Entra bearer
+      # the host sent, and openai usage metering - all offline, no network.
+      - name: Smoke AzureOpenAI (in-process Entra-only stand-in)
+        run: samples/AzureOpenAI/smoke.sh
 
       # Token exchange against real Keycloak: per-user exchanged tokens, forged
       # inbound 401 before any exchange, caller key still required, downstream

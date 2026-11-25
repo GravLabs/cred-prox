@@ -19,6 +19,16 @@ a stored secret — Entra-first, but any OIDC issuer works the same way (ADR-000
   valid — staleness gets a kill window shorter than Entra's own lifetime policy.
 - The caller's bearer token never reaches the upstream: CredProx strips `Authorization`
   after authenticating (journal-proven below).
+- The sample ships its own agent client (`Agent/`): a real tool-calling loop over the
+  Anthropic Messages API — `tool_use` in, `tool_result` back — pointed at this host and
+  holding nothing but its Entra token. The Anthropic key is a StaticKey credential
+  (`x-api-key`) held by CredProx and attached on the model route; the agent never has it
+  and never sees it. One tool (`fetch_docs`) is on the caller's allow-list; one
+  (`github_meta`) deliberately is not, so the proxy answers 403 before connecting and the
+  agent carries on with that refusal as a tool error — that is the admission demo.
+- The model route opts in to usage metering by naming its usage format
+  (`CredProx.Metering.Usage: "anthropic"`), so the provider's token counts are attributed
+  to the calling agent, not to whoever holds the key.
 
 `Program.cs` is the deployable host and nothing else: `AddCredProx(builder.Configuration)`
 (one call for the core defaults — token cache, secret stack, credential binder) chained
@@ -50,7 +60,10 @@ same core package — declare key hashes under `CredProx:Callers` and nothing mo
 | `CredProx:CallerToken:ClientClaimNames` / `ScopeClaimNames` | Optional. Claim layouts other than Entra v2 (`appid` on v1, custom names). The scheme turns inbound claim mapping off, so whatever the issuer writes is what these lists match. |
 | `CredProx:Callers:<name>:TokenClientIds` | The app (client) ids whose tokens map to this caller; match is verbatim against `azp`/`appid`. |
 | `CredProx:Callers:<name>:Operations[].Name` | The rule's name; a token is admitted only where its `roles` claim carries it. |
-| `CredProx:Destinations:<name>:Template` | Where the credential attaches. No secret here: this sample forwards the agent's own request untouched. |
+| `CredProx:Destinations:<name>:Template` | The real upstream each route may reach — the guard's allow-list. A route no operation names is refused with 403 before a connection is made (the `meta` route exists to show exactly that). |
+| `CredProx:Credentials:<name>` | The model route's Anthropic key: `Type: StaticKey`, `Location: Header`, `Name: x-api-key`, `Secret: secret:anthropic-key`. CredProx attaches it outbound; the agent can neither read nor override it (an inbound `x-api-key` is stripped like the bearer). The route also SETS `anthropic-version: 2023-06-01` outbound — the agent sends no version header of its own, and an inbound one is replaced, not forwarded (both pinned by the AgentTokens smokes). |
+| `CredProx:Secrets:<name>` | The key's value. Demo placeholder committed; supply the real one via your secret source (env `CredProx__Secrets__anthropic-key`, a vault provider, …) — never commit a live key. |
+| route metadata `CredProx.Metering.Usage: "anthropic"` | The opt-in: the value NAMES the usage format (M54); readers declaring it parse this route's provider usage numbers, counted onto the calling agent's meter. |
 
 A caller that lists `TokenClientIds` but names no operation rule logs a startup warning —
 *this caller can never admit a token* — and starts anyway: the key path is unaffected, the
@@ -63,15 +76,22 @@ no named operations`); the response body never carries one.
 1. **Expose the proxy API.** App registration "CredProx API" → *Expose an API* → application
    ID URI `api://YOUR-AGENT-API` (or your verified-domain URI). A tenant's default protection
    policy can refuse a name that is neither a verified domain nor an id — it accepts
-   `api://<client-id>` always, so that is the safest choice. Add app role **`docs-read`**,
-   allowed for *Applications*. In the API's **Manifest**, set `requestedAccessTokenVersion`
+   `api://<client-id>` always, so that is the safest choice. Add app roles **`docs-read`**
+   and **`model-call`**, allowed for *Applications*. In the API's **Manifest**, set `requestedAccessTokenVersion`
    to `2`: a new registration issues v1 tokens by default, whose issuer
    (`https://sts.windows.net/<tenant>/`) does not match the v2 `Authority` above, so every
    token would be refused with 401. A v2 token's audience is the API's **client id** (a
    GUID, not the URI) — that is what `CredProx:CallerToken:Audience` must equal.
-2. **Register the agent app** (or use its managed identity). Assign it the `docs-read`
-   app role (*API permissions → Granted roles*, or Enterprise-app role assignment). Entra
-   then writes `"roles": ["docs-read"]` into the app token it issues for that client.
+2. **Register the agent app** (or use its managed identity). Assign it **both** app roles,
+   `docs-read` and `model-call` (*API permissions → Granted roles*, or Enterprise-app role
+   assignment). Each gates its own route: `docs-read` is the role named by the GET docs
+   rule, `model-call` the one named by the model rule (`POST /v1/messages`) — a token
+   missing one is refused with 403 on that route before any vendor is touched. Entra
+   then writes `"roles": ["docs-read", "model-call"]` into the app token it issues for
+   that client. A fresh role assignment can lag issued tokens by seconds to minutes
+   (same replication class as a fresh client secret): the live harness therefore polls
+   for both roles to show up before its live cell, up to `CREDPROX_M46_ROLE_WAIT_SECONDS`
+   (default 300).
 3. **The agent gets a token with no stored secret** (needs the `Azure.Identity` package):
    - *On Azure (managed identity):*
      `new DefaultAzureCredential().GetTokenAsync(new TokenRequestContext(["api://YOUR-AGENT-API/.default"]))` —
@@ -83,6 +103,20 @@ no named operations`); the response body never carries one.
 4. **Fill the placeholders** in `appsettings.json`: your tenant id in `Authority`, the API's
    client id in `Audience`, the agent's client id in `TokenClientIds`. Don't set
    `RequireHttpsMetadata` — the default is what Entra needs.
+5. **Give the host the Anthropic key** — `CredProx__Secrets__anthropic-key` (or your secret
+   source). The model route already points at `api.anthropic.com`; nothing else to wire.
+6. **Run the agent.** It authenticates with its own Entra token and speaks the Anthropic
+   Messages protocol through the proxy:
+   ```bash
+   AGENT_TENANT_ID=... AGENT_CLIENT_ID=... AGENT_CLIENT_SECRET=... \
+   AGENT_API_SCOPE=api://YOUR-AGENT-API/.default \
+   dotnet run --project samples/AgentTokens/Agent
+   ```
+   A run makes a few billable Anthropic calls on your API credits — cheapest default model
+   (`claude-haiku-5-5`, override with `AGENT_MODEL`), small `max_tokens`, fixed short prompt,
+   so: cents. If you replace the raw-HttpClient loop with a vendor SDK, the SDK's mandatory
+   key argument must be a visible placeholder that CredProx replaces on the way out — the
+   agent process itself never holds a vendor secret either way.
 
 **Revocation** is Entra-side: remove the app-role assignment (or disable the SP / identity)
 and the next token stops carrying the role or authenticating at all; tokens already issued
@@ -108,8 +142,14 @@ key other than the one that signed the tokens. It proves: stub serves the genera
 (kid check); fresh `docs-read` token as a string and as an array → 200; multi-role arrays
 admit only what they name → 200/403; role naming no rule → 403; no `roles` claim → 403;
 unlisted `azp` → 401; a token issued 2 h ago with `MaxTokenAge=00:15:00` → 401; and the
-upstream journal shows no `Authorization` header on any proxied request. Nothing private is
-committed anywhere.
+upstream journal shows no `Authorization` header on any proxied request. A second file of
+cells drives the actual `Agent.dll` against a scripted stand-in chain
+(`tool_use` → `tool_use` → final answer): the allowed `fetch_docs` returns its document, the
+`github_meta` call comes back to the agent as an HTTP 403 tool error while the loop carries
+on, an unlisted `azp` or a missing `model-call` role stops the agent before the model, the
+provider journal shows `x-api-key` attached on every `/v1/messages` record with no
+`Authorization` among them, and the vendor key appears nowhere in the agent's output.
+Nothing private is committed anywhere.
 
 The samples restore CredProx from the local feed, so pack it once first (on a clean
 machine):
@@ -118,6 +158,7 @@ machine):
 dotnet pack src/CredProx.Abstractions -c Release -o artifacts/packages
 dotnet pack src/CredProx -c Release -o artifacts/packages
 dotnet pack src/CredProx.Identity -c Release -o artifacts/packages
+dotnet pack src/CredProx.Operations -c Release -o artifacts/packages
 ```
 
 Repacking the same version does not change its bytes' identity to NuGet: if you have packed

@@ -17,18 +17,39 @@ namespace CredProx.LiveTests;
 internal static class SecretPropagationStubs
 {
     // Fake curl: appends its argv (never its stdin - the secret arrives on
-    // stdin and is drained here), then prints the n-th scripted http code,
-    // repeating the last one forever. The runner captures only this stdout.
+    // stdin and is drained here). Code-mode probes (wait_secret_usable sends
+    // -o /dev/null) print the n-th scripted http code, repeating the last one
+    // forever. Body-mode probes (wait_roles_in_token reads the token) print a
+    // canned token response whose claims carry docs-read + model-call, or with
+    // STUB_CURL_ROLES=docs only docs-read. The payload segments are the exact
+    // base64url of {"roles":["docs-read","model-call"]} and
+    // {"roles":["docs-read"]} (computed and decoded back live, 2026-11-23).
+    // Both access_token literals are FAKES and say so in their own bytes: the
+    // third segment is the marker canary-not-a-secret — never a signature, never
+    // decoded by the runner or any cell — and only the claims segment is shape-
+    // real (it decodes to the role arrays above). Nothing here is, or could be,
+    // a real credential. The runner captures only this stdout.
     public const string StubCurl = """
         #!/usr/bin/env bash
         if [ -n "${STUB_AZ_LOG:-}" ]; then printf 'curl %s\n' "$*" >> "$STUB_AZ_LOG"; fi
         cat >/dev/null
-        n=0
-        if [ -n "${STUB_CURL_COUNT:-}" ] && [ -f "$STUB_CURL_COUNT" ]; then n="$(cat "$STUB_CURL_COUNT")"; fi
-        n=$((n+1)); printf '%s' "$n" > "$STUB_CURL_COUNT"
-        codes=(${STUB_CURL_CODES:-200})
-        i=$((n-1)); if [ "$i" -ge "${#codes[@]}" ]; then i=$(( ${#codes[@]} - 1 )); fi
-        printf '%s' "${codes[$i]}"
+        case "$*" in
+            *-o\ /dev/null*)
+                n=0
+                if [ -n "${STUB_CURL_COUNT:-}" ] && [ -f "$STUB_CURL_COUNT" ]; then n="$(cat "$STUB_CURL_COUNT")"; fi
+                n=$((n+1)); printf '%s' "$n" > "$STUB_CURL_COUNT"
+                codes=(${STUB_CURL_CODES:-200})
+                i=$((n-1)); if [ "$i" -ge "${#codes[@]}" ]; then i=$(( ${#codes[@]} - 1 )); fi
+                printf '%s' "${codes[$i]}"
+                ;;
+            *)
+                if [ "${STUB_CURL_ROLES:-both}" = "docs" ]; then
+                    printf '%s' '{"token_type":"Bearer","expires_in":3599,"access_token":"e30.eyJyb2xlcyI6WyJkb2NzLXJlYWQiXX0.canary-not-a-secret"}'
+                else
+                    printf '%s' '{"token_type":"Bearer","expires_in":3599,"access_token":"e30.eyJyb2xlcyI6WyJkb2NzLXJlYWQiLCJtb2RlbC1jYWxsIl19.canary-not-a-secret"}'
+                fi
+                ;;
+        esac
         """;
 
     public const string StubDotnet = """
@@ -101,7 +122,7 @@ internal static class SecretPropagationStubs
 }
 
 [Trait("Layer", "Offline")]
-public sealed class SecretPropagationGraphTests : IDisposable, IExecutesLiveRunner
+public sealed class SecretPropagationGraphTests : ExecutesLiveRunner, IDisposable
 {
     // an obvious canary that matches none of the runner's leak shapes: it must
     // reach the token endpoint on STDIN only - never the logged argv, never the
@@ -237,7 +258,7 @@ public sealed class SecretPropagationGraphTests : IDisposable, IExecutesLiveRunn
 }
 
 [Trait("Layer", "Offline")]
-public sealed class SecretPropagationClientTests : IDisposable, IExecutesLiveRunner
+public sealed class SecretPropagationClientTests : ExecutesLiveRunner, IDisposable
 {
     // the canned agenttokens az mints these ids; the audience read-back pins
     // the same value the create stamps into resource-audience.txt:
@@ -270,8 +291,10 @@ public sealed class SecretPropagationClientTests : IDisposable, IExecutesLiveRun
         // BOTH run-created secrets were waited for, each on its first poll:
         Assert.Contains("mapped secret usable after", run.Out, StringComparison.Ordinal);
         Assert.Contains("unmapped secret usable after", run.Out, StringComparison.Ordinal);
+        // and the role wait passed on its first body-mode poll (third curl):
+        Assert.Contains("token carries both app roles", run.Out, StringComparison.Ordinal);
         var pollLines = run.AzLog.Split('\n').Count(l => l.StartsWith("curl ", StringComparison.Ordinal));
-        Assert.Equal(2, pollLines);
+        Assert.Equal(3, pollLines);
         // the scope is the resource app's own id with .default - the bare form
         // the live cell itself mints with - not the api:// form and not the
         // graph scope (the create's own az rest PATCH may legitimately reach
@@ -282,9 +305,34 @@ public sealed class SecretPropagationClientTests : IDisposable, IExecutesLiveRun
         Assert.Contains("agenttokens destroy: read-back clean", run.Out, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RoleWait_MissingModelRole_AbortsBeforeTheCell()
+    {
+        // Entra propagates fresh app-role assignments to issued tokens with a
+        // delay; with the canned token carrying ONLY docs-read and the smallest
+        // budget the shape guard admits, the runner must abort before the dotnet
+        // live cell ever runs (the destroy trap still cleans up), and the FAIL
+        // must name both roles it waited for — this is live run 2's 403 shape
+        // caught pre-cell. The budget is 1, not 0: post-release item 2 gave this
+        // budget a positive-whole-number guard (measured: the old "0" here then
+        // exits 2 REFUSED, and the cell is about the ABORT shape, not about a
+        // zero budget) - one poll finds no model role, one sleep passes the
+        // budget, the abort lands before the cell:
+        var run = Run("200", new()
+        {
+            ["STUB_CURL_ROLES"] = "docs",
+            ["CREDPROX_M46_ROLE_WAIT_SECONDS"] = "1",
+        });
+        Assert.Equal(1, run.Exit);
+        Assert.Contains("never carried BOTH app roles (docs-read and model-call)", run.Out, StringComparison.Ordinal);
+        Assert.Contains("agenttokens destroy: read-back clean", run.Out, StringComparison.Ordinal);
+        // the fake dotnet never printed: the live cell was never reached:
+        Assert.DoesNotContain("OBSERVED", run.Out, StringComparison.Ordinal);
+    }
+
     private sealed record RunnerRun(int Exit, string Out, string Err, string AzLog);
 
-    private RunnerRun Run(string curlCodes)
+    private RunnerRun Run(string curlCodes, Dictionary<string, string>? extraEnv = null)
     {
         var azLogPath = Path.Combine(Path.GetTempPath(), $"credprox-m46-azlog-{Guid.NewGuid():N}.log");
         var psi = new ProcessStartInfo
@@ -305,12 +353,18 @@ public sealed class SecretPropagationClientTests : IDisposable, IExecutesLiveRun
         psi.Environment["STUB_AZ_SIGNED_IN"] = "1";
         psi.Environment["STUB_AUD"] = $"api://{ResourceAppId}";
         psi.Environment["STUB_URI"] = "1";
-        psi.Environment["STUB_ROLE"] = "1";
-        psi.Environment["STUB_ASSIGN"] = "1";
+        psi.Environment["STUB_ROLE"] = "2";
         psi.Environment["STUB_APP_LEFT"] = "0";
         psi.Environment["STUB_SP_LEFT"] = "0";
         psi.Environment["STUB_CURL_CODES"] = curlCodes;
         psi.Environment["STUB_CURL_COUNT"] = _countFile;
+        if (extraEnv is not null)
+        {
+            foreach (var (key, value) in extraEnv)
+            {
+                psi.Environment[key] = value;
+            }
+        }
 
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException("live-run.sh did not start");

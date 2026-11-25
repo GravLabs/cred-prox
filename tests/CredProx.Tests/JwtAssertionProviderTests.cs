@@ -177,6 +177,109 @@ public sealed class JwtAssertionProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task Claims_ScopeInAssertionOff_DefaultClaimSetAndFormUnchanged()
+    {
+        // Default-bytes pin: with the option off (the default) the claim set and the form
+        // are exactly what they were before ScopeInAssertion existed — scope stays a form
+        // field and never appears among the claims.
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":3600}"""));
+        var options = AssertionOptions();
+        options.Scope = "repo";
+
+        await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
+
+        var form = ParseForm(handler.Body(0)!);
+        Assert.Equal("repo", form["scope"]);
+        var (_, payloadJson, _, _) = ParseJwt(form["client_assertion"]);
+        using var payload = JsonDocument.Parse(payloadJson);
+        var claimNames = payload.RootElement.EnumerateObject()
+            .Select(p => p.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(new[] { "aud", "exp", "iat", "iss", "jti", "sub" }, claimNames);
+    }
+
+    [Theory]
+    [InlineData(JwtAssertionExchange.ClientAssertion)]
+    [InlineData(JwtAssertionExchange.JwtBearerGrant)]
+    public async Task Claims_ScopeInAssertionOn_ScopeClaimSetAndFormDropped(JwtAssertionExchange exchange)
+    {
+        // One supplier: with the option on the scope is minted inside the signed claims
+        // and the scope form parameter is dropped — never both channels.
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":3600}"""));
+        var options = AssertionOptions(exchange);
+        options.Scope = "repo";
+        options.ScopeInAssertion = true;
+
+        await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
+
+        var form = ParseForm(handler.Body(0)!);
+        Assert.False(form.ContainsKey("scope"));
+        var jwt = exchange == JwtAssertionExchange.JwtBearerGrant
+            ? form["assertion"]
+            : form["client_assertion"];
+        var (_, payloadJson, _, _) = ParseJwt(jwt);
+        using var payload = JsonDocument.Parse(payloadJson);
+        Assert.Equal("repo", payload.RootElement.GetProperty("scope").GetString());
+    }
+
+    [Fact]
+    public async Task ScopeInAssertion_BearerExchange_ScopeClaimMinted()
+    {
+        // The bearer flow carries the assertion in the Authorization header instead of a
+        // form field; the claim placement is identical there.
+        var (provider, _, handler) = CreateProvider(
+            new StubHttpHandler(HttpStatusCode.OK, """{"access_token":"tok-1","expires_in":3600}"""));
+        var options = AssertionOptions(JwtAssertionExchange.BearerExchange);
+        options.Scope = "repo";
+        options.ScopeInAssertion = true;
+
+        var token = await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
+
+        Assert.Equal("tok-1", token);
+        var request = Assert.Single(handler.Requests);
+        var (_, payloadJson, _, _) = ParseJwt(request.Headers.Authorization!.Parameter!);
+        using var payload = JsonDocument.Parse(payloadJson);
+        Assert.Equal("repo", payload.RootElement.GetProperty("scope").GetString());
+    }
+
+    [Fact]
+    public async Task EmptyScope_ScopeInAssertion_FailsBeforeAnyRequest()
+    {
+        // Defense-in-depth behind the startup validator: a directly constructed provider
+        // refuses to mint an empty scope claim and never reaches the network.
+        var (provider, _, handler) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+        var options = AssertionOptions();
+        options.Scope = string.Empty;
+        options.ScopeInAssertion = true;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("Scope is required when ScopeInAssertion is on.", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task WhitespaceScope_ScopeInAssertion_FailsBeforeAnyRequest()
+    {
+        // A blank Scope is refused exactly like an empty one: minting scope:"   " and
+        // posting it would hand the vendor a claim no resource accepts.
+        var (provider, _, handler) = CreateProvider(new StubHttpHandler(HttpStatusCode.OK, "{}"));
+        var options = AssertionOptions();
+        options.Scope = "   ";
+        options.ScopeInAssertion = true;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("Scope is required when ScopeInAssertion is on.", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task Jti_IsUniquePerAssertion()
     {
         var time = new FakeTimeProvider();
@@ -291,6 +394,67 @@ public sealed class JwtAssertionProviderTests : IDisposable
         time.Advance(TimeSpan.FromMinutes(31));
         await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
         Assert.Equal(2, handler.Requests.Count);
+    }
+
+    private static StubHttpHandler GoogleShapedTokenEndpoint()
+    {
+        // Offline stand-in for Google's token endpoint (developers.google.com
+        // service-account flow): it accepts ONLY an assertion whose claim set carries
+        // scope; a scope sent as a form field instead is answered invalid_grant,
+        // exactly as the real endpoint answers.
+        StubHttpHandler? handler = null!;
+        handler = new StubHttpHandler((_, index) =>
+        {
+            var form = ParseForm(handler.Body(index)!);
+            var carriesScopeClaim = false;
+            if (form.TryGetValue("assertion", out var assertion))
+            {
+                using var assertionPayload = JsonDocument.Parse(ParseJwt(assertion).Payload);
+                carriesScopeClaim = assertionPayload.RootElement.EnumerateObject().Any(p => p.Name == "scope");
+            }
+            return carriesScopeClaim
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = new StringContent("""{"access_token":"tok-google-1","expires_in":3600}""") }
+                : new HttpResponseMessage(HttpStatusCode.BadRequest)
+                { Content = new StringContent("""{"error":"invalid_grant"}""") };
+        });
+        return handler;
+    }
+
+    [Fact]
+    public async Task GoogleStandIn_ScopeInAssertionObtainsToken()
+    {
+        var (provider, _, handler) = CreateProvider(GoogleShapedTokenEndpoint());
+        var options = AssertionOptions(JwtAssertionExchange.JwtBearerGrant);
+        options.TokenEndpoint = "https://oauth2.googleapis.com/token";
+        options.Scope = "https://www.example.com/auth/scope";
+        options.ScopeInAssertion = true;
+
+        var token = await provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default);
+
+        Assert.Equal("tok-google-1", token);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task GoogleStandIn_ScopeAsFormFieldIsRefused()
+    {
+        // The same endpoint with today's placement (scope only in the form, no scope
+        // claim): the exchange is refused and no token is ever cached — the retry
+        // rethrows the cached failure without a second POST.
+        var (provider, _, handler) = CreateProvider(GoogleShapedTokenEndpoint());
+        var options = AssertionOptions(JwtAssertionExchange.JwtBearerGrant);
+        options.TokenEndpoint = "https://oauth2.googleapis.com/token";
+        options.Scope = "https://www.example.com/auth/scope";
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+
+        Assert.Contains("HTTP 400", ex.Message, StringComparison.Ordinal);
+        var retry = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.GetCredentialAsync(options, Secrets(RsaPem(), EcPem()), Context(), default).AsTask());
+        Assert.Contains("HTTP 400", retry.Message, StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
     }
 
     [Fact]

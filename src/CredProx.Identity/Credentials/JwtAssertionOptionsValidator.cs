@@ -63,6 +63,11 @@ internal sealed class JwtAssertionOptionsValidator : IValidateOptions<JwtAsserti
             failures.Add("TokenField is required.");
         }
 
+        if (options.ScopeInAssertion && string.IsNullOrWhiteSpace(options.Scope))
+        {
+            failures.Add("Scope is required when ScopeInAssertion is on.");
+        }
+
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;
     }
 }

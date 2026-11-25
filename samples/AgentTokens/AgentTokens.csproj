@@ -10,8 +10,19 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Agent/ is its own project; keep its files out of this compilation. -->
+    <Compile Remove="Agent/**" />
+    <Content Remove="Agent/**" />
+    <None Remove="Agent/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CredProx" />
     <PackageReference Include="CredProx.Identity" />
+    <PackageReference Include="CredProx.Operations" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" />
   </ItemGroup>
 
 </Project>

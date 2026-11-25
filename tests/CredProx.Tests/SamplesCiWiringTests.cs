@@ -10,8 +10,8 @@ namespace CredProx.Tests;
 /// so adding a sample without wiring it into CI fails the battery instead of
 /// leaving the sample untested. It also pins that the ACA harness's offline proxy
 /// smoke (`--mode proxy --smoke`) has a CI step: it is the only cheap in-process
-/// witness of the harness that proves the Key Vault path. Both CI pins read content
-/// lines only — a flag named in a comment does not satisfy them — and each binds the
+/// witness of the harness that proves the Key Vault path. Every CI pin reads content
+/// lines only — a step or loop recited in a comment does not satisfy them — and each binds the
 /// step's real shape: the smoke-project step must run exactly once, and the harness
 /// step must be a content line that STARTS with 'docker run' and carries the flag —
 /// a step name or an echo that recites the command is not the step.
@@ -31,7 +31,7 @@ public sealed class SamplesCiWiringTests
     [Fact]
     public void EverySample_IsBuiltByTheExamplesLoop()
     {
-        var ci = File.ReadAllText(Path.Combine(RepoRoot(), ".github", "workflows", "ci.yml"));
+        var ci = CiContent();
         var loop = BuildLoopPattern.Match(ci);
         Assert.True(loop.Success, "ci.yml has no 'for p in ...; do' build loop to bind");
         var built = loop.Groups["names"].Value
@@ -46,7 +46,7 @@ public sealed class SamplesCiWiringTests
     [Fact]
     public void EverySample_HasACIsmokeStep()
     {
-        var ci = File.ReadAllText(Path.Combine(RepoRoot(), ".github", "workflows", "ci.yml"));
+        var ci = CiContent();
         var smokes = SmokeStepPattern.Matches(ci).Select(m => m.Groups["name"].Value).ToArray();
         var missing = SampleNames().Except(smokes, StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal);
         var stale = smokes.Except(SampleNames(), StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal);
@@ -72,14 +72,17 @@ public sealed class SamplesCiWiringTests
     [Fact]
     public void WholeSmokeProjectStep_RunsUnfilteredInCI()
     {
-        var ciPath = Path.Combine(RepoRoot(), ".github", "workflows", "ci.yml");
-        var content = string.Join("\n", File.ReadAllLines(ciPath)
-            .Where(l => !l.TrimStart().StartsWith("#", StringComparison.Ordinal)));
-        var count = WholeSmokeStepPattern.Matches(content).Count;
+        var count = WholeSmokeStepPattern.Matches(CiContent()).Count;
         Assert.True(count == 1,
             "the examples job needs exactly one 'run: dotnet test tests/CredProx.SampleSmokes' " +
             $"content step — it is the only place the unfiltered order-dependence pass runs; found {count}");
     }
+
+    // A commented-out step can never run: every regex pin here reads content lines only,
+    // the same filter the harness cell applies line by line.
+    private static string CiContent() =>
+        string.Join("\n", File.ReadAllLines(Path.Combine(RepoRoot(), ".github", "workflows", "ci.yml"))
+            .Where(l => !l.TrimStart().StartsWith("#", StringComparison.Ordinal)));
 
     private static string[] SampleNames() =>
         Directory.EnumerateDirectories(Path.Combine(RepoRoot(), "samples"))

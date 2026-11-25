@@ -33,6 +33,7 @@ public sealed class AgentTokensFixture : IDisposable
             : "/tmp/credprox-m46-agenttokens";
 
     private readonly string _sampleBin = LiveHosts.LocateBin(Path.Combine("samples", "AgentTokens"), "AgentTokens.dll");
+    private readonly string _agentBin = LiveHosts.LocateBin(Path.Combine("samples", "AgentTokens", "Agent"), "Agent.dll");
     private readonly List<Process> _hosts = [];
     private IReadOnlyCollection<string> _secretValues = [];
     private HttpListener? _standIn;
@@ -126,11 +127,14 @@ public sealed class AgentTokensFixture : IDisposable
 
                 try
                 {
-                    if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath.StartsWith("/docs", StringComparison.Ordinal) == true)
+                    // The documented upstream path is exactly /docs/readme (every caller:
+                    // the offline counter cells, the live cells, the smoke probe) - a prefix
+                    // would answer for any /docs-suffixed path too.
+                    if (context.Request.HttpMethod == "GET" && context.Request.Url?.AbsolutePath.Equals("/docs/readme", StringComparison.Ordinal) == true)
                     {
                         var auth = context.Request.Headers["Authorization"];
                         Interlocked.Increment(ref _docsRequestCount);
-                        if (auth is not null && auth.StartsWith("Bearer eyJ", StringComparison.Ordinal))
+                        if (StandInBearerWitness.IsJwtShaped(auth))
                         {
                             Interlocked.Exchange(ref _sawBearerToken, 1);
                         }
@@ -171,6 +175,16 @@ public sealed class AgentTokensFixture : IDisposable
         LiveHosts.EnsurePortsFree(LiveHostPort);
         _secretValues = secretValues;
         var process = LiveHosts.Start(_sampleBin, "AgentTokens.dll", env);
+        _hosts.Add(process);
+        return new LiveHosts.RunningHost(process);
+    }
+
+    // The shipped agent client as its own process (M53 billable live cell): it mints its
+    // OWN Entra token from the AGENT_* env the caller passes — the real end-to-end shape.
+    // Unlike the host this is a short run: the cell waits for exit and reads the transcript.
+    public LiveHosts.RunningHost StartAgent(Dictionary<string, string> env)
+    {
+        var process = LiveHosts.Start(_agentBin, "Agent.dll", env);
         _hosts.Add(process);
         return new LiveHosts.RunningHost(process);
     }

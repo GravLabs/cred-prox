@@ -645,6 +645,44 @@ public sealed class CredProxStartupValidatorTests
     }
 
     [Fact]
+    public async Task MeteringSection_WithoutTheOperationsAddOn_RefusesAtStartup()
+    {
+        // M50 fold LOW-3: refusing with the package message (not the unknown-section text)
+        // is also the witness that "Metering" rides CoreSections — an unknown section is
+        // rejected as unknown, never as a missing package.
+        var configuration = Config(("CredProx:Metering:MaxUsageParseBytes", "1048576"));
+        using var services = BuildServices(configuration);
+        var validator = Validator(services, configuration);
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(
+            () => validator.StartAsync(default));
+        Assert.Contains(
+            "The 'CredProx:Metering' section needs the CredProx.Operations package: "
+            + "install it and call .AddOperations().",
+            error.Message);
+    }
+
+    [Fact]
+    public async Task MeteringSection_WithTheResponseFeatureRegistered_IsAccepted()
+    {
+        // M50 fold LOW-3: the acceptance arm of the same gate — with the add-on's response
+        // feature registered, a configured CredProx:Metering starts cleanly.
+        var configuration = Config(("CredProx:Metering:MaxUsageParseBytes", "1048576"));
+        using var services = BuildServices(configuration, mutateServices: s =>
+        {
+            s.AddSingleton(new CredProxMeteringReloadGuard(
+                configuration, NullLogger<CredProxMeteringReloadGuard>.Instance));
+            s.AddSingleton<IResponseFeature>(sp => new CredProxMeteringResponseFeature(
+                sp,
+                new CredProxMeteringOptions(),
+                NullLogger<CredProxMeteringResponseFeature>.Instance));
+        });
+        var validator = Validator(services, configuration);
+
+        await validator.StartAsync(default); // no throw: the section is accepted with the add-on
+    }
+
+    [Fact]
     public async Task AllThreeOperationsSections_WithoutTheAddOn_RefuseTogether()
     {
         var configuration = Config(

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Xunit;
@@ -26,9 +27,10 @@ public sealed class AgentTokensFixture : IAsyncLifetime
     public const string IssuerUrl = "http://localhost:8085";
     public const string UpstreamUrl = "http://localhost:8086";
 
-    // Both are set by InitializeAsync before any cell can see them.
+    // All three are set by InitializeAsync before any cell can see them.
     private string _repoRoot = "";
     private string _sampleBin = "";
+    private string _agentBin = "";
     private readonly StringBuilder _hostOutput = new();
     private readonly object _outputLock = new();
     private Process? _sample;
@@ -68,7 +70,7 @@ public sealed class AgentTokensFixture : IAsyncLifetime
 
     private async Task InitCoreAsync()
     {
-        (_repoRoot, _sampleBin) = LocateSampleBin();
+        (_repoRoot, _sampleBin, _agentBin) = LocateSampleBin();
         Now = DateTimeOffset.UtcNow;
 
         // down first: a leftover stack from an earlier run would carry a stale request
@@ -93,6 +95,11 @@ public sealed class AgentTokensFixture : IAsyncLifetime
         psi.ArgumentList.Add("exec");
         psi.ArgumentList.Add(Path.Combine(_sampleBin, "AgentTokens.dll"));
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
+        // The metering opt-in cell reads the usage counters off this host's console exporter,
+        // so the exporter must print on a 1 s cadence — its 60 s default outlasts the whole
+        // offline loop.
+        psi.Environment["Metrics__Console"] = "true";
+        psi.Environment["OTEL_METRIC_EXPORT_INTERVAL"] = "1000";
         _sample = Process.Start(psi)
             ?? throw new InvalidOperationException("could not start the AgentTokens host");
         _sample.OutputDataReceived += (_, e) => Append(e.Data);
@@ -219,7 +226,111 @@ public sealed class AgentTokensFixture : IAsyncLifetime
         await RunComposeAsync("down");
     }
 
-    private (string RepoRoot, string SampleBin) LocateSampleBin()
+    // Runs the sample's agent client as a separate process with NOTHING but its Entra
+    // token in the environment — exactly how a developer runs the demo. Returns exit code
+    // and merged stdout+stderr so cells can assert the transcript AND the leak scan.
+    public async Task<(int Exit, string Output)> RunAgentAsync(string token)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = _agentBin,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("exec");
+        psi.ArgumentList.Add(Path.Combine(_agentBin, "Agent.dll"));
+        psi.Environment["CREDPROX_URL"] = SampleUrl;
+        psi.Environment["AGENT_TOKEN"] = token;
+        using var agent = Process.Start(psi)
+            ?? throw new InvalidOperationException("could not start the AgentTokens agent");
+        var stdoutTask = agent.StandardOutput.ReadToEndAsync();
+        var stderrTask = agent.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        try
+        {
+            await agent.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            agent.Kill(entireProcessTree: true);
+            throw new InvalidOperationException(
+                $"the agent never finished within 60 s. output so far:\n{await stdoutTask}\n{await stderrTask}");
+        }
+
+        return (agent.ExitCode, $"{await stdoutTask}\n{await stderrTask}");
+    }
+
+    // The scripted provider chain is a state machine on the upstream stub; every cell
+    // that runs the full agent loop needs it back at "Started". The request journal is
+    // cleared with it so a cell that counts journal records sees only its own loop
+    // (the DELETE /__admin/requests house pattern, cf. CallerApiKeyFixture).
+    public async Task ResetProviderScenariosAsync()
+    {
+        using var response = await UpstreamAdmin.PostAsync("/__admin/scenarios/reset", new StringContent(""));
+        response.EnsureSuccessStatusCode();
+        using var clear = await UpstreamAdmin.DeleteAsync("/__admin/requests");
+        clear.EnsureSuccessStatusCode();
+    }
+
+    // A snapshot of everything the sample host has printed so far (stdout and stderr).
+    public string HostOutput()
+    {
+        lock (_outputLock)
+        {
+            return _hostOutput.ToString();
+        }
+    }
+
+    // Read the latest console-exporter value of a counter instrument: the shipped exporter's
+    // "Metric Name: <instrument>" line followed by its FIRST "Value:" line within the next
+    // 1200 chars; "Value: Sum:" (histogram) and a missing record both answer -1. This is a
+    // deliberate clone of the live suite's LiveHosts.CounterValue — that copy is pinned
+    // byte-for-byte against captured exporter bytes by LiveHostsCounterParseTests, so marker
+    // drift fails loudly THERE first. -1 is a failing read, never a value and never a pass.
+    public static long CounterValue(string stdout, string instrument)
+    {
+        var marker = "Metric Name: " + instrument;
+        var at = stdout.LastIndexOf(marker, StringComparison.Ordinal);
+        if (at < 0)
+        {
+            return -1;
+        }
+
+        var window = stdout[at..Math.Min(at + 1200, stdout.Length)];
+        var valueAt = window.IndexOf("Value:", StringComparison.Ordinal);
+        if (valueAt < 0)
+        {
+            return -1;
+        }
+
+        var match = Regex.Match(window[valueAt..], @"^Value:\s*(\d+)");
+        return match.Success ? long.Parse(match.Groups[1].Value) : -1;
+    }
+
+    // Wait until the console exporter has printed a non-zero value for every named instrument
+    // (up to 30 s at 1 s polls — this host's exporter cadence is 1 s). On timeout the throw
+    // carries the host output tail, so a RED cell shows what the exporter actually printed
+    // instead of silently reading -1.
+    public async Task WaitUntilMeteredAsync(params string[] instruments)
+    {
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            var output = HostOutput();
+            if (instruments.All(i => CounterValue(output, i) > 0))
+            {
+                return;
+            }
+
+            await Task.Delay(1000);
+        }
+
+        throw new InvalidOperationException(
+            $"the console exporter never printed a non-zero value for {string.Join(", ", instruments)} within 30 s; "
+            + $"host output:\n{Tail()}");
+    }
+
+    private (string RepoRoot, string SampleBin, string AgentBin) LocateSampleBin()
     {
         var own = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var parts = own.Split(Path.DirectorySeparatorChar);
@@ -237,7 +348,14 @@ public sealed class AgentTokensFixture : IAsyncLifetime
                 $"no built AgentTokens host at '{sampleBin}' — build the sample first");
         }
 
-        return (repoRoot, sampleBin);
+        var agentBin = Path.Combine(repoRoot, "samples", "AgentTokens", "Agent", "bin", parts[binIndex + 1], "net10.0");
+        if (!File.Exists(Path.Combine(agentBin, "Agent.dll")))
+        {
+            throw new InvalidOperationException(
+                $"no built AgentTokens agent at '{agentBin}' — build samples/AgentTokens/Agent first");
+        }
+
+        return (repoRoot, sampleBin, agentBin);
     }
 
     private async Task RunComposeAsync(params string[] args)

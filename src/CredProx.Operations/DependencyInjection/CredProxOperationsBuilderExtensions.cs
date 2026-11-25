@@ -14,8 +14,9 @@ public static class CredProxOperationsBuilderExtensions
 {
     /// <summary>
     /// Turns on the configured operations legs: throttling from
-    /// <c>CredProx:Throttling</c>, resilience from <c>CredProx:Resilience</c>, and health
-    /// probes from <c>CredProx:Health</c>. A section that is absent registers nothing for
+    /// <c>CredProx:Throttling</c>, resilience from <c>CredProx:Resilience</c>, health
+    /// probes from <c>CredProx:Health</c>, and usage metering from
+    /// <c>CredProx:Metering</c>. A section that is absent registers nothing for
     /// that leg; a section that is configured without this call refuses startup naming the
     /// package and this method.
     /// </summary>
@@ -40,6 +41,11 @@ public static class CredProxOperationsBuilderExtensions
         if (configuration.GetSection("CredProx:Health").GetChildren().Any())
         {
             builder.Services.AddCredProxHealthProbes(configuration);
+        }
+
+        if (configuration.GetSection("CredProx:Metering").GetChildren().Any())
+        {
+            builder.Services.AddCredProxMetering(configuration);
         }
 
         return builder;

@@ -25,7 +25,7 @@ public static class CredProxReverseProxyBuilderExtensions
     private static readonly IReadOnlySet<string> CoreSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "Audit", "CallerAuth", "CallerToken", "Callers", "Connections", "Credentials",
-        "Destinations", "Errors", "Health", "KillSwitch", "Presets", "Resilience", "Scrubbing", "Secrets", "Throttling",
+        "Destinations", "Errors", "Health", "KillSwitch", "Metering", "Presets", "Resilience", "Scrubbing", "Secrets", "Throttling",
     };
 
     /// <summary>

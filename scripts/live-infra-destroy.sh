@@ -18,7 +18,14 @@ az keyvault delete -n "$VAULT" -g "$RG" -o none 2>/dev/null || true
 # read-back below states honestly which state we actually left, so the cycle's
 # evidence records which re-apply path (create vs recover) was taken.
 az keyvault purge -n "$VAULT" -l northeurope -o none 2>/dev/null || true
-if [[ "$(az keyvault list-deleted --query "[?name=='$VAULT'] | length(@)" -o tsv 2>/dev/null)" == "1" ]]; then
+# Three states, never two: the list-deleted read-back can itself fail (its RBAC
+# is separate from delete/purge), and an UNKNOWN state must never print PURGED.
+# could-not-verify + a non-zero exit, so a caller's OK marker cannot mask a live
+# name lock (post-release item 1, 2026-11-25; the aca destroy carries the shape).
+if ! LIST_DELETED_COUNT="$(az keyvault list-deleted --query "[?name=='$VAULT'] | length(@)" -o tsv 2>/dev/null)"; then
+  echo "could-not-verify: $VAULT deletion state UNKNOWN - az keyvault list-deleted failed; the name may still be soft-delete-locked (apply must RECOVER, not create)"
+  exit 3
+elif [[ "$LIST_DELETED_COUNT" == "1" ]]; then
   echo "destroyed: $VAULT deleted but SOFT-DELETED (purge refused or unavailable - apply will RECOVER it)"
 else
   echo "destroyed: $VAULT deleted and PURGED (name lock cleared - apply creates fresh)"

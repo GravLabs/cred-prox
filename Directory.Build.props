@@ -120,11 +120,11 @@
     <EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
     <EnableSourceLink>true</EnableSourceLink>
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.15.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.15.1</PackageValidationBaselineVersion>
     <!-- A non-empty BaselinePath makes the SDK skip the feed-based baseline restore
          entirely (Microsoft.NET.ApiCompat.targets) and validate against this file.
          $(MSBuildProjectName) equals $(PackageId) for all six packable projects;
-         build/baselines holds the published 0.15.0 bytes for each (ADR-0001). -->
+         build/baselines holds the published 0.15.1 bytes for each (ADR-0001). -->
     <PackageValidationBaselinePath>$(MSBuildThisFileDirectory)build/baselines/$(MSBuildProjectName).$(PackageValidationBaselineVersion).nupkg</PackageValidationBaselinePath>
     <PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)/README.md')">README.md</PackageReadmeFile>
   </PropertyGroup>

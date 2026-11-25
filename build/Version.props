@@ -26,6 +26,6 @@
        tools/m33-soak/SoakHost props — the soak host tracks this number without
        inheriting the library's build policy. -->
   <PropertyGroup>
-    <Version>0.15.1</Version>
+    <Version>0.15.2</Version>
   </PropertyGroup>
 </Project>

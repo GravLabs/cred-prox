@@ -10,7 +10,7 @@ namespace CredProx.LiveTests;
 // AND method names match NONE of live-run.sh's test filters, in any case (the
 // runner's ~ match is case-insensitive), so a runner leg can never exec these cells
 // and recurse; RunnerRunCreatedScanTests.NamesCarryNoRunnerFilterToken enforces
-// this over every IExecutesLiveRunner-marked class against live-run.sh itself.
+// this over every ExecutesLiveRunner-derived class against live-run.sh itself.
 
 // The loaded-value arms (private key, api key) had no cell naming them, and the
 // run-created arms matched through a printf|grep pipe that the comment already
@@ -22,7 +22,7 @@ namespace CredProx.LiveTests;
 // destroy — with the private key WRAPPED across lines, so only the folded match
 // can catch it (the newline-free invariant is half of why case matching is sound).
 [Trait("Layer", "Offline")]
-public sealed class RunnerLoadedSecretScanTests : IDisposable, IExecutesLiveRunner
+public sealed class RunnerLoadedSecretScanTests : ExecutesLiveRunner, IDisposable
 {
     // single line in the central file, exactly as the line-by-line loader stores it:
     private const string LoadedPrivateKey = "RkFLRVBBVkVBTE5PQVJFQUxLRVk=";
@@ -101,6 +101,7 @@ public sealed class RunnerLoadedSecretScanTests : IDisposable, IExecutesLiveRunn
     }
 
     [Theory]
+    [InlineData("")]
     [InlineData("10s")]
     [InlineData("abc")]
     [InlineData("0")]
@@ -113,6 +114,43 @@ public sealed class RunnerLoadedSecretScanTests : IDisposable, IExecutesLiveRunn
         var run = Run(new() { ["CREDPROX_M46_SECRET_WAIT_SECONDS"] = budget });
         Assert.Equal(2, run.Exit);
         Assert.Contains("REFUSED: CREDPROX_M46_SECRET_WAIT_SECONDS must be a positive whole number of seconds, at most 6 digits",
+            run.Out, StringComparison.Ordinal);
+        Assert.DoesNotContain("live-graph-app.sh create", run.Out, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RoleWaitBudget_ExportedEmpty_RefusedBeforeAnythingIsCreated()
+    {
+        // Every verb parses BOTH wait budgets before any vendor dispatches, so
+        // the graph runner reaches the role-budget guard without an
+        // azureopenai run. An operator who exported the name with an EMPTY
+        // value used to silently get the 300s default; exported-empty is the
+        // refused shape now, unset still defaults.
+        var run = Run(new() { ["CREDPROX_M52_AOAI_ROLE_WAIT_SECONDS"] = string.Empty });
+        Assert.Equal(2, run.Exit);
+        Assert.Contains("REFUSED: CREDPROX_M52_AOAI_ROLE_WAIT_SECONDS must be a positive whole number of seconds, at most 6 digits",
+            run.Out, StringComparison.Ordinal);
+        Assert.DoesNotContain("live-graph-app.sh create", run.Out, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("10s")]
+    [InlineData("abc")]
+    [InlineData("0")]
+    [InlineData("007")]
+    [InlineData("99999999999999999999")]
+    public void M46RoleWaitBudget_NotAPositiveWholeNumber_RefusedBeforeAnythingIsCreated(string budget)
+    {
+        // The third wait budget, guarded last: wait_roles_in_token used the `:-`
+        // expansion with NO shape guard anywhere, so an exported-empty value
+        // silently took the 300 default and a non-numeric one reached the
+        // numeric wait comparison. The top guard and the `-` expansion at the
+        // wait land together: refused by name before any dispatch, unset still
+        // defaults (same LOW-2 hang shape as the sibling budgets).
+        var run = Run(new() { ["CREDPROX_M46_ROLE_WAIT_SECONDS"] = budget });
+        Assert.Equal(2, run.Exit);
+        Assert.Contains("REFUSED: CREDPROX_M46_ROLE_WAIT_SECONDS must be a positive whole number of seconds, at most 6 digits",
             run.Out, StringComparison.Ordinal);
         Assert.DoesNotContain("live-graph-app.sh create", run.Out, StringComparison.Ordinal);
     }
@@ -215,7 +253,7 @@ public sealed class RunnerLoadedSecretScanTests : IDisposable, IExecutesLiveRunn
 // the value, and the run must still PASS. This cell plants the tenant id through
 // the destroy door on an otherwise happy run: WARN present, PASS intact.
 [Trait("Layer", "Offline")]
-public sealed class RunnerTenantWarnTests : IDisposable, IExecutesLiveRunner
+public sealed class RunnerTenantWarnTests : ExecutesLiveRunner, IDisposable
 {
     // distinct so the WARN provably came from the plant, not from canned stub noise:
     private const string TenantId = "5f1e2d3c-4b5a-4678-9a0b-cdef01234567";
@@ -334,7 +372,7 @@ public sealed class RunnerTenantWarnTests : IDisposable, IExecutesLiveRunner
 // here would itself be the leak class this suite exists to stop). The central file
 // holds five vendors' variables; each vendor's child must see exactly its own.
 [Trait("Layer", "Offline")]
-public sealed class RunnerExportIsolationTests : IDisposable, IExecutesLiveRunner
+public sealed class RunnerExportIsolationTests : ExecutesLiveRunner, IDisposable
 {
     private static readonly string[] AllNames =
     [
@@ -485,7 +523,7 @@ public sealed class RunnerExportIsolationTests : IDisposable, IExecutesLiveRunne
 // SKIP and stayed silent about the dead file. The loop stats files and reads
 // nothing, so it now runs above every gate.
 [Trait("Layer", "Offline")]
-public sealed class RunnerStaleVendorNoteTests : IDisposable, IExecutesLiveRunner
+public sealed class RunnerStaleVendorNoteTests : ExecutesLiveRunner, IDisposable
 {
     // never read by anything, so it must never appear in any output:
     private const string DeadFileCanary = "dead-vendor-file-canary-0123456789abcdefg";
@@ -548,5 +586,288 @@ public sealed class RunnerStaleVendorNoteTests : IDisposable, IExecutesLiveRunne
     public void Dispose()
     {
         SecretPropagationStubs.TryDelete(_home);
+    }
+}
+
+// Post-release item 3 (2026-11-25): the PASS tail read only the FIRST "OBSERVED "
+// line of the run log (grep -m1), so when a vendor's live cells each write their
+// own line the run passed while the PASS record silently carried only the first
+// cell's result. The tail now aggregates: every OBSERVED payload joins into the
+// one PASS line, and a log with neither an OBSERVED nor a skip line still FAILs.
+[Trait("Layer", "Offline")]
+public sealed class RunnerObservedTailTests : ExecutesLiveRunner, IDisposable
+{
+    // one fake dotnet, two shapes: STUB_OBSERVE=2 prints one OBSERVED line per
+    // "cell"; STUB_OBSERVE=0 prints neither an OBSERVED nor a skip line:
+    private const string StubDotnetTails = """
+        #!/usr/bin/env bash
+        if [ -n "${STUB_AZ_LOG:-}" ]; then printf 'dotnet %s\n' "$*" >> "$STUB_AZ_LOG"; fi
+        if [ "${STUB_OBSERVE:-2}" = "0" ]; then exit 0; fi
+        echo "OBSERVED a2_first=alpha"
+        echo "OBSERVED a2_second=beta"
+        exit 0
+        """;
+
+    private readonly string _stubBin;
+    private readonly string _home;
+    private readonly string _scratch;
+    private readonly string _countFile;
+    private readonly string _runner;
+    // PASS runs keep their log as evidence now (item 4), so this class must clean up:
+    private readonly List<string> _runnerLogs = [];
+
+    public RunnerObservedTailTests()
+    {
+        _stubBin = Path.Combine(Path.GetTempPath(), $"credprox-m46-gatestub-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_stubBin);
+        SecretPropagationStubs.WriteExec(_stubBin, "az", GraphAppScriptTests.StubAz);
+        SecretPropagationStubs.WriteExec(_stubBin, "dotnet", StubDotnetTails);
+        SecretPropagationStubs.WriteExec(_stubBin, "curl", SecretPropagationStubs.StubCurl);
+        _home = RunnerLoadedSecretScanTests.MakeUnionHome("00000000-0000-0000-0000-000000000000");
+        _scratch = Path.Combine(Path.GetTempPath(), $"credprox-m46-gate-scratch-{Guid.NewGuid():N}");
+        _countFile = Path.Combine(_stubBin, "curl-count");
+        _runner = SecretPropagationStubs.LocateRunner();
+    }
+
+    [Fact]
+    public void PassTail_CarriesEveryObservedLineNotJustTheFirst()
+    {
+        var run = Run("2");
+        Assert.True(run.Exit == 0, $"the two-line leg must pass: exit={run.Exit} out={run.Out} err={run.Err}");
+        var passLine = run.Out.Split('\n')
+            .Where(l => l.StartsWith("PASS graph:", StringComparison.Ordinal))
+            .ToList();
+        Assert.Single(passLine);
+        Assert.Contains("a2_first=alpha", passLine[0], StringComparison.Ordinal);
+        // the bug this cell exists for: the second cell's result must not vanish:
+        Assert.Contains("a2_second=beta", passLine[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoObservedAndNoSkipLine_FailsNeverSilentPass()
+    {
+        var run = Run("0");
+        Assert.Equal(1, run.Exit);
+        Assert.Contains("FAIL: the live cell neither ran nor skipped cleanly", run.Out, StringComparison.Ordinal);
+        Assert.DoesNotContain("PASS graph", run.Out, StringComparison.Ordinal);
+    }
+
+    private sealed record RunnerRun(int Exit, string Out, string Err);
+
+    private RunnerRun Run(string observe)
+    {
+        var azLogPath = Path.Combine(Path.GetTempPath(), $"credprox-m46-azlog-{Guid.NewGuid():N}.log");
+        var psi = new ProcessStartInfo
+        {
+            FileName = "/bin/bash",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add(_runner);
+        psi.ArgumentList.Add("graph");
+        psi.Environment["PATH"] = _stubBin + ":/usr/bin:/bin";
+        psi.Environment["HOME"] = _home;
+        psi.Environment["CREDPROX_M46_SCRATCH"] = _scratch;
+        psi.Environment["STUB_AZ_LOG"] = azLogPath;
+        psi.Environment["STUB_OBSERVE"] = observe;
+        psi.Environment["STUB_SECRET"] = "canary-gate-secret-0123456789";
+        psi.Environment["STUB_APP_ID"] = "stub-app-id";
+        psi.Environment["STUB_AZ_SIGNED_IN"] = "1";
+        psi.Environment["STUB_CRED"] = "1";
+        psi.Environment["STUB_APP_LEFT"] = "0";
+        psi.Environment["STUB_SP_LEFT"] = "0";
+        psi.Environment["STUB_CREATE_FAIL"] = "0";
+        psi.Environment["STUB_PLANT"] = string.Empty;
+        psi.Environment["STUB_DESTROY_PLANT"] = string.Empty;
+        psi.Environment["STUB_EXISTING_IDS"] = "stub-app-id";
+        psi.Environment["STUB_CURL_CODES"] = "200";
+        psi.Environment["STUB_CURL_COUNT"] = _countFile;
+
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException("live-run.sh did not start");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        Assert.True(process.WaitForExit(120_000), "live-run.sh did not exit within 120 s");
+        if (File.Exists(azLogPath))
+        {
+            File.Delete(azLogPath);
+        }
+
+        foreach (var line in stdout.Result.Split('\n'))
+        {
+            if (line.StartsWith("log: ", StringComparison.Ordinal))
+            {
+                _runnerLogs.Add(line[5..].Trim());
+                break;
+            }
+        }
+
+        return new RunnerRun(process.ExitCode, stdout.Result, stderr.Result);
+    }
+
+    public void Dispose()
+    {
+        foreach (var path in _runnerLogs)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (IOException)
+            {
+                // scratch tree
+            }
+        }
+
+        foreach (var dir in new[] { _stubBin, _home, _scratch })
+        {
+            SecretPropagationStubs.TryDelete(dir);
+        }
+    }
+}
+
+// Post-release item 4 (2026-11-25): run logs accumulated forever - every run
+// printed its path and removed nothing (961 orphans observed in /tmp). The log
+// name now carries the vendor, and each run sweeps its OWN pattern, plain files
+// only, older than 24h. Logs stay kept as evidence - the leak-scan witnesses
+// read the log back after a PASS run - so hygiene is bounded growth, not deletion.
+[Trait("Layer", "Offline")]
+public sealed class RunnerRunLogHygieneTests : ExecutesLiveRunner, IDisposable
+{
+    private readonly string _stubBin;
+    private readonly string _home;
+    private readonly string _scratch;
+    private readonly string _countFile;
+    private readonly string _runner;
+    private readonly List<string> _planted = [];
+
+    public RunnerRunLogHygieneTests()
+    {
+        _stubBin = Path.Combine(Path.GetTempPath(), $"credprox-m46-gatestub-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_stubBin);
+        SecretPropagationStubs.WriteExec(_stubBin, "az", GraphAppScriptTests.StubAz);
+        SecretPropagationStubs.WriteExec(_stubBin, "dotnet", SecretPropagationStubs.StubDotnet);
+        SecretPropagationStubs.WriteExec(_stubBin, "curl", SecretPropagationStubs.StubCurl);
+        _home = RunnerLoadedSecretScanTests.MakeUnionHome("00000000-0000-0000-0000-000000000000");
+        _scratch = Path.Combine(Path.GetTempPath(), $"credprox-m46-gate-scratch-{Guid.NewGuid():N}");
+        _countFile = Path.Combine(_stubBin, "curl-count");
+        _runner = SecretPropagationStubs.LocateRunner();
+    }
+
+    [Fact]
+    public void RunLog_NamedByVendor_KeptAfterPass()
+    {
+        var run = Run();
+        Assert.True(run.Exit == 0, $"the stub leg must pass: exit={run.Exit} out={run.Out} err={run.Err}");
+        var path = RunnerLoadedSecretScanTests.ExtractRunnerLogPath(run.Out);
+        _planted.Add(path);
+        Assert.Contains("-graph.", Path.GetFileName(path), StringComparison.Ordinal);
+        // evidence stays: the PASS tail must not eat the file the witnesses read back
+        Assert.True(File.Exists(path), $"the PASS run's log must remain for inspection: {path}");
+    }
+
+    [Fact]
+    public void StaleOwnPatternLog_Swept_WhileFreshLogsStay()
+    {
+        var tmp = Path.GetTempPath();
+        // the sweep must cover BOTH name shapes: the historical dotted one (the
+        // 961-file pile) and the vendor-dashed one this run itself creates:
+        var staleDotted = Path.Combine(tmp, $"credprox-live-run.{Guid.NewGuid():N}.log");
+        var staleDashed = Path.Combine(tmp, $"credprox-live-run-sweep.{Guid.NewGuid():N}.log");
+        var fresh = Path.Combine(tmp, $"credprox-live-run-sweep.{Guid.NewGuid():N}.log");
+        File.WriteAllText(staleDotted, "stale orphan\n");
+        File.WriteAllText(staleDashed, "stale orphan\n");
+        File.WriteAllText(fresh, "fresh log\n");
+        File.SetLastWriteTimeUtc(staleDotted, DateTime.UtcNow.AddHours(-26));
+        File.SetLastWriteTimeUtc(staleDashed, DateTime.UtcNow.AddHours(-26));
+        _planted.Add(staleDotted);
+        _planted.Add(staleDashed);
+        _planted.Add(fresh);
+        try
+        {
+            var run = Run();
+            Assert.True(run.Exit == 0, $"the stub leg must pass: exit={run.Exit} out={run.Out} err={run.Err}");
+            _planted.Add(RunnerLoadedSecretScanTests.ExtractRunnerLogPath(run.Out));
+            Assert.False(File.Exists(staleDotted), "a stale dotted-shape run log must be swept");
+            Assert.False(File.Exists(staleDashed), "a stale vendor-dashed run log must be swept");
+            Assert.True(File.Exists(fresh), "the sweep must not touch logs younger than 24h");
+        }
+        finally
+        {
+            // a sweep removes the stale files mid-test; never fail on the cleanup
+            if (File.Exists(fresh))
+            {
+                File.Delete(fresh);
+            }
+        }
+    }
+
+    private sealed record RunnerRun(int Exit, string Out, string Err);
+
+    private RunnerRun Run()
+    {
+        var azLogPath = Path.Combine(Path.GetTempPath(), $"credprox-m46-azlog-{Guid.NewGuid():N}.log");
+        var psi = new ProcessStartInfo
+        {
+            FileName = "/bin/bash",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add(_runner);
+        psi.ArgumentList.Add("graph");
+        psi.Environment["PATH"] = _stubBin + ":/usr/bin:/bin";
+        psi.Environment["HOME"] = _home;
+        psi.Environment["CREDPROX_M46_SCRATCH"] = _scratch;
+        psi.Environment["STUB_AZ_LOG"] = azLogPath;
+        psi.Environment["STUB_SECRET"] = "canary-gate-secret-0123456789";
+        psi.Environment["STUB_APP_ID"] = "stub-app-id";
+        psi.Environment["STUB_AZ_SIGNED_IN"] = "1";
+        psi.Environment["STUB_CRED"] = "1";
+        psi.Environment["STUB_APP_LEFT"] = "0";
+        psi.Environment["STUB_SP_LEFT"] = "0";
+        psi.Environment["STUB_CREATE_FAIL"] = "0";
+        psi.Environment["STUB_PLANT"] = string.Empty;
+        psi.Environment["STUB_DESTROY_PLANT"] = string.Empty;
+        psi.Environment["STUB_EXISTING_IDS"] = "stub-app-id";
+        psi.Environment["STUB_CURL_CODES"] = "200";
+        psi.Environment["STUB_CURL_COUNT"] = _countFile;
+
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException("live-run.sh did not start");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        Assert.True(process.WaitForExit(120_000), "live-run.sh did not exit within 120 s");
+        if (File.Exists(azLogPath))
+        {
+            File.Delete(azLogPath);
+        }
+
+        return new RunnerRun(process.ExitCode, stdout.Result, stderr.Result);
+    }
+
+    public void Dispose()
+    {
+        foreach (var path in _planted)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (IOException)
+            {
+                // scratch files
+            }
+        }
+
+        foreach (var dir in new[] { _stubBin, _home, _scratch })
+        {
+            SecretPropagationStubs.TryDelete(dir);
+        }
     }
 }

@@ -6,7 +6,7 @@ Status: accepted (M25, GitHub public pivot)
 ## Context
 
 Every `dotnet pack` runs APICompat against the last published release
-(`<PackageValidationBaselineVersion>`, currently `0.15.0`) so a public-surface removal
+(`<PackageValidationBaselineVersion>`, currently `0.15.1`) so a public-surface removal
 fails the build before it can ship (PUBLISHING.md rules; the gate has caught real breaks).
 Until M25 the baseline nupkg was **restored from a feed**: the repo's `NuGet.Config`
 declared the internal LAN NuGet registry (anonymous download), and the SDK's
@@ -22,12 +22,12 @@ Commit the **published baseline packages** under `build/baselines/` and point
 `<PackageValidationBaselinePath>` at them in `Directory.Build.props`:
 
 ```
-build/baselines/CredProx.0.15.0.nupkg               b3c5abb8cf0e5a252e854a21e32faada59fd681c0ca938c23dfe2f320db0b8ab
-build/baselines/CredProx.Abstractions.0.15.0.nupkg  8ee75ef2b01b1fcfbedf1a3a233ed9d3341c5657f995e39db0825afa532799c8
-build/baselines/CredProx.Azure.0.15.0.nupkg         92d25c672f5da4a4620334ee99f91610a2cf30f2298b3aab015fdae4b3950b9e
-build/baselines/CredProx.Identity.0.15.0.nupkg      b8e7a7c82cedb65137779800db2ebece8c9d42f5bf07c0c54123f78161a208b5
-build/baselines/CredProx.Operations.0.15.0.nupkg    7400efad216bb524c4f62386bf574eedeffdf3453d8b13622a3bc90117675d6b
-build/baselines/CredProx.Testing.0.15.0.nupkg       703b1602e9ece48196b563caf95df3e3b919a41e7ad5964916d13edb4ca217a2
+build/baselines/CredProx.0.15.1.nupkg               dc062a5c892fddc37f1579d263cc8edd1a290f37e48121e8badf0b99038f29ab
+build/baselines/CredProx.Abstractions.0.15.1.nupkg  2a412e57402a292566eeed505720567d13294656a4dc72003f29411e706a81f8
+build/baselines/CredProx.Azure.0.15.1.nupkg         ad05b1412a6b62e8497edf46449f9852bf037552cfa9150749e3ff6964b5b8d7
+build/baselines/CredProx.Identity.0.15.1.nupkg      587942e54d382a03754ecd81b481293dc2656cc54c72b4426937d37e73131aac
+build/baselines/CredProx.Operations.0.15.1.nupkg    d16598f409bddf6d91ba409ce52668811bb15381ca9e165220ba7d21a0e8bc22
+build/baselines/CredProx.Testing.0.15.1.nupkg       d179f261263b473cedd33dc3977c3239b5e374c2170016543b23621b80f47dfd
 ```
 
 The files are the bytes downloaded from the registry that published them (sha256 above;
@@ -37,7 +37,7 @@ non-empty `PackageValidationBaselinePath` **skips the feed-based restore entirel
 (`Microsoft.NET.ApiCompat.targets`); the version property stays as the baseline identity
 and the filename convention. Each release bumps the baseline to the previously published
 version: download its published nupkgs from the registry (four through `0.11.0`, ten
-from `0.12.0`, four from `0.14.0`, all six ids from `0.15.0`, the packages that keep their identity under ADR-0007), replace the folder, update this list.
+from `0.12.0`, four from `0.14.0`, all six ids from `0.15.0` and `0.15.1`, the packages that keep their identity under ADR-0007), replace the folder, update this list.
 Rotations executed: `0.6.0` at M25 (2026-10-30, hashes in git history at that commit);
 `0.7.0` for the 0.7.1 metadata release (2026-10-30; hashes in git history at that
 commit). `0.7.1` **deliberately skipped** for the 0.8.0 release (2026-11-04, release
@@ -107,7 +107,11 @@ registry-served `0.15.0` bytes — all six, sha256 verified 6/6 equal to the pub
 artifacts recorded in PUBLISHING.md's release history — replace the `0.14.0` set, whose
 entries are in git history at that commit. `CredProx.Identity` and `CredProx.Azure` now
 carry published bytes, so all six packable ids validate against committed baselines and
-the two baseline-less csproj overrides are gone. Pack the
+the two baseline-less csproj overrides are gone. `0.15.1` rotated at the `0.15.2`
+prep (2026-11-25, owner release approval d-9ce00ea4): those registry-served `0.15.1`
+bytes — all six, sha256 verified 6/6 equal to the published artifacts recorded in
+PUBLISHING.md's release history — replace the `0.15.0` set, whose entries are in git
+history at that commit. Pack the
 **fresh**
 `obj/` after rotating (see
 Consequences): a repack on an untouched obj skips validation silently.

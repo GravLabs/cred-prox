@@ -27,9 +27,9 @@ namespace CredProx;
 /// <item>binds <c>CredProx:KillSwitch</c>, so a switch that cannot be read is
 /// a startup failure and never an unarmed switch;</item>
 /// <item>refuses <c>CredProx:Throttling</c> / <c>CredProx:Resilience</c> /
-/// <c>CredProx:Health</c> configuration whose feature is not registered — those sections
-/// ship in the CredProx.Operations add-on (ADR-0005), and a configured limit must never
-/// sit inert.</item>
+/// <c>CredProx:Health</c> / <c>CredProx:Metering</c> configuration whose feature is not
+/// registered — those sections ship in the CredProx.Operations add-on (ADR-0005), and a
+/// configured limit must never sit inert.</item>
 /// </list>
 /// All problems are collected into one <see cref="OptionsValidationException"/> naming
 /// references — never values.
@@ -165,14 +165,16 @@ public sealed class CredProxStartupValidator : IHostedService
     }
 
     /// <summary>
-    /// The <c>CredProx:Throttling</c>, <c>CredProx:Resilience</c> and <c>CredProx:Health</c>
-    /// sections belong to the CredProx.Operations add-on. A configured section whose feature
-    /// is not registered is refused at startup, not left inert: an operator who wrote a
-    /// limit or enabled a probe expects it enforced, and silence is the worst outcome.
-    /// Detection goes through the public abstractions the add-on registers into
-    /// (<see cref="IPipelineFeature"/>, <see cref="ICredentialHealthProbe"/>) matched on the
-    /// built-in implementation names — the core must not know the add-on's assembly the way
-    /// the credential binder already does not know the OAuth providers'.
+    /// The <c>CredProx:Throttling</c>, <c>CredProx:Resilience</c>, <c>CredProx:Health</c>
+    /// and <c>CredProx:Metering</c> sections belong to the CredProx.Operations add-on. A
+    /// configured section whose feature is not registered is refused at startup, not left
+    /// inert: an operator who wrote a limit, enabled a probe or armed metering expects it
+    /// enforced, and silence is the worst outcome. Detection goes through the public
+    /// abstractions the add-on registers into
+    /// (<see cref="IPipelineFeature"/>, <see cref="ICredentialHealthProbe"/>,
+    /// <see cref="IResponseFeature"/>) matched on the built-in implementation names — the
+    /// core must not know the add-on's assembly the way the credential binder already does
+    /// not know the OAuth providers'.
     /// </summary>
     private void RejectUnregisteredOperationsSections(List<string> errors)
     {
@@ -181,6 +183,9 @@ public sealed class CredProxStartupValidator : IHostedService
             .ToHashSet(StringComparer.Ordinal);
         var probeNames = (_services.GetService<IEnumerable<ICredentialHealthProbe>>() ?? [])
             .Select(p => p.GetType().FullName)
+            .ToHashSet(StringComparer.Ordinal);
+        var responseFeatureNames = (_services.GetService<IEnumerable<IResponseFeature>>() ?? [])
+            .Select(f => f.GetType().FullName)
             .ToHashSet(StringComparer.Ordinal);
 
         RejectIfSectionConfigured(
@@ -195,6 +200,9 @@ public sealed class CredProxStartupValidator : IHostedService
         RejectIfSectionConfigured(
             errors, "CredProx:Health",
             healthRegistered);
+        RejectIfSectionConfigured(
+            errors, "CredProx:Metering",
+            responseFeatureNames.Contains("CredProx.CredProxMeteringResponseFeature"));
     }
 
     /// <summary>

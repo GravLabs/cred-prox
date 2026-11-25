@@ -37,6 +37,13 @@ is plain config — no vendor-specific C#.
   provider key in any response body or SSE event: it arrives as `[redacted]`. The
   stand-in's 200-vs-401 check is the proof the real key still reached the provider.
 - **Audit**: one record per call with caller id, route, status — never any key value.
+- **Usage metering** (`CredProx:Metering`): a request counter and request/response byte
+  histograms on the `CredProx` meter, tagged by caller, credential, destination, route and
+  status class — configuration names only, never a key. Exported over OTLP by default;
+  `Metrics:Console` prints them to stdout instead. The `ai` route opts into token counting
+  by naming its usage format (`CredProx.Metering.Usage: "anthropic"`): token counters come
+  from the provider's own usage report, so a stand-in that reports no usage stays
+  unmetered for tokens.
 
 ## Run it
 
@@ -63,6 +70,18 @@ The provider saw `Authorization: Bearer <provider key>` on the call; you see it
 redacted — the response scrubber removes every injected value from anything the
 provider reflects back.
 
+To watch the metering leg instead of exporting OTLP, run the gateway with the console
+exporter and call it again:
+
+```bash
+Metrics__Console=true OTEL_METRIC_EXPORT_INTERVAL=2000 \
+  ASPNETCORE_ENVIRONMENT=Development dotnet run
+```
+
+The stdout shows `credprox.requests`, `credprox.request.bytes` and
+`credprox.response.bytes` carrying `credprox.caller: chat-app` and the route tag —
+counts you can point at an OTLP collector by dropping the `Metrics__Console` override.
+
 ## Point it at a real provider
 
 1. Put the real key in your secret source under `ai-provider-key` (env var or
@@ -87,14 +106,16 @@ cd samples/AiGateway && ./smoke.sh
 dotnet test tests/CredProx.SampleSmokes --filter Sample=AiGateway
 ```
 
-Seven cells against the provider stand-in: keyless → 401 with the provider's hit
+Eight cells against the provider stand-in: keyless → 401 with the provider's hit
 counter unmoved; chat call → 200 (the stand-in validated the injected key) **and** the
 echo arrives as `Bearer [redacted]`, never the key itself; the first SSE event lands
 < 300 ms after the request with the second a full provider delay later (nothing
 buffered) and the key redacted inside the stream; chat caller on `/ai/v1/files` →
 `403 credprox.operation_not_allowed` while the ops caller passes; burst of 6 against
 2 permits/s → ≥1 × 429; `batch-app`'s third call → `429 credprox.caller_throttled` with
-`Retry-After` while `chat-app` still gets 200 (per-app isolation); and the audit log
+`Retry-After` while `chat-app` still gets 200 (per-app isolation); a metered chat call →
+the console exporter prints `credprox.requests` with `credprox.caller: chat-app` and no
+key value; and the audit log
 shows `proxied_call` per caller, `rejected_call` for the blocked one, and no key value
 anywhere.
 

@@ -43,7 +43,7 @@ public sealed class VendorSnippetValidationTests
 
     private static readonly string[] ExpectedPages =
     [
-        "adp.md", "github-apps.md", "graph.md", "salesforce.md", "servicenow.md", "workday.md",
+        "adp.md", "atlassian.md", "github-apps.md", "google.md", "graph.md", "openai.md", "salesforce.md", "servicenow.md", "slack.md", "stripe.md", "workday.md",
     ];
 
     // ---- roster + extraction ----
@@ -63,6 +63,49 @@ public sealed class VendorSnippetValidationTests
         {
             Assert.Single(BlockPattern.Matches(File.ReadAllText(Path.Combine(VendorsDir(), page!))).Cast<Match>());
         }
+    }
+
+    [Fact]
+    public void VendorRoster_IsEqualAcrossTableRootReadmeAndFolder()
+    {
+        // M51 finding 1: three surfaces name the vendors - the table in
+        // docs/vendors/README.md, the vendor links in the root README, and the
+        // folder itself - and any two can drift while the third agrees. Each set
+        // is compared against the live folder (roster-pinned by the cell above),
+        // so emptying a README burns here instead of matching the other empty one.
+        var folder = Directory.GetFiles(VendorsDir(), "*.md")
+            .Where(p => !string.Equals(Path.GetFileName(p), "README.md", StringComparison.OrdinalIgnoreCase))
+            .Select(Path.GetFileName!)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+
+        var table = Regex.Matches(
+                File.ReadAllText(Path.Combine(VendorsDir(), "README.md")),
+                @"^\| \[[^\]]+\]\((?<f>[a-z\-]+\.md)\)",
+                RegexOptions.Multiline)
+            .Cast<Match>()
+            .Select(m => m.Groups["f"].Value)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "docs", "credprox-plan.md")))
+        {
+            root = root.Parent;
+        }
+
+        Assert.NotNull(root);
+        var rootLinks = Regex.Matches(
+                File.ReadAllText(Path.Combine(root!.FullName, "README.md")),
+                @"\]\(docs/vendors/(?<f>[a-z\-]+\.md)\)")
+            .Cast<Match>()
+            .Select(m => m.Groups["f"].Value)
+            .Distinct()
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(folder, table);
+        Assert.Equal(folder, rootLinks);
     }
 
     // ---- the happy path: every snippet survives the real startup gate ----

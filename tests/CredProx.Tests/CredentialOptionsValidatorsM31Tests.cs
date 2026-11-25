@@ -182,6 +182,46 @@ public sealed class CredentialOptionsValidatorsM31Tests
         Assert.Contains("TokenField is required", result.FailureMessage!, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void JwtAssertion_RejectsScopeInAssertionWithoutScope_NamingTheRule()
+    {
+        // Fail closed at startup: the option promises a scope claim, and an absent,
+        // empty or blank Scope cannot honour it — this combination never reaches a
+        // vendor call.
+        var validator = new JwtAssertionOptionsValidator();
+
+        var unset = JwtValid();
+        unset.ScopeInAssertion = true;
+        var unsetResult = validator.Validate("c", unset);
+        Assert.False(unsetResult.Succeeded);
+        Assert.Contains("Scope is required when ScopeInAssertion is on.",
+            unsetResult.FailureMessage!, StringComparison.Ordinal);
+
+        var empty = JwtValid();
+        empty.ScopeInAssertion = true;
+        empty.Scope = string.Empty;
+        Assert.False(validator.Validate("c", empty).Succeeded);
+
+        // Whitespace is not a scope: a blank string would mint scope:"   " verbatim.
+        var blank = JwtValid();
+        blank.ScopeInAssertion = true;
+        blank.Scope = "   ";
+        var blankResult = validator.Validate("c", blank);
+        Assert.False(blankResult.Succeeded);
+        Assert.Contains("Scope is required when ScopeInAssertion is on.",
+            blankResult.FailureMessage!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void JwtAssertion_AcceptsScopeInAssertionWithScope()
+    {
+        var options = JwtValid();
+        options.ScopeInAssertion = true;
+        options.Scope = "https://www.example.com/auth/scope";
+
+        Assert.True(new JwtAssertionOptionsValidator().Validate("c", options).Succeeded);
+    }
+
     // --- HmacOptionsValidator ---
 
     private static HmacOptions HmacValid() => new()

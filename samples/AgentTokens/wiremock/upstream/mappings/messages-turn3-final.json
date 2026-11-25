@@ -1,0 +1,27 @@
+{
+  "metadata": { "note": "Turn 3: given the docs text and the 403 tool error, answer and stop. Scenario chain: meta-answered -> finished. The usage numbers here are what the M50 metering parse reads on the metered model route." },
+  "priority": 1,
+  "scenarioName": "agent-loop",
+  "requiredScenarioState": "meta-answered",
+  "newScenarioState": "finished",
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/messages"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "id": "msg_stub_turn3",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-haiku-5-5",
+      "content": [
+        { "type": "text", "text": "The docs readme says the docs service received the request, and the GitHub meta call did not work: the proxy refused it with 403." }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": { "input_tokens": 520, "output_tokens": 60 }
+    }
+  }
+}

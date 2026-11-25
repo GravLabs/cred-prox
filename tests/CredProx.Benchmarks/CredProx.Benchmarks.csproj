@@ -21,6 +21,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\CredProx\CredProx.csproj" />
     <ProjectReference Include="..\..\src\CredProx.Identity\CredProx.Identity.csproj" />
+    <ProjectReference Include="..\..\src\CredProx.Operations\CredProx.Operations.csproj" />
   </ItemGroup>
 
 </Project>

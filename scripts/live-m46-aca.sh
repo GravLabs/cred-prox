@@ -343,13 +343,22 @@ destroy)
   az keyvault purge -n "$VAULT" -l "$LOC" -o none 2>/dev/null || true
   az identity delete -n "$UAI" -g "$RG" -o none 2>/dev/null || true
   az identity delete -n "$KUBELET" -g "$RG" -o none 2>/dev/null || true
-  rm -rf "$SCRATCH"
-  if [[ "$(az keyvault list-deleted --query "[?name=='$VAULT'] | length(@)" -o tsv 2>/dev/null)" == "1" ]]; then
+  # Three states, never two (post-release item 1, 2026-11-25): the list-deleted
+  # read-back can itself fail (its RBAC is separate from delete/purge), and an
+  # UNKNOWN state must never print PURGED. SCRATCH is torn down BELOW the
+  # read-back and only when the read-back ANSWERED - a could-not-verify run
+  # keeps the recorded names for a retry, and DESTROY_FAIL rides the exit at EOF.
+  DESTROY_FAIL=0
+  if ! LIST_DELETED_COUNT="$(az keyvault list-deleted --query "[?name=='$VAULT'] | length(@)" -o tsv 2>/dev/null)"; then
+    echo "could-not-verify: $VAULT deletion state UNKNOWN - az keyvault list-deleted failed; the name may still be soft-delete-locked (apply must RECOVER, not create) - SCRATCH retained for the retry"
+    DESTROY_FAIL=1
+  elif [[ "$LIST_DELETED_COUNT" == "1" ]]; then
     echo "destroyed: $VAULT deleted but SOFT-DELETED (purge refused - apply will RECOVER it)"
+    rm -rf "$SCRATCH"
   else
     echo "destroyed: $VAULT deleted and PURGED (name lock cleared - apply creates fresh)"
+    rm -rf "$SCRATCH"
   fi
-  DESTROY_FAIL=0
   # ARM deletes are ASYNC (live finding 2026-11-06): poll to gone, bounded at
   # 4 min (ACR latency observed 2-4 min), and let the exit code carry it.
   for R in "Microsoft.App/containerApps $APP" "Microsoft.App/jobs $JOB" "Microsoft.App/managedEnvironments $CAPENV" "Microsoft.ContainerRegistry/registries $ACR"; do

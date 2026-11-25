@@ -15,7 +15,9 @@ namespace CredProx;
 /// The built-in <c>JwtAssertion</c> provider:
 /// mints a signed assertion (RS256/ES256/PS256 with <c>iss</c>/<c>sub</c>/<c>aud</c>/
 /// <c>exp</c>/<c>iat</c>/<c>jti</c>, a fresh <c>jti</c> per assertion, clock skew applied
-/// through <see cref="TimeProvider"/>) and exchanges it for an access token in one of three
+/// through <see cref="TimeProvider"/>, and <c>scope</c> inside the claim set when
+/// <see cref="JwtAssertionOptions.ScopeInAssertion"/> is on) and exchanges it for an
+/// access token in one of three
 /// modes (<c>client_assertion</c>, RFC 7523 jwt-bearer grant, or GitHub-App-style bearer
 /// exchange). The exchanged token is cached per <c>(credential, partition)</c> through
 /// <see cref="ITokenCache"/>; the assertion itself is never cached because every assertion
@@ -137,7 +139,7 @@ public sealed class JwtAssertionProvider : ICredentialProvider<JwtAssertionOptio
                     form.Add(new KeyValuePair<string, string>("client_id", clientId));
                 }
 
-                if (!string.IsNullOrEmpty(options.Scope))
+                if (!options.ScopeInAssertion && !string.IsNullOrEmpty(options.Scope))
                 {
                     form.Add(new KeyValuePair<string, string>("scope", options.Scope));
                 }
@@ -153,7 +155,7 @@ public sealed class JwtAssertionProvider : ICredentialProvider<JwtAssertionOptio
                     new("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
                     new("assertion", assertion),
                 };
-                if (!string.IsNullOrEmpty(options.Scope))
+                if (!options.ScopeInAssertion && !string.IsNullOrEmpty(options.Scope))
                 {
                     form.Add(new KeyValuePair<string, string>("scope", options.Scope));
                 }
@@ -376,6 +378,20 @@ public sealed class JwtAssertionProvider : ICredentialProvider<JwtAssertionOptio
         if (subject is not null)
         {
             payload["sub"] = subject;
+        }
+
+        if (options.ScopeInAssertion)
+        {
+            if (string.IsNullOrWhiteSpace(options.Scope))
+            {
+                // Defense in depth: the options validator refuses this at startup; a
+                // directly constructed provider must never mint an empty or blank scope
+                // claim — whitespace-only is refused too, it is not a usable scope.
+                throw new InvalidOperationException(
+                    "Scope is required when ScopeInAssertion is on.");
+            }
+
+            payload["scope"] = options.Scope;
         }
 
         return JwtSigner.Sign(

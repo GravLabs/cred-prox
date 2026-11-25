@@ -65,6 +65,7 @@ an Entra access token that CredProx obtained, cached and refreshed.
 | Give AI agents short-lived, scoped access with no stored secret (Entra) | [AgentTokens](samples/AgentTokens) |
 | Put an AI agent's tool calls behind per-agent allow-lists | [AgentEgress](samples/AgentEgress) |
 | Front an AI provider: caller keys in, provider key injected, streaming intact | [AiGateway](samples/AiGateway) |
+| Reach an Azure OpenAI deployment with a short-lived Entra token and no API key, per-caller deployment allow-lists | [AzureOpenAI](samples/AzureOpenAI) |
 | Call Microsoft Graph or any Entra-protected API, with a secret or secretless | [MicrosoftGraph](samples/MicrosoftGraph) |
 | OAuth client credentials end to end (cache, single-flight, refresh) | [OAuthKeycloak](samples/OAuthKeycloak) |
 | OAuth plus a client certificate on every hop (ADP shape) | [ADP](samples/ADP) |
@@ -108,7 +109,10 @@ no built-in vendor presets.
 [docs/vendors/](docs/vendors/) carries a copy-paste `CredProx:` config block per
 vendor: [Microsoft Graph](docs/vendors/graph.md), [ADP](docs/vendors/adp.md),
 [Workday](docs/vendors/workday.md), [Salesforce](docs/vendors/salesforce.md),
-[ServiceNow](docs/vendors/servicenow.md) and [GitHub Apps](docs/vendors/github-apps.md).
+[ServiceNow](docs/vendors/servicenow.md), [GitHub Apps](docs/vendors/github-apps.md),
+[OpenAI](docs/vendors/openai.md), [Slack](docs/vendors/slack.md),
+[Stripe](docs/vendors/stripe.md), [Atlassian](docs/vendors/atlassian.md) and
+[Google APIs](docs/vendors/google.md).
 Each one covers the auth model, required secret names, scopes and gotchas.
 Every block is bound and validated through the real
 fail-closed startup path by a CI test, so a snippet with a wrong or misspelled key

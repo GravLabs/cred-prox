@@ -62,6 +62,10 @@ public sealed class AgentTokensLiveTests
 
         using var client = new HttpClient { BaseAddress = new Uri(AgentTokensFixture.LiveHostUrl) };
 
+        // The stand-in counter is collection-wide (shared fixture): take where it
+        // stands NOW so this cell asserts its own traffic, whatever ran before it.
+        var docsBefore = _fixture.DocsRequestCount;
+
         // A real token, minted by the CONFIGURED client against the run-registered
         // API. If Entra refuses to mint or validate, this cell fails with the
         // sanitized error — no fallback path.
@@ -74,7 +78,7 @@ public sealed class AgentTokensLiveTests
             $"the mapped caller was not accepted with 200 but with {mappedStatus}; sanitized host output:\n" +
             SecretLeakScanner.Sanitize(host.Stdout + host.Stderr, secrets));
         Assert.Contains(AgentTokensFixture.StandInMarker, mappedBody, StringComparison.Ordinal);
-        Assert.Equal(1, _fixture.DocsRequestCount);
+        Assert.Equal(docsBefore + 1, _fixture.DocsRequestCount);
         // The sample's README: "The caller's bearer token never reaches the upstream:
         // CredProx strips Authorization". A real Entra token must not leave the proxy.
         Assert.False(_fixture.SawBearerToken, "the caller's bearer token reached the upstream stand-in");
@@ -92,7 +96,7 @@ public sealed class AgentTokensLiveTests
             SecretLeakScanner.Sanitize(host.Stdout + host.Stderr, secrets));
         Assert.Contains("problem+json", unmapped.Content.Headers.ContentType?.MediaType ?? "", StringComparison.Ordinal);
         Assert.Contains("credprox.caller_unauthenticated", unmappedBody, StringComparison.Ordinal);
-        Assert.Equal(1, _fixture.DocsRequestCount);
+        Assert.Equal(docsBefore + 1, _fixture.DocsRequestCount);
 
         // Nothing minted or loaded may appear in the visible output: the scanner
         // catches both the loaded secrets and any eyJ JWT shape.

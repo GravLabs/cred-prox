@@ -1,0 +1,28 @@
+{
+  "metadata": { "note": "Anthropic Messages stand-in, turn 1 of the scripted agent loop: ask for the allowed docs tool. Scenario chain agent-loop: Started -> docs-answered." },
+  "priority": 1,
+  "scenarioName": "agent-loop",
+  "requiredScenarioState": "Started",
+  "newScenarioState": "docs-answered",
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/messages"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "id": "msg_stub_turn1",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-haiku-5-5",
+      "content": [
+        { "type": "text", "text": "Let me look that up." },
+        { "type": "tool_use", "id": "tu_docs", "name": "fetch_docs", "input": { "path": "readme" } }
+      ],
+      "stop_reason": "tool_use",
+      "stop_sequence": null,
+      "usage": { "input_tokens": 320, "output_tokens": 45 }
+    }
+  }
+}

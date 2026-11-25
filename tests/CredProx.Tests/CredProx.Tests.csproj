@@ -11,6 +11,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- M50 live-failure export-seam witness: drives the real MeterProvider
+         (AddMeter("CredProx") + a collecting reader) over the shipped instruments. -->
+    <PackageReference Include="OpenTelemetry" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />

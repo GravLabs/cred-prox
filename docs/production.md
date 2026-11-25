@@ -4,7 +4,8 @@ What to configure, what to watch, and what to leave on when you deploy CredProx.
 Written for operators. Every name below is a real option, config key, meter or method —
 `ProductionDocGuardTests` fails the build when a `CredProx:`-rooted key or an `AddCredProx…`
 call in this page stops existing at source. For rotating credentials see
-[docs/operations/credential-rotation.md](operations/credential-rotation.md); for version
+[docs/operations/credential-rotation.md](operations/credential-rotation.md); for the usage
+meter instruments and tags see [docs/operations/metrics.md](operations/metrics.md); for version
 steps see [docs/upgrading.md](upgrading.md).
 
 ## 1. Hosting
@@ -85,6 +86,9 @@ steps see [docs/upgrading.md](upgrading.md).
   `credprox.throttle.paused`, `credprox.resilience.retried`,
   `credprox.resilience.circuit_opened`, `credprox.certificate.days_to_expiry` (days),
   `credprox.health.status`. The activity source `CredProx` emits `token.fetch` spans.
+  A `CredProx:Metering` section adds `credprox.requests`, `credprox.request.bytes`,
+  `credprox.response.bytes` and the two `credprox.usage.*` token counters — full instrument
+  and tag reference in [docs/operations/metrics.md](operations/metrics.md).
 - Audit: a `CredProx:Audit` section turns the audit log on — the core entry
   (`services.AddCredProx(builder.Configuration)`) arms it with no setup call — writing
   one record per admitted request
